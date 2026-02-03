@@ -125,7 +125,7 @@ def test_spatial_omics_datamodule_precompute(tmp_path: Path) -> None:
     assert hasattr(data, "x")
     assert hasattr(data, "pos")
     assert hasattr(data, "label_cell_type")
-    assert data.patch_id.startswith("sample_1")
+    assert data.patch_id.startswith("sample_1_region_1")
     assert hasattr(data, "edge_attr")
     assert hasattr(data, "graph_y")
     assert data.x.shape[0] == 1

@@ -131,7 +131,7 @@ class SpatialOmicsPreprocessor:
             patch_indices = [idx for idx in patch_indices if idx.size >= self.precompute_config.min_cells]
 
             for patch_idx, indices in enumerate(patch_indices):
-                patch_id = f"{sample_id}_patch_{patch_idx}"
+                patch_id = _build_patch_id(sample_id, region_id, patch_idx)
                 data = self._build_pyg_data(
                     table=table,
                     indices=indices,
@@ -182,7 +182,29 @@ class SpatialOmicsPreprocessor:
         for col in required:
             if col not in df.columns:
                 raise ValueError(f"Manifest missing required column: {col}")
+        self._validate_manifest_regions(df)
         return df.to_dict(orient="records")
+
+    def _validate_manifest_regions(self, df) -> None:
+        sample_col = self.manifest_config.sample_id
+        region_col = self.manifest_config.region_id
+        if region_col not in df.columns:
+            return
+
+        duplicates = df[sample_col].duplicated(keep=False)
+        if not duplicates.any():
+            return
+
+        for sample_id, group in df[duplicates].groupby(sample_col):
+            region_vals = group[region_col].fillna("").astype(str).str.strip()
+            if region_vals.eq("").any():
+                raise ValueError(
+                    f"Manifest has duplicate sample_id '{sample_id}' with empty region_id."
+                )
+            if region_vals.duplicated().any():
+                raise ValueError(
+                    f"Manifest has duplicate sample_id '{sample_id}' with repeated region_id values."
+                )
 
     def _load_table(self, row: Dict[str, str]) -> SpatialOmicsTable:
         sample_id = row[self.manifest_config.sample_id]
@@ -334,3 +356,9 @@ def _select_graph_label_id(
     if region_id is None:
         raise ValueError("region_id required for region-scope graph labels")
     return region_id
+
+
+def _build_patch_id(sample_id: str, region_id: Optional[str], patch_idx: int) -> str:
+    if region_id:
+        return f"{sample_id}_{region_id}_patch_{patch_idx}"
+    return f"{sample_id}_patch_{patch_idx}"
