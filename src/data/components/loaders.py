@@ -35,6 +35,8 @@ class CsvConfig:
 
 @dataclass
 class H5adConfig:
+    coord_source: str  # "obs" or "obsm"
+    coord_key: Optional[str]
     coord_columns: Tuple[str, str]
     cell_id_column: Optional[str]
     categorical_label_columns: Sequence[str]
@@ -44,6 +46,8 @@ class H5adConfig:
     @classmethod
     def from_dict(cls, data: Dict[str, object], use_molecular_features: bool) -> "H5adConfig":
         return cls(
+            coord_source=data.get("coord_source", "obsm"),
+            coord_key=data.get("coord_key"),
             coord_columns=tuple(data["coord_columns"]),
             cell_id_column=data.get("cell_id_column"),
             categorical_label_columns=data.get("categorical_label_columns", []),
@@ -143,11 +147,21 @@ def load_h5ad_table(
     import anndata as ad
 
     adata = ad.read_h5ad(path)
-    x_col, y_col = config.coord_columns
-    if x_col not in adata.obs.columns or y_col not in adata.obs.columns:
-        raise ValueError(f"Missing coord columns {config.coord_columns} in {path}")
-
-    coords = adata.obs[[x_col, y_col]].to_numpy(dtype=float)
+    if config.coord_source == "obsm":
+        key = config.coord_key or "spatial"
+        if key not in adata.obsm:
+            raise ValueError(f"Missing obsm['{key}'] for spatial coords in {path}")
+        coords = np.asarray(adata.obsm[key], dtype=float)
+        if coords.ndim != 2 or coords.shape[1] < 2:
+            raise ValueError(f"obsm['{key}'] must be 2D with at least 2 columns in {path}")
+        coords = coords[:, :2]
+    elif config.coord_source == "obs":
+        x_col, y_col = config.coord_columns
+        if x_col not in adata.obs.columns or y_col not in adata.obs.columns:
+            raise ValueError(f"Missing coord columns {config.coord_columns} in {path}")
+        coords = adata.obs[[x_col, y_col]].to_numpy(dtype=float)
+    else:
+        raise ValueError("h5ad coord_source must be 'obs' or 'obsm'")
 
     if config.cell_id_column and config.cell_id_column in adata.obs.columns:
         cell_ids = adata.obs[config.cell_id_column].astype(str).to_numpy()

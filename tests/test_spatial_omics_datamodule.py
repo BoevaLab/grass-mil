@@ -255,3 +255,34 @@ def test_spatial_omics_datamodule_indices_no_molecular(tmp_path: Path) -> None:
     assert data.x.shape[1] == 0
     assert hasattr(data, "categorical_index")
     assert data.categorical_index.shape == (2, 1)
+
+
+def test_h5ad_obsm_spatial_coords(tmp_path: Path) -> None:
+    pytest.importorskip("anndata")
+
+    import anndata as ad
+
+    coords = np.array([[1.0, 2.0], [3.0, 4.0]])
+    x = np.random.rand(2, 3)
+    adata = ad.AnnData(X=x)
+    adata.obsm["spatial"] = coords
+    adata.obs["cell_type"] = ["A", "B"]
+
+    p = tmp_path / "test.h5ad"
+    adata.write_h5ad(p)
+
+    from src.data.components.loaders import H5adConfig, load_h5ad_table
+
+    table = load_h5ad_table(
+        p,
+        H5adConfig(
+            coord_source="obsm",
+            coord_key="spatial",
+            coord_columns=("x", "y"),
+            cell_id_column=None,
+            categorical_label_columns=("cell_type",),
+            molecular_layer=None,
+            use_molecular_features=True,
+        ),
+    )
+    assert np.allclose(table.coords, coords)

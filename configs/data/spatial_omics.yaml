@@ -38,6 +38,8 @@ csv:
   molecular_columns: null
 
 h5ad:
+  coord_source: obsm # obs | obsm
+  coord_key: spatial
   coord_columns: ["x", "y"]
   cell_id_column: null
   categorical_label_columns: []
