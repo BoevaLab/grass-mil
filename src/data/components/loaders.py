@@ -18,6 +18,7 @@ class CsvConfig:
     cell_id_column: Optional[str]
     categorical_label_columns: Sequence[str]
     molecular_columns: Optional[Sequence[str]]
+    use_molecular_features: bool = True
     sep: str = ","
 
 
@@ -27,6 +28,7 @@ class H5adConfig:
     cell_id_column: Optional[str]
     categorical_label_columns: Sequence[str]
     molecular_layer: Optional[str]
+    use_molecular_features: bool = True
 
 
 @dataclass
@@ -38,6 +40,7 @@ class SceConfig:
     cell_id_column: Optional[str]
     categorical_label_columns: Sequence[str]
     transpose_assay: bool = True
+    use_molecular_features: bool = True
 
 
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
@@ -72,18 +75,20 @@ def load_csv_table(
             raise ValueError(f"Missing categorical label column {label_col} in {path}")
         categorical_labels[label_col] = df[label_col].astype(str).to_numpy()
 
-    if config.molecular_columns is None:
-        exclude = {x_col, y_col, *(config.categorical_label_columns or [])}
-        if config.cell_id_column:
-            exclude.add(config.cell_id_column)
-        molecular_cols = [c for c in df.columns if c not in exclude]
-    else:
-        molecular_cols = list(config.molecular_columns)
+    molecular_features = None
+    if config.use_molecular_features:
+        if config.molecular_columns is None:
+            exclude = {x_col, y_col, *(config.categorical_label_columns or [])}
+            if config.cell_id_column:
+                exclude.add(config.cell_id_column)
+            molecular_cols = [c for c in df.columns if c not in exclude]
+        else:
+            molecular_cols = list(config.molecular_columns)
 
-    if not molecular_cols:
-        raise ValueError(f"No molecular feature columns found in {path}")
+        if not molecular_cols:
+            raise ValueError(f"No molecular feature columns found in {path}")
 
-    molecular_features = df[molecular_cols].astype(float).to_numpy()
+        molecular_features = df[molecular_cols].astype(float).to_numpy()
 
     return SpatialOmicsTable(
         coords=coords,
@@ -121,14 +126,16 @@ def load_h5ad_table(
             raise ValueError(f"Missing categorical label column {label_col} in {path}")
         categorical_labels[label_col] = adata.obs[label_col].astype(str).to_numpy()
 
-    if config.molecular_layer:
-        data = adata.layers[config.molecular_layer]
-    else:
-        data = adata.X
+    molecular_features = None
+    if config.use_molecular_features:
+        if config.molecular_layer:
+            data = adata.layers[config.molecular_layer]
+        else:
+            data = adata.X
 
-    if hasattr(data, "toarray"):
-        data = data.toarray()
-    molecular_features = np.asarray(data, dtype=float)
+        if hasattr(data, "toarray"):
+            data = data.toarray()
+        molecular_features = np.asarray(data, dtype=float)
 
     return SpatialOmicsTable(
         coords=coords,
@@ -161,13 +168,15 @@ def load_sce_table(
     r = ro.r
     sce = r["readRDS"](str(path))
 
-    if config.assay_name:
-        assay = r["assay"](sce, config.assay_name)
-    else:
-        assay = r["assay"](sce)
-    molecular_features = np.asarray(assay, dtype=float)
-    if config.transpose_assay:
-        molecular_features = molecular_features.T
+    molecular_features = None
+    if config.use_molecular_features:
+        if config.assay_name:
+            assay = r["assay"](sce, config.assay_name)
+        else:
+            assay = r["assay"](sce)
+        molecular_features = np.asarray(assay, dtype=float)
+        if config.transpose_assay:
+            molecular_features = molecular_features.T
 
     coldata_df = None
     try:

@@ -28,6 +28,10 @@ class SpatialOmicsGraphDataset(Dataset):
             ProcessedIndexEntry(**entry) for entry in data["entries"]
         ]
         self.label_maps: Dict[str, Dict[str, int]] = data.get("label_maps", {})
+        self.label_maps_inv: Dict[str, Dict[int, str]] = {
+            label: {idx: name for name, idx in mapping.items()}
+            for label, mapping in self.label_maps.items()
+        }
         self.graph_label_maps: Dict[str, Dict[str, int]] = data.get("graph_label_maps", {})
         self.reducer_state: Dict[str, Any] = data.get("reducer_state", {})
 

@@ -14,6 +14,10 @@ reducer_scope: sample # sample | dataset
 keep_raw_molecular: false
 force_precompute: false
 min_cells: 10
+use_molecular_features: true
+
+categorical_features:
+  include_labels: ["cell_type"]
 
 split:
   train_val_test_split: [0.8, 0.1, 0.1]

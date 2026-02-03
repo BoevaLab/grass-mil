@@ -41,13 +41,21 @@ class CompositionVector:
         self.keep_original = keep_original
 
     def __call__(self, data):
-        if not hasattr(data, self.label_attr):
-            raise AttributeError(f"Missing label attribute '{self.label_attr}' for composition vector")
-        labels = getattr(data, self.label_attr)
-        if isinstance(labels, torch.Tensor):
-            labels_np = labels.detach().cpu().numpy()
+        if hasattr(data, self.label_attr):
+            labels = getattr(data, self.label_attr)
+            labels_np = labels.detach().cpu().numpy() if isinstance(labels, torch.Tensor) else np.asarray(labels)
+        elif hasattr(data, "categorical_index") and hasattr(data, "categorical_slices"):
+            label_name = self.label_attr.replace("label_", "")
+            if label_name not in data.categorical_slices:
+                raise AttributeError(
+                    f"Missing label '{label_name}' in categorical_slices for composition vector"
+                )
+            col_idx = data.categorical_slices[label_name]
+            labels_np = data.categorical_index[:, col_idx].detach().cpu().numpy()
         else:
-            labels_np = np.asarray(labels)
+            raise AttributeError(
+                f"Missing label attribute '{self.label_attr}' or categorical_index for composition vector"
+            )
 
         labels_np = labels_np.reshape(-1)
         num_classes = self.num_classes or (int(labels_np.max()) + 1 if labels_np.size > 0 else 0)
@@ -56,7 +64,7 @@ class CompositionVector:
             counts = counts / counts.sum()
 
         vec = torch.from_numpy(counts).view(1, -1)
-        if self.keep_original:
+        if self.keep_original and hasattr(data, "x"):
             data.x_original = data.x
         setattr(data, self.output_attr, vec)
         return data

@@ -18,6 +18,7 @@ from .components.graph_builders import GraphBuilderConfig
 from .components.loaders import CsvConfig, H5adConfig, SceConfig
 from .components.patching import TileConfig
 from .components.precompute import (
+    CategoricalFeatureConfig,
     GraphLabelConfig,
     ManifestConfig,
     PrecomputeConfig,
@@ -47,6 +48,8 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         keep_raw_molecular: bool,
         force_precompute: bool,
         min_cells: int,
+        use_molecular_features: bool,
+        categorical_features: Dict[str, Any],
         split: Dict[str, Any],
         csv: Dict[str, Any],
         h5ad: Dict[str, Any],
@@ -78,6 +81,7 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             cell_id_column=csv.get("cell_id_column"),
             categorical_label_columns=csv.get("categorical_label_columns", []),
             molecular_columns=csv.get("molecular_columns"),
+            use_molecular_features=use_molecular_features,
             sep=csv.get("sep", ","),
         )
         self.h5ad_config = H5adConfig(
@@ -85,6 +89,7 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             cell_id_column=h5ad.get("cell_id_column"),
             categorical_label_columns=h5ad.get("categorical_label_columns", []),
             molecular_layer=h5ad.get("molecular_layer"),
+            use_molecular_features=use_molecular_features,
         )
         self.sce_config = SceConfig(
             assay_name=sce.get("assay_name"),
@@ -94,6 +99,7 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             cell_id_column=sce.get("cell_id_column"),
             categorical_label_columns=sce.get("categorical_label_columns", []),
             transpose_assay=sce.get("transpose_assay", True),
+            use_molecular_features=use_molecular_features,
         )
         self.graph_builder_config = GraphBuilderConfig(
             name=graph_builder["name"],
@@ -121,6 +127,10 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             keep_raw_molecular=keep_raw_molecular,
             force=force_precompute,
             min_cells=min_cells,
+            use_molecular_features=use_molecular_features,
+        )
+        self.categorical_feature_config = CategoricalFeatureConfig(
+            include_labels=categorical_features.get("include_labels", []),
         )
 
     def prepare_data(self) -> None:
@@ -132,6 +142,7 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             sce_config=self.sce_config,
             graph_builder_config=self.graph_builder_config,
             feature_reducer_config=self.feature_reducer_config,
+            categorical_feature_config=self.categorical_feature_config,
             tile_config=self.tile_config,
             graph_label_config=self.graph_label_config,
         )
