@@ -28,4 +28,5 @@ scipy
 shapely
 anndata
 torch-geometric
+rpy2
 # sh            # for running bash commands in some tests (linux/macos only)

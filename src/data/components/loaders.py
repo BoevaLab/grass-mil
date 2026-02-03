@@ -29,6 +29,17 @@ class H5adConfig:
     molecular_layer: Optional[str]
 
 
+@dataclass
+class SceConfig:
+    assay_name: Optional[str]
+    coord_source: str  # "colData" or "reducedDims"
+    coord_key: Optional[str]
+    coord_columns: Optional[Tuple[str, str]]
+    cell_id_column: Optional[str]
+    categorical_label_columns: Sequence[str]
+    transpose_assay: bool = True
+
+
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     df.columns = [c.strip() for c in df.columns]
     return df
@@ -118,6 +129,84 @@ def load_h5ad_table(
     if hasattr(data, "toarray"):
         data = data.toarray()
     molecular_features = np.asarray(data, dtype=float)
+
+    return SpatialOmicsTable(
+        coords=coords,
+        molecular_features=molecular_features,
+        categorical_labels=categorical_labels,
+        cell_ids=cell_ids,
+        sample_id=sample_id,
+        region_id=region_id,
+    )
+
+
+def load_sce_table(
+    path: str | Path,
+    config: SceConfig,
+    sample_id: Optional[str] = None,
+    region_id: Optional[str] = None,
+) -> SpatialOmicsTable:
+    try:
+        import rpy2.robjects as ro
+        from rpy2.robjects import numpy2ri, pandas2ri
+    except ImportError as exc:
+        raise ImportError(
+            "rpy2 is required to load SingleCellExperiment objects. "
+            "Install rpy2 and make sure R + Bioconductor are available."
+        ) from exc
+
+    pandas2ri.activate()
+    numpy2ri.activate()
+
+    r = ro.r
+    sce = r["readRDS"](str(path))
+
+    if config.assay_name:
+        assay = r["assay"](sce, config.assay_name)
+    else:
+        assay = r["assay"](sce)
+    molecular_features = np.asarray(assay, dtype=float)
+    if config.transpose_assay:
+        molecular_features = molecular_features.T
+
+    coldata_df = None
+    try:
+        coldata_df = pandas2ri.rpy2py(r["as.data.frame"](r["colData"](sce)))
+    except Exception:
+        coldata_df = None
+
+    if config.coord_source == "colData":
+        if coldata_df is None:
+            raise ValueError("coord_source=colData but colData could not be loaded from SCE.")
+        if not config.coord_columns:
+            raise ValueError("coord_columns must be set when coord_source=colData.")
+        x_col, y_col = config.coord_columns
+        if x_col not in coldata_df.columns or y_col not in coldata_df.columns:
+            raise ValueError(f"Missing coord columns {config.coord_columns} in colData for {path}")
+        coords = coldata_df[[x_col, y_col]].to_numpy(dtype=float)
+    elif config.coord_source == "reducedDims":
+        if not config.coord_key:
+            raise ValueError("coord_key must be set when coord_source=reducedDims.")
+        reduced = r["reducedDim"](sce, config.coord_key)
+        coords = np.asarray(reduced, dtype=float)
+        if coords.shape[1] < 2:
+            raise ValueError(f"reducedDim '{config.coord_key}' has <2 columns.")
+        coords = coords[:, :2]
+    else:
+        raise ValueError("coord_source must be 'colData' or 'reducedDims'.")
+
+    if config.cell_id_column and coldata_df is not None and config.cell_id_column in coldata_df.columns:
+        cell_ids = coldata_df[config.cell_id_column].astype(str).to_numpy()
+    else:
+        cell_ids = np.asarray(r["colnames"](sce), dtype=str)
+
+    categorical_labels: Dict[str, np.ndarray] = {}
+    if config.categorical_label_columns and coldata_df is None:
+        raise ValueError("categorical_label_columns requested but colData could not be loaded.")
+    for label_col in config.categorical_label_columns:
+        if label_col not in coldata_df.columns:
+            raise ValueError(f"Missing categorical label column {label_col} in colData for {path}")
+        categorical_labels[label_col] = coldata_df[label_col].astype(str).to_numpy()
 
     return SpatialOmicsTable(
         coords=coords,

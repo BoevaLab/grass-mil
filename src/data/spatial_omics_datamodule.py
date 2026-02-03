@@ -15,7 +15,7 @@ except Exception:  # pragma: no cover - fallback when PyG isn't installed
 from .components.datasets import SpatialOmicsGraphDataset, TransformDataset
 from .components.feature_reducers import FeatureReducerConfig
 from .components.graph_builders import GraphBuilderConfig
-from .components.loaders import CsvConfig, H5adConfig
+from .components.loaders import CsvConfig, H5adConfig, SceConfig
 from .components.patching import TileConfig
 from .components.precompute import (
     GraphLabelConfig,
@@ -50,6 +50,7 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         split: Dict[str, Any],
         csv: Dict[str, Any],
         h5ad: Dict[str, Any],
+        sce: Dict[str, Any],
         graph_builder: Dict[str, Any],
         feature_reducer: Dict[str, Any],
         tiling: Dict[str, Any],
@@ -85,6 +86,15 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             categorical_label_columns=h5ad.get("categorical_label_columns", []),
             molecular_layer=h5ad.get("molecular_layer"),
         )
+        self.sce_config = SceConfig(
+            assay_name=sce.get("assay_name"),
+            coord_source=sce.get("coord_source", "colData"),
+            coord_key=sce.get("coord_key"),
+            coord_columns=tuple(sce["coord_columns"]) if sce.get("coord_columns") else None,
+            cell_id_column=sce.get("cell_id_column"),
+            categorical_label_columns=sce.get("categorical_label_columns", []),
+            transpose_assay=sce.get("transpose_assay", True),
+        )
         self.graph_builder_config = GraphBuilderConfig(
             name=graph_builder["name"],
             kwargs=graph_builder.get("kwargs", {}),
@@ -119,6 +129,7 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             precompute_config=self.precompute_config,
             csv_config=self.csv_config,
             h5ad_config=self.h5ad_config,
+            sce_config=self.sce_config,
             graph_builder_config=self.graph_builder_config,
             feature_reducer_config=self.feature_reducer_config,
             tile_config=self.tile_config,

@@ -11,7 +11,15 @@ from torch_geometric.data import Data
 
 from .feature_reducers import FeatureReducerConfig, get_feature_reducer
 from .graph_builders import GraphBuilderConfig, GraphBuildResult, get_graph_builder
-from .loaders import CsvConfig, H5adConfig, load_csv_table, load_h5ad_table, load_polygons_from_path
+from .loaders import (
+    CsvConfig,
+    H5adConfig,
+    SceConfig,
+    load_csv_table,
+    load_h5ad_table,
+    load_polygons_from_path,
+    load_sce_table,
+)
 from .patching import TileConfig, build_grid_tiles, build_patches_from_polygons, filter_coords_by_union
 from .spatial_types import SpatialOmicsTable
 
@@ -52,6 +60,7 @@ class SpatialOmicsPreprocessor:
         precompute_config: PrecomputeConfig,
         csv_config: CsvConfig,
         h5ad_config: H5adConfig,
+        sce_config: SceConfig,
         graph_builder_config: GraphBuilderConfig,
         feature_reducer_config: FeatureReducerConfig,
         tile_config: TileConfig,
@@ -61,6 +70,7 @@ class SpatialOmicsPreprocessor:
         self.precompute_config = precompute_config
         self.csv_config = csv_config
         self.h5ad_config = h5ad_config
+        self.sce_config = sce_config
         self.graph_builder_config = graph_builder_config
         self.feature_reducer_config = feature_reducer_config
         self.tile_config = tile_config
@@ -193,6 +203,8 @@ class SpatialOmicsPreprocessor:
             return load_csv_table(input_path, cfg, sample_id=sample_id, region_id=region_id)
         if input_type == "h5ad":
             return load_h5ad_table(input_path, self.h5ad_config, sample_id=sample_id, region_id=region_id)
+        if input_type in {"sce", "rds"}:
+            return load_sce_table(input_path, self.sce_config, sample_id=sample_id, region_id=region_id)
         raise ValueError(f"Unsupported input type: {input_type}")
 
     def _build_label_maps(self, tables: Sequence[SpatialOmicsTable]) -> Dict[str, Dict[str, int]]:

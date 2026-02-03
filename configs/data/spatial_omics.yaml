@@ -39,6 +39,15 @@ h5ad:
   categorical_label_columns: []
   molecular_layer: null
 
+sce:
+  assay_name: null
+  coord_source: colData # colData | reducedDims
+  coord_key: null
+  coord_columns: ["x", "y"]
+  cell_id_column: null
+  categorical_label_columns: []
+  transpose_assay: true
+
 graph_builder:
   name: delaunay
   kwargs:
