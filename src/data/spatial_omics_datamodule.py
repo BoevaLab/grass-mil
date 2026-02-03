@@ -76,49 +76,17 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             train_val_test_split=tuple(split["train_val_test_split"]),
             split_by=split["split_by"],
         )
-        self.csv_config = CsvConfig(
-            coord_columns=tuple(csv["coord_columns"]),
-            cell_id_column=csv.get("cell_id_column"),
-            categorical_label_columns=csv.get("categorical_label_columns", []),
-            molecular_columns=csv.get("molecular_columns"),
-            use_molecular_features=use_molecular_features,
-            sep=csv.get("sep", ","),
-        )
-        self.h5ad_config = H5adConfig(
-            coord_columns=tuple(h5ad["coord_columns"]),
-            cell_id_column=h5ad.get("cell_id_column"),
-            categorical_label_columns=h5ad.get("categorical_label_columns", []),
-            molecular_layer=h5ad.get("molecular_layer"),
-            use_molecular_features=use_molecular_features,
-        )
-        self.sce_config = SceConfig(
-            assay_name=sce.get("assay_name"),
-            coord_source=sce.get("coord_source", "colData"),
-            coord_key=sce.get("coord_key"),
-            coord_columns=tuple(sce["coord_columns"]) if sce.get("coord_columns") else None,
-            cell_id_column=sce.get("cell_id_column"),
-            categorical_label_columns=sce.get("categorical_label_columns", []),
-            transpose_assay=sce.get("transpose_assay", True),
-            use_molecular_features=use_molecular_features,
-        )
-        self.graph_builder_config = GraphBuilderConfig(
-            name=graph_builder["name"],
-            kwargs=graph_builder.get("kwargs", {}),
-        )
-        self.feature_reducer_config = FeatureReducerConfig(
-            name=feature_reducer["name"],
-            kwargs=feature_reducer.get("kwargs", {}),
-        )
-        self.tile_config = TileConfig(
-            tile_size_um=tiling["tile_size_um"],
-            stride_um=tiling["stride_um"],
-            min_cells=tiling["min_cells"],
-        )
-        self.manifest_config = ManifestConfig(**(manifest or {}))
-        self.graph_label_config = GraphLabelConfig(**(graph_labels or {}))
+        self.csv_config = CsvConfig.from_dict(csv, use_molecular_features)
+        self.h5ad_config = H5adConfig.from_dict(h5ad, use_molecular_features)
+        self.sce_config = SceConfig.from_dict(sce, use_molecular_features)
+        self.graph_builder_config = GraphBuilderConfig.from_dict(graph_builder)
+        self.feature_reducer_config = FeatureReducerConfig.from_dict(feature_reducer)
+        self.tile_config = TileConfig.from_dict(tiling)
+        self.manifest_config = ManifestConfig.from_dict(manifest)
+        self.graph_label_config = GraphLabelConfig.from_dict(graph_labels)
         self.transforms = instantiate_transforms(transforms)
 
-        self.precompute_config = PrecomputeConfig(
+        self.precompute_config = PrecomputeConfig.from_args(
             raw_manifest_path=self.raw_manifest_path,
             processed_dir=self.processed_dir,
             coord_scale_um=coord_scale_um,
@@ -129,12 +97,14 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             min_cells=min_cells,
             use_molecular_features=use_molecular_features,
         )
-        self.categorical_feature_config = CategoricalFeatureConfig(
-            include_labels=categorical_features.get("include_labels", []),
-        )
+        self.categorical_feature_config = CategoricalFeatureConfig.from_dict(categorical_features)
 
     def prepare_data(self) -> None:
-        preprocessor = SpatialOmicsPreprocessor(
+        preprocessor = self._build_preprocessor()
+        preprocessor.precompute()
+
+    def _build_preprocessor(self) -> SpatialOmicsPreprocessor:
+        return SpatialOmicsPreprocessor(
             manifest_config=self.manifest_config,
             precompute_config=self.precompute_config,
             csv_config=self.csv_config,
@@ -146,7 +116,6 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             tile_config=self.tile_config,
             graph_label_config=self.graph_label_config,
         )
-        preprocessor.precompute()
 
     def setup(self, stage: Optional[str] = None) -> None:
         index_path = Path(self.processed_dir) / "processed_index.json"

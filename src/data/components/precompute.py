@@ -32,6 +32,10 @@ class ManifestConfig:
     region_id: str = "region_id"
     polygons_path: str = "polygons_path"
 
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, object]]) -> "ManifestConfig":
+        return cls(**(data or {}))
+
 
 @dataclass
 class GraphLabelConfig:
@@ -39,6 +43,10 @@ class GraphLabelConfig:
     id_column: str = "id"
     tasks: Optional[Sequence[str]] = None
     scope: str = "region"  # region | patch | sample
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, object]]) -> "GraphLabelConfig":
+        return cls(**(data or {}))
 
 
 @dataclass
@@ -53,10 +61,40 @@ class PrecomputeConfig:
     min_cells: int
     use_molecular_features: bool
 
+    @classmethod
+    def from_args(
+        cls,
+        raw_manifest_path: str,
+        processed_dir: str,
+        coord_scale_um: float,
+        sample_unit: str,
+        reducer_scope: str,
+        keep_raw_molecular: bool,
+        force: bool,
+        min_cells: int,
+        use_molecular_features: bool,
+    ) -> "PrecomputeConfig":
+        return cls(
+            raw_manifest_path=raw_manifest_path,
+            processed_dir=processed_dir,
+            coord_scale_um=coord_scale_um,
+            sample_unit=sample_unit,
+            reducer_scope=reducer_scope,
+            keep_raw_molecular=keep_raw_molecular,
+            force=force,
+            min_cells=min_cells,
+            use_molecular_features=use_molecular_features,
+        )
+
 
 @dataclass
 class CategoricalFeatureConfig:
     include_labels: Sequence[str]
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, object]]) -> "CategoricalFeatureConfig":
+        data = data or {}
+        return cls(include_labels=data.get("include_labels", []))
 
 
 class SpatialOmicsPreprocessor:
@@ -88,25 +126,18 @@ class SpatialOmicsPreprocessor:
         processed_dir = Path(self.precompute_config.processed_dir)
         processed_dir.mkdir(parents=True, exist_ok=True)
         index_path = processed_dir / "processed_index.json"
+        metadata_path = processed_dir / "metadata.json"
 
         if index_path.exists() and not self.precompute_config.force:
             return index_path
 
         manifest_rows = self._load_manifest(Path(self.precompute_config.raw_manifest_path))
-        tables = [self._load_table(row) for row in manifest_rows]
+        tables = self._load_tables(manifest_rows)
         label_maps = self._build_label_maps(tables)
         graph_label_maps: Dict[str, Dict[str, int]] = {}
         graph_label_df = self._load_graph_labels()
 
-        reducer_state: Dict[str, object] = {"scope": self.precompute_config.reducer_scope}
-        reducer = get_feature_reducer(self.feature_reducer_config)
-
-        if self.precompute_config.use_molecular_features and self.precompute_config.reducer_scope == "dataset":
-            all_features = np.concatenate(
-                [t.molecular_features for t in tables if t.molecular_features is not None], axis=0
-            )
-            reducer.fit(all_features)
-            reducer_state["global"] = reducer.state_dict()
+        reducer_state, reducer = self._prepare_reducer(tables)
 
         entries: List[Dict[str, object]] = []
         reducer_state["by_sample"] = {}
@@ -117,28 +148,10 @@ class SpatialOmicsPreprocessor:
             polygons_path = row.get(self.manifest_config.polygons_path)
 
             table = _apply_coord_scale(table, self.precompute_config.coord_scale_um)
-            polygons = load_polygons_from_path(polygons_path) if polygons_path else None
+            table, polygons = self._apply_polygons(table, polygons_path)
 
-            if polygons:
-                union_idx = filter_coords_by_union(table.coords, polygons)
-                table = _subset_table(table, union_idx)
-
-            embedded = None
-            if self.precompute_config.use_molecular_features:
-                reducer_instance = reducer
-                if self.precompute_config.reducer_scope == "sample":
-                    reducer_instance = get_feature_reducer(self.feature_reducer_config)
-                    reducer_instance.fit(table.molecular_features)
-                    reducer_state["by_sample"][sample_id] = reducer_instance.state_dict()
-
-                embedded = reducer_instance.transform(table.molecular_features)
-
-            if polygons and self.precompute_config.sample_unit != "full":
-                patch_indices = build_patches_from_polygons(table.coords, polygons)
-            elif self.precompute_config.sample_unit == "tile":
-                patch_indices = build_grid_tiles(table.coords, self.tile_config)
-            else:
-                patch_indices = [np.arange(table.coords.shape[0])]
+            embedded = self._compute_molecular_embedding(table, reducer, reducer_state, sample_id)
+            patch_indices = self._compute_patch_indices(table, polygons)
 
             patch_indices = [idx for idx in patch_indices if idx.size >= self.precompute_config.min_cells]
 
@@ -179,7 +192,67 @@ class SpatialOmicsPreprocessor:
             },
         }
         index_path.write_text(json.dumps(index_payload, indent=2))
+        metadata = self._build_metadata(
+            entries=entries,
+            tables=tables,
+            label_maps=label_maps,
+            graph_label_maps=graph_label_maps,
+        )
+        metadata_path.write_text(json.dumps(metadata, indent=2))
         return index_path
+
+    def _load_tables(self, manifest_rows: List[Dict[str, str]]) -> List[SpatialOmicsTable]:
+        return [self._load_table(row) for row in manifest_rows]
+
+    def _prepare_reducer(
+        self, tables: List[SpatialOmicsTable]
+    ) -> tuple[Dict[str, object], object]:
+        reducer_state: Dict[str, object] = {"scope": self.precompute_config.reducer_scope}
+        reducer = get_feature_reducer(self.feature_reducer_config)
+        if self.precompute_config.use_molecular_features and self.precompute_config.reducer_scope == "dataset":
+            all_features = np.concatenate(
+                [t.molecular_features for t in tables if t.molecular_features is not None], axis=0
+            )
+            reducer.fit(all_features)
+            reducer_state["global"] = reducer.state_dict()
+        reducer_state["by_sample"] = {}
+        return reducer_state, reducer
+
+    def _apply_polygons(
+        self, table: SpatialOmicsTable, polygons_path: Optional[str]
+    ) -> tuple[SpatialOmicsTable, Optional[Sequence[object]]]:
+        polygons = load_polygons_from_path(polygons_path) if polygons_path else None
+        if polygons:
+            union_idx = filter_coords_by_union(table.coords, polygons)
+            table = _subset_table(table, union_idx)
+        return table, polygons
+
+    def _compute_molecular_embedding(
+        self,
+        table: SpatialOmicsTable,
+        reducer,
+        reducer_state: Dict[str, object],
+        sample_id: str,
+    ) -> Optional[np.ndarray]:
+        if not self.precompute_config.use_molecular_features:
+            return None
+        reducer_instance = reducer
+        if self.precompute_config.reducer_scope == "sample":
+            reducer_instance = get_feature_reducer(self.feature_reducer_config)
+            reducer_instance.fit(table.molecular_features)
+            reducer_state["by_sample"][sample_id] = reducer_instance.state_dict()
+        return reducer_instance.transform(table.molecular_features)
+
+    def _compute_patch_indices(
+        self, table: SpatialOmicsTable, polygons: Optional[Sequence[object]]
+    ) -> List[np.ndarray]:
+        if polygons and self.precompute_config.sample_unit != "full":
+            patch_indices = build_patches_from_polygons(table.coords, polygons)
+        elif self.precompute_config.sample_unit == "tile":
+            patch_indices = build_grid_tiles(table.coords, self.tile_config)
+        else:
+            patch_indices = [np.arange(table.coords.shape[0])]
+        return [idx for idx in patch_indices if idx.size >= self.precompute_config.min_cells]
 
     def _load_manifest(self, path: Path) -> List[Dict[str, str]]:
         import pandas as pd
@@ -291,6 +364,8 @@ class SpatialOmicsPreprocessor:
         }
         if embedded is not None:
             data_kwargs["x"] = torch.from_numpy(embedded).float()
+        else:
+            data_kwargs["x"] = torch.zeros((coords.shape[0], 0), dtype=torch.float)
         data = Data(**data_kwargs)
         if graph_result.edge_attr is not None:
             data.edge_attr = graph_result.edge_attr.float()
@@ -299,11 +374,6 @@ class SpatialOmicsPreprocessor:
         if self.precompute_config.keep_raw_molecular and table.molecular_features is not None:
             data.x_raw = torch.from_numpy(table.molecular_features[indices]).float()
 
-        for label_name, labels in table.categorical_labels.items():
-            mapping = label_maps.get(label_name, {})
-            encoded = np.array([mapping[val] for val in labels[indices]], dtype=np.int64)
-            setattr(data, f"label_{label_name}", torch.from_numpy(encoded))
-        data.cell_label_names = list(table.categorical_labels.keys())
         self._attach_categorical_indices(data, table.categorical_labels, label_maps, indices)
 
         if graph_label_df is not None:
@@ -360,6 +430,35 @@ class SpatialOmicsPreprocessor:
         data.categorical_index = torch.from_numpy(categorical_index).long()
         data.categorical_labels = list(config.include_labels)
         data.categorical_slices = slices
+
+    def _build_metadata(
+        self,
+        entries: List[Dict[str, object]],
+        tables: List[SpatialOmicsTable],
+        label_maps: Dict[str, Dict[str, int]],
+        graph_label_maps: Dict[str, Dict[str, int]],
+    ) -> Dict[str, object]:
+        molecular_dim = 0
+        if self.precompute_config.use_molecular_features:
+            for table in tables:
+                if table.molecular_features is not None:
+                    molecular_dim = int(table.molecular_features.shape[1])
+                    break
+        categorical_cardinalities = {
+            label: len(mapping) for label, mapping in label_maps.items()
+        }
+        return {
+            "num_graphs": len(entries),
+            "num_samples": len({entry["sample_id"] for entry in entries}),
+            "molecular_feature_dim": molecular_dim,
+            "categorical_labels": list(self.categorical_feature_config.include_labels),
+            "categorical_cardinalities": categorical_cardinalities,
+            "label_maps": label_maps,
+            "graph_label_maps": graph_label_maps,
+            "use_molecular_features": self.precompute_config.use_molecular_features,
+            "reducer_scope": self.precompute_config.reducer_scope,
+            "sample_unit": self.precompute_config.sample_unit,
+        }
 
 
 def _apply_coord_scale(table: SpatialOmicsTable, coord_scale_um: float) -> SpatialOmicsTable:

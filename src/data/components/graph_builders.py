@@ -26,6 +26,13 @@ class GraphBuilderConfig:
     name: str
     kwargs: Dict[str, object]
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "GraphBuilderConfig":
+        return cls(
+            name=data["name"],
+            kwargs=data.get("kwargs", {}),
+        )
+
 
 _GRAPH_BUILDERS: Dict[str, Callable[..., GraphBuilder]] = {}
 

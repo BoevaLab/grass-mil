@@ -12,6 +12,14 @@ class TileConfig:
     stride_um: float
     min_cells: int
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "TileConfig":
+        return cls(
+            tile_size_um=data["tile_size_um"],
+            stride_um=data["stride_um"],
+            min_cells=data["min_cells"],
+        )
+
 
 def build_patches_from_polygons(coords: np.ndarray, polygons: Sequence[object]) -> List[np.ndarray]:
     from shapely import vectorized

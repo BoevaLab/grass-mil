@@ -31,6 +31,13 @@ class FeatureReducerConfig:
     name: str
     kwargs: Dict[str, object]
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, object]) -> "FeatureReducerConfig":
+        return cls(
+            name=data["name"],
+            kwargs=data.get("kwargs", {}),
+        )
+
 
 _FEATURE_REDUCERS: Dict[str, Callable[..., FeatureReducer]] = {}
 

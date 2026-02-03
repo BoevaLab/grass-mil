@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import json
 import numpy as np
 import pytest
 
@@ -132,10 +133,14 @@ def test_spatial_omics_datamodule_precompute(tmp_path: Path) -> None:
     dataset = dm.train_dataloader().dataset
     assert len(dataset) > 0
 
+    metadata_path = data_dir / "processed" / "metadata.json"
+    metadata = json.loads(metadata_path.read_text())
+    assert metadata["molecular_feature_dim"] == 2
+    assert metadata["categorical_labels"] == ["cell_type"]
+
     data = dataset[0]
     assert hasattr(data, "x")
     assert hasattr(data, "pos")
-    assert hasattr(data, "label_cell_type")
     assert data.patch_id.startswith("sample_1_region_1")
     assert hasattr(data, "edge_attr")
     assert hasattr(data, "graph_y")
@@ -246,6 +251,7 @@ def test_spatial_omics_datamodule_indices_no_molecular(tmp_path: Path) -> None:
     dm.setup()
 
     data = dm.train_dataloader().dataset[0]
-    assert not hasattr(data, "x")
+    assert hasattr(data, "x")
+    assert data.x.shape[1] == 0
     assert hasattr(data, "categorical_index")
     assert data.categorical_index.shape == (2, 1)

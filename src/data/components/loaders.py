@@ -21,6 +21,17 @@ class CsvConfig:
     use_molecular_features: bool = True
     sep: str = ","
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, object], use_molecular_features: bool) -> "CsvConfig":
+        return cls(
+            coord_columns=tuple(data["coord_columns"]),
+            cell_id_column=data.get("cell_id_column"),
+            categorical_label_columns=data.get("categorical_label_columns", []),
+            molecular_columns=data.get("molecular_columns"),
+            use_molecular_features=use_molecular_features,
+            sep=data.get("sep", ","),
+        )
+
 
 @dataclass
 class H5adConfig:
@@ -29,6 +40,16 @@ class H5adConfig:
     categorical_label_columns: Sequence[str]
     molecular_layer: Optional[str]
     use_molecular_features: bool = True
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, object], use_molecular_features: bool) -> "H5adConfig":
+        return cls(
+            coord_columns=tuple(data["coord_columns"]),
+            cell_id_column=data.get("cell_id_column"),
+            categorical_label_columns=data.get("categorical_label_columns", []),
+            molecular_layer=data.get("molecular_layer"),
+            use_molecular_features=use_molecular_features,
+        )
 
 
 @dataclass
@@ -41,6 +62,19 @@ class SceConfig:
     categorical_label_columns: Sequence[str]
     transpose_assay: bool = True
     use_molecular_features: bool = True
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, object], use_molecular_features: bool) -> "SceConfig":
+        return cls(
+            assay_name=data.get("assay_name"),
+            coord_source=data.get("coord_source", "colData"),
+            coord_key=data.get("coord_key"),
+            coord_columns=tuple(data["coord_columns"]) if data.get("coord_columns") else None,
+            cell_id_column=data.get("cell_id_column"),
+            categorical_label_columns=data.get("categorical_label_columns", []),
+            transpose_assay=data.get("transpose_assay", True),
+            use_molecular_features=use_molecular_features,
+        )
 
 
 def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
