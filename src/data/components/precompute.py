@@ -121,6 +121,7 @@ class SpatialOmicsPreprocessor:
         self.categorical_feature_config = categorical_feature_config
         self.tile_config = tile_config
         self.graph_label_config = graph_label_config or GraphLabelConfig()
+        self._manifest_dir: Optional[Path] = None
 
     def precompute(self) -> Path:
         processed_dir = Path(self.precompute_config.processed_dir)
@@ -145,7 +146,7 @@ class SpatialOmicsPreprocessor:
         for row, table in zip(manifest_rows, tables):
             sample_id = table.sample_id or str(row[self.manifest_config.sample_id])
             region_id = table.region_id or row.get(self.manifest_config.region_id)
-            polygons_path = row.get(self.manifest_config.polygons_path)
+            polygons_path = self._resolve_manifest_relative_path(row.get(self.manifest_config.polygons_path))
 
             table = _apply_coord_scale(table, self.precompute_config.coord_scale_um)
             table, polygons = self._apply_polygons(table, polygons_path)
@@ -259,6 +260,7 @@ class SpatialOmicsPreprocessor:
 
         if not path.exists():
             raise FileNotFoundError(f"Manifest file not found: {path}")
+        self._manifest_dir = path.parent
         df = pd.read_csv(path)
         df.columns = [c.strip() for c in df.columns]
 
@@ -298,6 +300,7 @@ class SpatialOmicsPreprocessor:
         sample_id = row[self.manifest_config.sample_id]
         region_id = row.get(self.manifest_config.region_id)
         input_path = row[self.manifest_config.input_path]
+        input_path = self._resolve_manifest_relative_path(input_path)
         input_type = row[self.manifest_config.input_type].lower()
 
         if input_type in {"csv", "tsv"}:
@@ -316,6 +319,19 @@ class SpatialOmicsPreprocessor:
         if input_type in {"sce", "rds"}:
             return load_sce_table(input_path, self.sce_config, sample_id=sample_id, region_id=region_id)
         raise ValueError(f"Unsupported input type: {input_type}")
+
+    def _resolve_manifest_relative_path(self, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        value = str(value)
+        if value.strip() == "":
+            return None
+        p = Path(value)
+        if p.is_absolute():
+            return str(p)
+        if self._manifest_dir is None:
+            return str(p)
+        return str((self._manifest_dir / p).resolve())
 
     def _build_label_maps(self, tables: Sequence[SpatialOmicsTable]) -> Dict[str, Dict[str, int]]:
         label_maps: Dict[str, Dict[str, int]] = {}
