@@ -513,7 +513,9 @@ def _apply_coord_scale(table: SpatialOmicsTable, coord_scale_um: float) -> Spati
 def _subset_table(table: SpatialOmicsTable, indices: np.ndarray) -> SpatialOmicsTable:
     return SpatialOmicsTable(
         coords=table.coords[indices],
-        molecular_features=table.molecular_features[indices],
+        molecular_features=(
+            None if table.molecular_features is None else table.molecular_features[indices]
+        ),
         molecular_feature_names=table.molecular_feature_names,
         categorical_labels={k: v[indices] for k, v in table.categorical_labels.items()},
         cell_ids=table.cell_ids[indices],
