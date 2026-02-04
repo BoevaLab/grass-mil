@@ -41,6 +41,7 @@ class H5adConfig:
     cell_id_column: Optional[str]
     categorical_label_columns: Sequence[str]
     molecular_layer: Optional[str]
+    molecular_features: Optional[Sequence[str]]
     use_molecular_features: bool = True
 
     @classmethod
@@ -52,6 +53,7 @@ class H5adConfig:
             cell_id_column=data.get("cell_id_column"),
             categorical_label_columns=data.get("categorical_label_columns", []),
             molecular_layer=data.get("molecular_layer"),
+            molecular_features=data.get("molecular_features"),
             use_molecular_features=use_molecular_features,
         )
 
@@ -65,6 +67,7 @@ class SceConfig:
     cell_id_column: Optional[str]
     categorical_label_columns: Sequence[str]
     transpose_assay: bool = True
+    molecular_features: Optional[Sequence[str]] = None
     use_molecular_features: bool = True
 
     @classmethod
@@ -77,6 +80,7 @@ class SceConfig:
             cell_id_column=data.get("cell_id_column"),
             categorical_label_columns=data.get("categorical_label_columns", []),
             transpose_assay=data.get("transpose_assay", True),
+            molecular_features=data.get("molecular_features"),
             use_molecular_features=use_molecular_features,
         )
 
@@ -114,6 +118,7 @@ def load_csv_table(
         categorical_labels[label_col] = df[label_col].astype(str).to_numpy()
 
     molecular_features = None
+    molecular_feature_names: Optional[List[str]] = None
     if config.use_molecular_features:
         if config.molecular_columns is None:
             exclude = {x_col, y_col, *(config.categorical_label_columns or [])}
@@ -127,10 +132,12 @@ def load_csv_table(
             raise ValueError(f"No molecular feature columns found in {path}")
 
         molecular_features = df[molecular_cols].astype(float).to_numpy()
+        molecular_feature_names = list(molecular_cols)
 
     return SpatialOmicsTable(
         coords=coords,
         molecular_features=molecular_features,
+        molecular_feature_names=molecular_feature_names,
         categorical_labels=categorical_labels,
         cell_ids=cell_ids,
         sample_id=sample_id,
@@ -175,7 +182,15 @@ def load_h5ad_table(
         categorical_labels[label_col] = adata.obs[label_col].astype(str).to_numpy()
 
     molecular_features = None
+    molecular_feature_names: Optional[List[str]] = None
     if config.use_molecular_features:
+        if config.molecular_features is not None:
+            requested = list(config.molecular_features)
+            missing = [f for f in requested if f not in set(adata.var_names)]
+            if missing:
+                raise ValueError(f"Requested molecular features not found in {path}: {missing[:10]}")
+            adata = adata[:, requested]
+
         if config.molecular_layer:
             data = adata.layers[config.molecular_layer]
         else:
@@ -184,10 +199,12 @@ def load_h5ad_table(
         if hasattr(data, "toarray"):
             data = data.toarray()
         molecular_features = np.asarray(data, dtype=float)
+        molecular_feature_names = list(map(str, adata.var_names))
 
     return SpatialOmicsTable(
         coords=coords,
         molecular_features=molecular_features,
+        molecular_feature_names=molecular_feature_names,
         categorical_labels=categorical_labels,
         cell_ids=cell_ids,
         sample_id=sample_id,
@@ -217,12 +234,32 @@ def load_sce_table(
     sce = r["readRDS"](str(path))
 
     molecular_features = None
+    molecular_feature_names: Optional[List[str]] = None
     if config.use_molecular_features:
         if config.assay_name:
             assay = r["assay"](sce, config.assay_name)
         else:
             assay = r["assay"](sce)
         molecular_features = np.asarray(assay, dtype=float)
+        try:
+            rn = r["rownames"](assay)
+            full_names = [str(x) for x in list(rn)]
+        except Exception:
+            full_names = None
+
+        if config.molecular_features is not None:
+            if full_names is None:
+                raise ValueError("Cannot subset SCE features by name: rownames(assay) not available.")
+            name_to_idx = {n: i for i, n in enumerate(full_names)}
+            requested = list(config.molecular_features)
+            missing = [f for f in requested if f not in name_to_idx]
+            if missing:
+                raise ValueError(f"Requested molecular features not found in {path}: {missing[:10]}")
+            idx = [name_to_idx[f] for f in requested]
+            molecular_features = molecular_features[idx, :]
+            molecular_feature_names = requested
+        else:
+            molecular_feature_names = full_names
         if config.transpose_assay:
             molecular_features = molecular_features.T
 
@@ -268,6 +305,7 @@ def load_sce_table(
     return SpatialOmicsTable(
         coords=coords,
         molecular_features=molecular_features,
+        molecular_feature_names=molecular_feature_names,
         categorical_labels=categorical_labels,
         cell_ids=cell_ids,
         sample_id=sample_id,

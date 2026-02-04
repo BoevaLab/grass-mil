@@ -136,6 +136,7 @@ def test_spatial_omics_datamodule_precompute(tmp_path: Path) -> None:
     metadata_path = data_dir / "processed" / "metadata.json"
     metadata = json.loads(metadata_path.read_text())
     assert metadata["molecular_feature_dim"] == 2
+    assert metadata["molecular_feature_names"] == ["gene1", "gene2"]
     assert metadata["categorical_labels"] == ["cell_type"]
 
     data = dataset[0]
@@ -265,6 +266,7 @@ def test_h5ad_obsm_spatial_coords(tmp_path: Path) -> None:
     coords = np.array([[1.0, 2.0], [3.0, 4.0]])
     x = np.random.rand(2, 3)
     adata = ad.AnnData(X=x)
+    adata.var_names = ["0", "1", "2"]
     adata.obsm["spatial"] = coords
     adata.obs["cell_type"] = ["A", "B"]
 
@@ -282,7 +284,10 @@ def test_h5ad_obsm_spatial_coords(tmp_path: Path) -> None:
             cell_id_column=None,
             categorical_label_columns=("cell_type",),
             molecular_layer=None,
+            molecular_features=["0", "2"],
             use_molecular_features=True,
         ),
     )
     assert np.allclose(table.coords, coords)
+    assert table.molecular_features.shape[1] == 2
+    assert list(table.molecular_feature_names) == ["0", "2"]

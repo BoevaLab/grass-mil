@@ -44,6 +44,7 @@ h5ad:
   cell_id_column: null
   categorical_label_columns: []
   molecular_layer: null
+  molecular_features: null
 
 sce:
   assay_name: null
@@ -53,6 +54,7 @@ sce:
   cell_id_column: null
   categorical_label_columns: []
   transpose_assay: true
+  molecular_features: null
 
 graph_builder:
   name: delaunay

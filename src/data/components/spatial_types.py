@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Optional, Sequence
 
 import numpy as np
 
@@ -12,6 +12,7 @@ class SpatialOmicsTable:
 
     coords: np.ndarray  # (n_cells, 2) float, in micrometers
     molecular_features: Optional[np.ndarray]  # (n_cells, n_features) float
+    molecular_feature_names: Optional[Sequence[str]]
     categorical_labels: Dict[str, np.ndarray]  # {label_name: (n_cells,)}
     cell_ids: np.ndarray  # (n_cells,)
     sample_id: Optional[str] = None

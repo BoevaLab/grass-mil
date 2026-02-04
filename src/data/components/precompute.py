@@ -466,10 +466,16 @@ class SpatialOmicsPreprocessor:
         graph_label_maps: Dict[str, Dict[str, int]],
     ) -> Dict[str, object]:
         molecular_dim = 0
+        molecular_feature_names = None
         if self.precompute_config.use_molecular_features:
             for table in tables:
                 if table.molecular_features is not None:
                     molecular_dim = int(table.molecular_features.shape[1])
+                    molecular_feature_names = (
+                        list(table.molecular_feature_names)
+                        if table.molecular_feature_names is not None
+                        else None
+                    )
                     break
         categorical_cardinalities = {
             label: len(mapping) for label, mapping in label_maps.items()
@@ -478,6 +484,7 @@ class SpatialOmicsPreprocessor:
             "num_graphs": len(entries),
             "num_samples": len({entry["sample_id"] for entry in entries}),
             "molecular_feature_dim": molecular_dim,
+            "molecular_feature_names": molecular_feature_names,
             "categorical_labels": list(self.categorical_feature_config.include_labels),
             "categorical_cardinalities": categorical_cardinalities,
             "label_maps": label_maps,
@@ -495,6 +502,7 @@ def _apply_coord_scale(table: SpatialOmicsTable, coord_scale_um: float) -> Spati
     return SpatialOmicsTable(
         coords=scaled,
         molecular_features=table.molecular_features,
+        molecular_feature_names=table.molecular_feature_names,
         categorical_labels=table.categorical_labels,
         cell_ids=table.cell_ids,
         sample_id=table.sample_id,
@@ -506,6 +514,7 @@ def _subset_table(table: SpatialOmicsTable, indices: np.ndarray) -> SpatialOmics
     return SpatialOmicsTable(
         coords=table.coords[indices],
         molecular_features=table.molecular_features[indices],
+        molecular_feature_names=table.molecular_feature_names,
         categorical_labels={k: v[indices] for k, v in table.categorical_labels.items()},
         cell_ids=table.cell_ids[indices],
         sample_id=table.sample_id,
