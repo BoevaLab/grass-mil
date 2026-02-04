@@ -323,8 +323,19 @@ class SpatialOmicsPreprocessor:
     def _resolve_manifest_relative_path(self, value: Optional[str]) -> Optional[str]:
         if value is None:
             return None
-        value = str(value)
-        if value.strip() == "":
+        # handle pandas NaN and common empty sentinels
+        try:
+            import pandas as pd
+
+            if pd.isna(value):
+                return None
+        except Exception:
+            pass
+
+        value = str(value).strip()
+        if value == "":
+            return None
+        if value.lower() in {"nan", "none", "null"}:
             return None
         p = Path(value)
         if p.is_absolute():
