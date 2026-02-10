@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Literal, Optional
 
@@ -9,7 +10,7 @@ from torch import nn
 from .pooling import GraphPooling
 
 try:
-    from torch_geometric.nn import GATConv, GCNConv, GINConv, SAGEConv
+    from torch_geometric.nn import GATConv, GCNConv, GINConv, GINEConv, SAGEConv
 except Exception as exc:  # pragma: no cover
     raise ImportError(
         "torch_geometric is required for src.models.components.backbones"
@@ -18,7 +19,7 @@ except Exception as exc:  # pragma: no cover
 
 NormType = Literal["batchnorm", "layernorm", "none"]
 JKType = Literal["last", "concat", "max", "sum"]
-ConvType = Literal["gin", "gcn", "gat", "graphsage"]
+ConvType = Literal["gin", "gcn", "gat", "graphsage", "gine"]
 
 
 @dataclass
@@ -37,6 +38,7 @@ class EncoderConfig:
     gat_heads: int = 4
     use_edge_attr: bool = False
     edge_weight_index: int = 0
+    edge_attr_dim: Optional[int] = None
 
 
 def _get_activation(name: str) -> nn.Module:
@@ -67,6 +69,7 @@ class GNNEncoder(nn.Module):
         if cfg.num_layers < 1:
             raise ValueError("num_layers must be >= 1")
         self.cfg = cfg
+        self._validate_edge_attr_config()
         self.act = _get_activation(cfg.act)
         self.dropout = nn.Dropout(cfg.dropout)
 
@@ -127,7 +130,33 @@ class GNNEncoder(nn.Module):
             )
         if ctype == "graphsage":
             return SAGEConv(hdim, hdim, aggr="mean")
+        if ctype == "gine":
+            if self.cfg.edge_attr_dim is None:
+                raise ValueError(
+                    "conv_type='gine' requires edge_attr_dim in EncoderConfig."
+                )
+            mlp = nn.Sequential(
+                nn.Linear(hdim, hdim * 2),
+                nn.ReLU(),
+                nn.Linear(hdim * 2, hdim),
+            )
+            return GINEConv(mlp, edge_dim=self.cfg.edge_attr_dim)
         raise ValueError(f"Unsupported conv_type: {ctype}")
+
+    def _supports_edge_attr(self) -> bool:
+        return self.cfg.conv_type in {"gcn", "gine"}
+
+    def _validate_edge_attr_config(self) -> None:
+        if self.cfg.conv_type == "gine" and self.cfg.edge_attr_dim is None:
+            raise ValueError(
+                "conv_type='gine' requires edge_attr_dim to be set in EncoderConfig."
+            )
+        if self.cfg.use_edge_attr and not self._supports_edge_attr():
+            warnings.warn(
+                f"use_edge_attr=True is ignored for conv_type='{self.cfg.conv_type}'. "
+                "Choose 'gcn' (scalar edge_weight) or 'gine' (edge_attr) for edge-aware message passing.",
+                stacklevel=2,
+            )
 
     def _combined_node_dim(self) -> int:
         if self.cfg.jk == "concat":
@@ -141,13 +170,27 @@ class GNNEncoder(nn.Module):
         edge_index: torch.Tensor,
         edge_attr: Optional[torch.Tensor],
     ) -> torch.Tensor:
-        if (
-            self.cfg.conv_type == "gcn"
-            and edge_attr is not None
-            and self.cfg.use_edge_attr
-        ):
+        if self.cfg.conv_type == "gcn" and self.cfg.use_edge_attr:
+            if edge_attr is None:
+                raise ValueError(
+                    "use_edge_attr=True with conv_type='gcn' requires edge_attr in forward inputs."
+                )
+            if edge_attr.dim() != 2:
+                raise ValueError(
+                    "edge_attr must have shape [num_edges, num_edge_features]."
+                )
+            if self.cfg.edge_weight_index >= edge_attr.size(1):
+                raise ValueError(
+                    "edge_weight_index is out of range for provided edge_attr."
+                )
             edge_weight = edge_attr[:, self.cfg.edge_weight_index]
             return layer(x, edge_index, edge_weight=edge_weight)
+        if self.cfg.conv_type == "gine":
+            if edge_attr is None:
+                raise ValueError(
+                    "conv_type='gine' requires edge_attr in forward inputs."
+                )
+            return layer(x, edge_index, edge_attr)
         return layer(x, edge_index)
 
     def _apply_jk(self, states: list[torch.Tensor]) -> torch.Tensor:

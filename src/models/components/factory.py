@@ -53,14 +53,17 @@ def build_ssl(use_ssl: bool, encoder, ssl_config: Optional[Dict[str, Any]] = Non
     method = cfg.get("method", "bgrl")
     if method != "bgrl":
         raise ValueError(f"Unsupported SSL method: {method}")
-    predictor_cfg = cfg.get(
-        "predictor",
-        {
-            "input_size": encoder.output_dim,
-            "output_size": encoder.output_dim,
-            "hidden_size": 512,
-        },
-    )
+    predictor_cfg = cfg.get("predictor")
+    if predictor_cfg is None:
+        raise ValueError(
+            "SSL predictor configuration is required when use_ssl=True "
+            "(expected key: ssl.predictor)."
+        )
+    if "hidden_size" not in predictor_cfg:
+        raise ValueError("ssl.predictor.hidden_size is required when use_ssl=True.")
+    predictor_cfg = dict(predictor_cfg)
+    predictor_cfg.setdefault("input_size", encoder.output_dim)
+    predictor_cfg.setdefault("output_size", encoder.output_dim)
     predictor = MLPPredictor(**predictor_cfg)
     return BGRL(encoder=encoder, predictor=predictor)
 

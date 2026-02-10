@@ -16,6 +16,7 @@ def test_model_component_yaml_instantiation():
         base / "encoder" / "gcn.yaml",
         base / "encoder" / "gat.yaml",
         base / "encoder" / "graphsage.yaml",
+        base / "encoder" / "gine.yaml",
         base / "attention" / "gated.yaml",
         base / "attention" / "gated_projected.yaml",
         base / "heads" / "graph.yaml",
@@ -39,3 +40,13 @@ def test_sampler_strategy_resolution():
         cfg = OmegaConf.load(base / f"{name}.yaml")
         strategy = get_sampler_strategy(OmegaConf.to_container(cfg, resolve=True))
         assert strategy is not None
+
+
+def test_default_component_and_data_sampler_configs():
+    model_cfg = OmegaConf.load(Path("configs/model/components.yaml"))
+    assert model_cfg.model.attention._target_ == (
+        "src.models.components.attention.AttnNetGatedProjected"
+    )
+
+    data_cfg = OmegaConf.load(Path("configs/data/spatial_omics.yaml"))
+    assert data_cfg.sampler.name == "shadow_custom"

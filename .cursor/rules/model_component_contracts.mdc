@@ -54,3 +54,9 @@ Optional fields:
 - No mutable global runtime state in model and sampler modules.
 - No script-specific hardcoded project logic.
 - Constructors must be side-effect free.
+
+## Config-First Constants Rule
+
+- Use named configuration values for hyperparameters and architecture constants.
+- Avoid undocumented inline numeric defaults in implementation code.
+- Allow small structural literals only when they are shape-level invariants and self-evident.

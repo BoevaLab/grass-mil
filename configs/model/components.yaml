@@ -2,7 +2,7 @@
 
 model:
   flags:
-    use_attention: false
+    use_attention: true
     use_ssl: false
 
   encoder:
@@ -21,11 +21,13 @@ model:
     gat_heads: 4
     use_edge_attr: false
     edge_weight_index: 0
+    edge_attr_dim: null
 
   attention:
-    _target_: src.models.components.attention.AttnNetGated
+    _target_: src.models.components.attention.AttnNetGatedProjected
     input_dim: 128
-    hidden_dim: 64
+    projection_dim: 64
+    hidden_dim: 16
     dropout: false
     n_classes: 1
 

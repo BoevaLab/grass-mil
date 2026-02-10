@@ -66,6 +66,10 @@ feature_reducer:
   name: identity
   kwargs: {}
 
+sampler:
+  name: shadow_custom
+  kwargs: {}
+
 tiling:
   tile_size_um: 200.0
   stride_um: 200.0

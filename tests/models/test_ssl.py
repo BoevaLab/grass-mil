@@ -39,8 +39,26 @@ def test_ssl_optional_factory(enabled):
     encoder = GNNEncoder(
         EncoderConfig(input_dim=4, hidden_dim=8, out_dim=8, num_layers=1)
     )
-    ssl_model = build_ssl(enabled, encoder, {"method": "bgrl"})
+    ssl_model = build_ssl(
+        enabled,
+        encoder,
+        {
+            "method": "bgrl",
+            "predictor": {"hidden_size": 16},
+        },
+    )
     if enabled:
         assert ssl_model is not None
     else:
         assert ssl_model is None
+
+
+def test_ssl_factory_requires_hidden_size():
+    from src.models.components.backbones import EncoderConfig, GNNEncoder
+    from src.models.components.factory import build_ssl
+
+    encoder = GNNEncoder(
+        EncoderConfig(input_dim=4, hidden_dim=8, out_dim=8, num_layers=1)
+    )
+    with pytest.raises(ValueError, match="ssl.predictor.hidden_size is required"):
+        build_ssl(True, encoder, {"method": "bgrl", "predictor": {}})

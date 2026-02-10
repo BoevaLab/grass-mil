@@ -109,3 +109,8 @@ Native-first policy:
 - No implicit side effects in constructors.
 - No reliance on deprecated APIs when modern equivalent exists.
 
+## Config-First Constants
+
+- Keep hyperparameters and architecture constants in configs with explicit names.
+- Avoid undocumented inline numeric defaults in implementation modules.
+- Structural literals are acceptable only for clear invariants (for example, rank checks).

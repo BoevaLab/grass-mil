@@ -13,3 +13,4 @@ set2set_steps: 3
 gat_heads: 4
 use_edge_attr: true
 edge_weight_index: 0
+edge_attr_dim: null
