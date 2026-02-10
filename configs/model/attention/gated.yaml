@@ -1,0 +1,5 @@
+_target_: src.models.components.attention.AttnNetGated
+input_dim: 128
+hidden_dim: 64
+dropout: false
+n_classes: 1

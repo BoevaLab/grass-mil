@@ -1,0 +1,2 @@
+_target_: src.models.components.losses.WeightedBCEWithLogitsLoss
+pos_weight: null

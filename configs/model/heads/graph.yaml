@@ -1,0 +1,6 @@
+_target_: src.models.components.heads.GraphPredictionHead
+input_dim: 128
+output_dim: 1
+hidden_dim: 128
+num_layers: 2
+dropout: 0.0
