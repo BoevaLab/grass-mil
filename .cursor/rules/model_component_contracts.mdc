@@ -1,0 +1,56 @@
+---
+description: Enforce clean-slate contracts for graph model components, losses, and samplers
+alwaysApply: false
+---
+
+# Model Component Contracts
+
+## Data-Layer Agnostic Rule
+
+- Treat each dataset output as a generic graph unit (`torch_geometric.data.Data`).
+- Do not assume outputs are patches.
+- Do not assume outputs are full graphs.
+- Samplers must consume whatever graph-unit granularity the data layer emits.
+
+## Required Graph Fields
+
+- `x` must be float tensor of shape `[num_nodes, num_features]`.
+- `edge_index` must be `torch.long` tensor of shape `[2, num_edges]`.
+
+Optional fields:
+
+- `edge_attr`, `batch`, `pos`, `graph_y`, `graph_w`, `categorical_index`.
+
+## Encoder Rules
+
+- Prefer native PyG operators over custom message passing.
+- Allow only thin adapters around native PyG layers.
+- Keep jump-knowledge and pooling behavior explicit and configurable.
+
+## Attention Rules
+
+- MIL attention heads must be optional and config-driven.
+- Attention modules return logits; normalization is caller-controlled.
+
+## SSL Rules
+
+- SSL components must be optional and config-driven.
+- Disabled SSL must instantiate no SSL modules.
+
+## Loss Rules
+
+- Support categorical, regression, and Cox survival objectives.
+- Validate shapes and dtypes at boundaries.
+- Avoid hidden broadcasting that can silently mis-train.
+
+## Sampler Rules
+
+- Provide identity and neighborhood strategies.
+- Prefer native PyG neighborhood sampler when contracts are satisfied.
+- Use custom sampler only when required behavior is unavailable in native path.
+
+## State and Side-Effect Rules
+
+- No mutable global runtime state in model and sampler modules.
+- No script-specific hardcoded project logic.
+- Constructors must be side-effect free.
