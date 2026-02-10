@@ -7,7 +7,9 @@ import numpy as np
 import torch
 
 
-def instantiate_transforms(configs: Optional[Iterable[Dict[str, Any]]]) -> List[Callable]:
+def instantiate_transforms(
+    configs: Optional[Iterable[Dict[str, Any]]],
+) -> List[Callable]:
     if not configs:
         return []
     transforms: List[Callable] = []
@@ -43,7 +45,11 @@ class CompositionVector:
     def __call__(self, data):
         if hasattr(data, self.label_attr):
             labels = getattr(data, self.label_attr)
-            labels_np = labels.detach().cpu().numpy() if isinstance(labels, torch.Tensor) else np.asarray(labels)
+            labels_np = (
+                labels.detach().cpu().numpy()
+                if isinstance(labels, torch.Tensor)
+                else np.asarray(labels)
+            )
         elif hasattr(data, "categorical_index") and hasattr(data, "categorical_slices"):
             label_name = self.label_attr.replace("label_", "")
             if label_name not in data.categorical_slices:
@@ -58,7 +64,9 @@ class CompositionVector:
             )
 
         labels_np = labels_np.reshape(-1)
-        num_classes = self.num_classes or (int(labels_np.max()) + 1 if labels_np.size > 0 else 0)
+        num_classes = self.num_classes or (
+            int(labels_np.max()) + 1 if labels_np.size > 0 else 0
+        )
         counts = np.bincount(labels_np, minlength=num_classes).astype(np.float32)
         if self.normalize and counts.sum() > 0:
             counts = counts / counts.sum()

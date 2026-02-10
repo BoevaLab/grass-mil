@@ -97,7 +97,9 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             min_cells=min_cells,
             use_molecular_features=use_molecular_features,
         )
-        self.categorical_feature_config = CategoricalFeatureConfig.from_dict(categorical_features)
+        self.categorical_feature_config = CategoricalFeatureConfig.from_dict(
+            categorical_features
+        )
 
     def prepare_data(self) -> None:
         preprocessor = self._build_preprocessor()
@@ -131,9 +133,15 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             self.split_config.train_val_test_split,
         )
 
-        self.dataset_train = _subset_dataset(base_dataset, entries, train_idx, self.transforms)
-        self.dataset_val = _subset_dataset(base_dataset, entries, val_idx, self.transforms)
-        self.dataset_test = _subset_dataset(base_dataset, entries, test_idx, self.transforms)
+        self.dataset_train = _subset_dataset(
+            base_dataset, entries, train_idx, self.transforms
+        )
+        self.dataset_val = _subset_dataset(
+            base_dataset, entries, val_idx, self.transforms
+        )
+        self.dataset_test = _subset_dataset(
+            base_dataset, entries, test_idx, self.transforms
+        )
 
     def train_dataloader(self) -> Any:
         loader_cls = PyGDataLoader or TorchDataLoader
@@ -166,7 +174,9 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         )
 
 
-def _split_indices(total: int, ratios: Tuple[float, float, float]) -> Tuple[list[int], list[int], list[int]]:
+def _split_indices(
+    total: int, ratios: Tuple[float, float, float]
+) -> Tuple[list[int], list[int], list[int]]:
     import numpy as np
 
     train_r, val_r, test_r = ratios

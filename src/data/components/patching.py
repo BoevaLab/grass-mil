@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Sequence, Tuple
+from typing import List, Sequence
 
 import numpy as np
 
@@ -21,7 +21,9 @@ class TileConfig:
         )
 
 
-def build_patches_from_polygons(coords: np.ndarray, polygons: Sequence[object]) -> List[np.ndarray]:
+def build_patches_from_polygons(
+    coords: np.ndarray, polygons: Sequence[object]
+) -> List[np.ndarray]:
     from shapely import vectorized
     from shapely.geometry import Point
     from shapely.prepared import prep
@@ -41,10 +43,12 @@ def build_patches_from_polygons(coords: np.ndarray, polygons: Sequence[object]) 
     return patches
 
 
-def filter_coords_by_union(coords: np.ndarray, polygons: Sequence[object]) -> np.ndarray:
-    from shapely.ops import unary_union
+def filter_coords_by_union(
+    coords: np.ndarray, polygons: Sequence[object]
+) -> np.ndarray:
     from shapely import vectorized
     from shapely.geometry import Point
+    from shapely.ops import unary_union
     from shapely.prepared import prep
 
     union = unary_union(list(polygons))

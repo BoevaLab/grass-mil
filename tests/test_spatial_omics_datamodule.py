@@ -1,6 +1,6 @@
+import json
 from pathlib import Path
 
-import json
 import numpy as np
 import pytest
 
@@ -107,7 +107,10 @@ def test_spatial_omics_datamodule_precompute(tmp_path: Path) -> None:
         },
         graph_builder={
             "name": "delaunay",
-            "kwargs": {"edge_features": ["distance", "neighbor"], "neighbor_cutoff_um": 50.0},
+            "kwargs": {
+                "edge_features": ["distance", "neighbor"],
+                "neighbor_cutoff_um": 50.0,
+            },
         },
         feature_reducer={"name": "identity", "kwargs": {}},
         tiling={"tile_size_um": 50.0, "stride_um": 50.0, "min_cells": 1},
@@ -233,7 +236,10 @@ def test_spatial_omics_datamodule_indices_no_molecular(tmp_path: Path) -> None:
         },
         graph_builder={
             "name": "delaunay",
-            "kwargs": {"edge_features": ["distance", "neighbor"], "neighbor_cutoff_um": 50.0},
+            "kwargs": {
+                "edge_features": ["distance", "neighbor"],
+                "neighbor_cutoff_um": 50.0,
+            },
         },
         feature_reducer={"name": "identity", "kwargs": {}},
         tiling={"tile_size_um": 50.0, "stride_um": 50.0, "min_cells": 1},

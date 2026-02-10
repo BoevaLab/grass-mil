@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import importlib
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional
-
-import importlib
 
 import numpy as np
 import torch
@@ -53,7 +52,9 @@ def get_graph_builder(config: GraphBuilderConfig) -> GraphBuilder:
         module = importlib.import_module(module_name)
         cls = getattr(module, class_name)
         return cls(**(config.kwargs or {}))
-    raise ValueError(f"Unknown graph builder '{config.name}'. Available: {list(_GRAPH_BUILDERS)}")
+    raise ValueError(
+        f"Unknown graph builder '{config.name}'. Available: {list(_GRAPH_BUILDERS)}"
+    )
 
 
 @register_graph_builder("delaunay")
@@ -75,7 +76,11 @@ class DelaunayGraphBuilder(GraphBuilder):
             edge_attr, edge_attr_names = _build_edge_attr(
                 edge_index, coords, self.edge_features, self.neighbor_cutoff_um
             )
-            return GraphBuildResult(edge_index=edge_index, edge_attr=edge_attr, edge_attr_names=edge_attr_names)
+            return GraphBuildResult(
+                edge_index=edge_index,
+                edge_attr=edge_attr,
+                edge_attr_names=edge_attr_names,
+            )
 
         from scipy.spatial import Delaunay
 
@@ -92,7 +97,9 @@ class DelaunayGraphBuilder(GraphBuilder):
         edge_attr, edge_attr_names = _build_edge_attr(
             edge_index, coords, self.edge_features, self.neighbor_cutoff_um
         )
-        return GraphBuildResult(edge_index=edge_index, edge_attr=edge_attr, edge_attr_names=edge_attr_names)
+        return GraphBuildResult(
+            edge_index=edge_index, edge_attr=edge_attr, edge_attr_names=edge_attr_names
+        )
 
 
 def _edges_to_tensor(edges: set[tuple[int, int]]) -> torch.Tensor:
@@ -111,7 +118,9 @@ def _build_edge_attr(
     if not edge_features:
         return None, None
     if edge_index.numel() == 0:
-        return torch.empty((0, len(edge_features)), dtype=torch.float), list(edge_features)
+        return torch.empty((0, len(edge_features)), dtype=torch.float), list(
+            edge_features
+        )
 
     src = edge_index[0].cpu().numpy()
     dst = edge_index[1].cpu().numpy()
@@ -124,7 +133,9 @@ def _build_edge_attr(
             columns.append(distances.astype(np.float32))
         elif feat == "neighbor":
             if neighbor_cutoff_um is None:
-                raise ValueError("neighbor_cutoff_um must be set to compute neighbor edge feature")
+                raise ValueError(
+                    "neighbor_cutoff_um must be set to compute neighbor edge feature"
+                )
             columns.append((distances <= neighbor_cutoff_um).astype(np.float32))
         else:
             raise ValueError(f"Unsupported edge feature '{feat}'")

@@ -32,7 +32,9 @@ class SpatialOmicsGraphDataset(Dataset):
             label: {idx: name for name, idx in mapping.items()}
             for label, mapping in self.label_maps.items()
         }
-        self.graph_label_maps: Dict[str, Dict[str, int]] = data.get("graph_label_maps", {})
+        self.graph_label_maps: Dict[str, Dict[str, int]] = data.get(
+            "graph_label_maps", {}
+        )
         self.reducer_state: Dict[str, Any] = data.get("reducer_state", {})
 
     def __len__(self) -> int:

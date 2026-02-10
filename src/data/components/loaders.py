@@ -22,7 +22,9 @@ class CsvConfig:
     sep: str = ","
 
     @classmethod
-    def from_dict(cls, data: Dict[str, object], use_molecular_features: bool) -> "CsvConfig":
+    def from_dict(
+        cls, data: Dict[str, object], use_molecular_features: bool
+    ) -> "CsvConfig":
         return cls(
             coord_columns=tuple(data["coord_columns"]),
             cell_id_column=data.get("cell_id_column"),
@@ -45,7 +47,9 @@ class H5adConfig:
     use_molecular_features: bool = True
 
     @classmethod
-    def from_dict(cls, data: Dict[str, object], use_molecular_features: bool) -> "H5adConfig":
+    def from_dict(
+        cls, data: Dict[str, object], use_molecular_features: bool
+    ) -> "H5adConfig":
         return cls(
             coord_source=data.get("coord_source", "obsm"),
             coord_key=data.get("coord_key"),
@@ -71,12 +75,16 @@ class SceConfig:
     use_molecular_features: bool = True
 
     @classmethod
-    def from_dict(cls, data: Dict[str, object], use_molecular_features: bool) -> "SceConfig":
+    def from_dict(
+        cls, data: Dict[str, object], use_molecular_features: bool
+    ) -> "SceConfig":
         return cls(
             assay_name=data.get("assay_name"),
             coord_source=data.get("coord_source", "colData"),
             coord_key=data.get("coord_key"),
-            coord_columns=tuple(data["coord_columns"]) if data.get("coord_columns") else None,
+            coord_columns=tuple(data["coord_columns"])
+            if data.get("coord_columns")
+            else None,
             cell_id_column=data.get("cell_id_column"),
             categorical_label_columns=data.get("categorical_label_columns", []),
             transpose_assay=data.get("transpose_assay", True),
@@ -160,7 +168,9 @@ def load_h5ad_table(
             raise ValueError(f"Missing obsm['{key}'] for spatial coords in {path}")
         coords = np.asarray(adata.obsm[key], dtype=float)
         if coords.ndim != 2 or coords.shape[1] < 2:
-            raise ValueError(f"obsm['{key}'] must be 2D with at least 2 columns in {path}")
+            raise ValueError(
+                f"obsm['{key}'] must be 2D with at least 2 columns in {path}"
+            )
         coords = coords[:, :2]
     elif config.coord_source == "obs":
         x_col, y_col = config.coord_columns
@@ -188,7 +198,9 @@ def load_h5ad_table(
             requested = list(config.molecular_features)
             missing = [f for f in requested if f not in set(adata.var_names)]
             if missing:
-                raise ValueError(f"Requested molecular features not found in {path}: {missing[:10]}")
+                raise ValueError(
+                    f"Requested molecular features not found in {path}: {missing[:10]}"
+                )
             adata = adata[:, requested]
 
         if config.molecular_layer:
@@ -249,12 +261,16 @@ def load_sce_table(
 
         if config.molecular_features is not None:
             if full_names is None:
-                raise ValueError("Cannot subset SCE features by name: rownames(assay) not available.")
+                raise ValueError(
+                    "Cannot subset SCE features by name: rownames(assay) not available."
+                )
             name_to_idx = {n: i for i, n in enumerate(full_names)}
             requested = list(config.molecular_features)
             missing = [f for f in requested if f not in name_to_idx]
             if missing:
-                raise ValueError(f"Requested molecular features not found in {path}: {missing[:10]}")
+                raise ValueError(
+                    f"Requested molecular features not found in {path}: {missing[:10]}"
+                )
             idx = [name_to_idx[f] for f in requested]
             molecular_features = molecular_features[idx, :]
             molecular_feature_names = requested
@@ -271,12 +287,16 @@ def load_sce_table(
 
     if config.coord_source == "colData":
         if coldata_df is None:
-            raise ValueError("coord_source=colData but colData could not be loaded from SCE.")
+            raise ValueError(
+                "coord_source=colData but colData could not be loaded from SCE."
+            )
         if not config.coord_columns:
             raise ValueError("coord_columns must be set when coord_source=colData.")
         x_col, y_col = config.coord_columns
         if x_col not in coldata_df.columns or y_col not in coldata_df.columns:
-            raise ValueError(f"Missing coord columns {config.coord_columns} in colData for {path}")
+            raise ValueError(
+                f"Missing coord columns {config.coord_columns} in colData for {path}"
+            )
         coords = coldata_df[[x_col, y_col]].to_numpy(dtype=float)
     elif config.coord_source == "reducedDims":
         if not config.coord_key:
@@ -289,17 +309,25 @@ def load_sce_table(
     else:
         raise ValueError("coord_source must be 'colData' or 'reducedDims'.")
 
-    if config.cell_id_column and coldata_df is not None and config.cell_id_column in coldata_df.columns:
+    if (
+        config.cell_id_column
+        and coldata_df is not None
+        and config.cell_id_column in coldata_df.columns
+    ):
         cell_ids = coldata_df[config.cell_id_column].astype(str).to_numpy()
     else:
         cell_ids = np.asarray(r["colnames"](sce), dtype=str)
 
     categorical_labels: Dict[str, np.ndarray] = {}
     if config.categorical_label_columns and coldata_df is None:
-        raise ValueError("categorical_label_columns requested but colData could not be loaded.")
+        raise ValueError(
+            "categorical_label_columns requested but colData could not be loaded."
+        )
     for label_col in config.categorical_label_columns:
         if label_col not in coldata_df.columns:
-            raise ValueError(f"Missing categorical label column {label_col} in colData for {path}")
+            raise ValueError(
+                f"Missing categorical label column {label_col} in colData for {path}"
+            )
         categorical_labels[label_col] = coldata_df[label_col].astype(str).to_numpy()
 
     return SpatialOmicsTable(
@@ -314,8 +342,8 @@ def load_sce_table(
 
 
 def load_polygons_from_path(path: str | Path) -> List[object]:
-    from shapely.geometry import shape
     from shapely import wkt
+    from shapely.geometry import shape
 
     path = Path(path)
     if not path.exists():
