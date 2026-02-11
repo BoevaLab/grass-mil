@@ -1,0 +1,56 @@
+# @package _global_
+
+model:
+  flags:
+    use_attention: true
+    use_ssl: false
+
+  encoder:
+    _target_: src.models.components.backbones.EncoderConfig
+    input_dim: 64
+    hidden_dim: 128
+    out_dim: 128
+    num_layers: 3
+    dropout: 0.1
+    conv_type: gin
+    norm: batchnorm
+    jk: last
+    act: relu
+    pooling: mean
+    set2set_steps: 3
+    gat_heads: 4
+    use_edge_attr: false
+    edge_weight_index: 0
+    edge_attr_dim: null
+
+  attention:
+    _target_: src.models.components.attention.AttnNetGatedProjected
+    input_dim: 128
+    projection_dim: 64
+    hidden_dim: 16
+    dropout: false
+    n_classes: 1
+
+  ssl:
+    method: bgrl
+    predictor:
+      _target_: src.models.components.ssl.MLPPredictor
+      input_size: 128
+      output_size: 128
+      hidden_size: 512
+
+  graph_head:
+    _target_: src.models.components.heads.GraphPredictionHead
+    input_dim: 128
+    output_dim: 1
+    hidden_dim: 128
+    num_layers: 2
+    dropout: 0.0
+
+  node_head:
+    _target_: src.models.components.heads.NodePredictionHead
+    input_dim: 128
+    output_dim: 1
+    hidden_dim: 128
+    num_layers: 2
+    dropout: 0.0

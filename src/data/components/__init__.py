@@ -12,5 +12,6 @@ from .loaders import (
 )
 from .patching import TileConfig, build_grid_tiles, build_patches_from_polygons
 from .precompute import SpatialOmicsPreprocessor
+from .samplers import SamplerConfig, get_sampler_strategy, register_sampler_strategy
 from .spatial_types import SpatialOmicsTable
 from .transforms import CompositionVector, instantiate_transforms

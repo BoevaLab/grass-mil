@@ -5,12 +5,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 import lightning as L
-from torch.utils.data import DataLoader as TorchDataLoader
-
-try:
-    from torch_geometric.loader import DataLoader as PyGDataLoader
-except Exception:  # pragma: no cover - fallback when PyG isn't installed
-    PyGDataLoader = None
 
 from .components.datasets import SpatialOmicsGraphDataset, TransformDataset
 from .components.feature_reducers import FeatureReducerConfig
@@ -23,6 +17,11 @@ from .components.precompute import (
     ManifestConfig,
     PrecomputeConfig,
     SpatialOmicsPreprocessor,
+)
+from .components.samplers import (
+    BaseSamplerStrategy,
+    SamplerConfig,
+    get_sampler_strategy,
 )
 from .components.transforms import instantiate_transforms
 
@@ -57,6 +56,7 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         graph_builder: Dict[str, Any],
         feature_reducer: Dict[str, Any],
         tiling: Dict[str, Any],
+        sampler: Optional[Dict[str, Any]] = None,
         manifest: Optional[Dict[str, Any]] = None,
         graph_labels: Optional[Dict[str, Any]] = None,
         transforms: Optional[list[Dict[str, Any]]] = None,
@@ -82,6 +82,8 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         self.graph_builder_config = GraphBuilderConfig.from_dict(graph_builder)
         self.feature_reducer_config = FeatureReducerConfig.from_dict(feature_reducer)
         self.tile_config = TileConfig.from_dict(tiling)
+        self.sampler_config = SamplerConfig.from_dict(sampler)
+        self.sampler_strategy: Optional[BaseSamplerStrategy] = None
         self.manifest_config = ManifestConfig.from_dict(manifest)
         self.graph_label_config = GraphLabelConfig.from_dict(graph_labels)
         self.transforms = instantiate_transforms(transforms)
@@ -142,10 +144,16 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         self.dataset_test = _subset_dataset(
             base_dataset, entries, test_idx, self.transforms
         )
+        self._ensure_sampler_strategy()
+
+    def _ensure_sampler_strategy(self) -> BaseSamplerStrategy:
+        if self.sampler_strategy is None:
+            self.sampler_strategy = get_sampler_strategy(self.sampler_config)
+        return self.sampler_strategy
 
     def train_dataloader(self) -> Any:
-        loader_cls = PyGDataLoader or TorchDataLoader
-        return loader_cls(
+        sampler = self._ensure_sampler_strategy()
+        return sampler.build_dataset_loader(
             dataset=self.dataset_train,
             batch_size=self.hparams.batch_size,
             num_workers=self.hparams.num_workers,
@@ -154,8 +162,8 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         )
 
     def val_dataloader(self) -> Any:
-        loader_cls = PyGDataLoader or TorchDataLoader
-        return loader_cls(
+        sampler = self._ensure_sampler_strategy()
+        return sampler.build_dataset_loader(
             dataset=self.dataset_val,
             batch_size=self.hparams.batch_size,
             num_workers=self.hparams.num_workers,
@@ -164,8 +172,8 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         )
 
     def test_dataloader(self) -> Any:
-        loader_cls = PyGDataLoader or TorchDataLoader
-        return loader_cls(
+        sampler = self._ensure_sampler_strategy()
+        return sampler.build_dataset_loader(
             dataset=self.dataset_test,
             batch_size=self.hparams.batch_size,
             num_workers=self.hparams.num_workers,
