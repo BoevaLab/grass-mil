@@ -18,7 +18,7 @@ from .training import (
     gather_instance_logits,
     group_instance_indices_by_bag,
     instantiate_optimizer,
-    instantiate_scheduler,
+    instantiate_scheduler_with_warmup,
     load_state_dict_with_optional_mapping,
     validate_task_config,
 )
@@ -505,9 +505,50 @@ class SupervisedMILModule(L.LightningModule):
     def configure_optimizers(self):
         if not self._built:
             self.setup("fit")
+        optimization_cfg = dict(self.task_cfg.get("optimization", {}))
+        backbone_lr = optimization_cfg.get("backbone_lr")
+        attention_lr = optimization_cfg.get("attention_lr")
+
         params = [p for p in self.parameters() if p.requires_grad]
+        if backbone_lr is not None and attention_lr is not None:
+            seen: set[int] = set()
+
+            def _collect_params(module) -> list[torch.nn.Parameter]:
+                out: list[torch.nn.Parameter] = []
+                if module is None:
+                    return out
+                for param in module.parameters():
+                    if not param.requires_grad:
+                        continue
+                    pid = id(param)
+                    if pid in seen:
+                        continue
+                    seen.add(pid)
+                    out.append(param)
+                return out
+
+            backbone_params = _collect_params(self.encoder) + _collect_params(
+                self.graph_head
+            )
+            attention_params = _collect_params(self.attention)
+            param_groups = []
+            if backbone_params:
+                param_groups.append(
+                    {"params": backbone_params, "lr": float(backbone_lr)}
+                )
+            if attention_params:
+                param_groups.append(
+                    {"params": attention_params, "lr": float(attention_lr)}
+                )
+            if param_groups:
+                params = param_groups
+
         optimizer = instantiate_optimizer(self.optim_cfg, params)
-        scheduler = instantiate_scheduler(self.scheduler_cfg, optimizer)
+        scheduler = instantiate_scheduler_with_warmup(
+            self.scheduler_cfg,
+            optimizer,
+            warmup_cfg=self.task_cfg.get("lr_warmup"),
+        )
         if scheduler is None:
             return optimizer
         return {

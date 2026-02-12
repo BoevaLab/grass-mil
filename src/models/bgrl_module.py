@@ -12,7 +12,7 @@ from .training import (
     augment_graph,
     infer_encoder_input_dim,
     instantiate_optimizer,
-    instantiate_scheduler,
+    instantiate_scheduler_with_warmup,
     load_state_dict_with_optional_mapping,
 )
 
@@ -153,7 +153,11 @@ class BGRLModule(L.LightningModule):
         optimizer = instantiate_optimizer(
             self.optim_cfg, self.ssl_model.trainable_parameters()
         )
-        scheduler = instantiate_scheduler(self.scheduler_cfg, optimizer)
+        scheduler = instantiate_scheduler_with_warmup(
+            self.scheduler_cfg,
+            optimizer,
+            warmup_cfg=self.task_cfg.get("lr_warmup"),
+        )
         if scheduler is None:
             return optimizer
         return {

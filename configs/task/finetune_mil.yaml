@@ -10,6 +10,13 @@ task:
   target_type: binary
   target_columns: null
   loss: categorical_bce
+  optimization:
+    backbone_lr: null
+    attention_lr: null
+  lr_warmup:
+    enabled: false
+    warmup_steps: 0
+    start_factor: 0.1
   # Hyperbatch has one meaning only:
   # number of regions accumulated before one optimizer/scheduler step.
   region_accumulation:

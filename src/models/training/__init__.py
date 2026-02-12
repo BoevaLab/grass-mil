@@ -24,7 +24,11 @@ from .losses import (
     compute_supervised_loss,
     gather_instance_logits,
 )
-from .optimization import instantiate_optimizer, instantiate_scheduler
+from .optimization import (
+    instantiate_optimizer,
+    instantiate_scheduler,
+    instantiate_scheduler_with_warmup,
+)
 from .ssl_runtime import CosineWarmup, augment_graph
 
 __all__ = [
@@ -48,6 +52,7 @@ __all__ = [
     "gather_instance_logits",
     "instantiate_optimizer",
     "instantiate_scheduler",
+    "instantiate_scheduler_with_warmup",
     "CosineWarmup",
     "augment_graph",
 ]

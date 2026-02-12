@@ -13,6 +13,10 @@ task:
   target_type: binary
   target_columns: null
   loss: categorical_bce
+  lr_warmup:
+    enabled: true
+    warmup_steps: 1000
+    start_factor: 0.1
   warmup_steps: 1000
   total_steps: 10000
   momentum: 0.99

@@ -13,7 +13,7 @@ from .training import (
     gather_bag_targets,
     group_instance_indices_by_bag,
     instantiate_optimizer,
-    instantiate_scheduler,
+    instantiate_scheduler_with_warmup,
     load_state_dict_with_optional_mapping,
     validate_task_config,
 )
@@ -168,7 +168,11 @@ class SupervisedMeanModule(L.LightningModule):
             self.setup("fit")
         params = [p for p in self.parameters() if p.requires_grad]
         optimizer = instantiate_optimizer(self.optim_cfg, params)
-        scheduler = instantiate_scheduler(self.scheduler_cfg, optimizer)
+        scheduler = instantiate_scheduler_with_warmup(
+            self.scheduler_cfg,
+            optimizer,
+            warmup_cfg=self.task_cfg.get("lr_warmup"),
+        )
         if scheduler is None:
             return optimizer
         return {
