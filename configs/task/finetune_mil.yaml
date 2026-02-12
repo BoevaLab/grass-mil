@@ -1,0 +1,30 @@
+# @package _global_
+
+task:
+  name: finetune_mil
+  aggregation: mil_attention
+  bag_key: region_id
+  bag_fallback_key: sample_id
+  max_instances_per_bag: 0
+  instance_sampling: all
+  target_type: binary
+  target_columns: null
+  loss: categorical_bce
+  # Optional hyperbatch-style reduction over region losses.
+  hyperbatch_size: 0
+  node_aux:
+    enabled: false
+    # graph_label | attention_shaped_ti
+    target_mode: attention_shaped_ti
+    # bce | weighted_bce
+    loss_mode: bce
+    weight: 1.0
+  entropy_reg:
+    enabled: false
+    # attention | attention_shaped_target
+    mode: attention_shaped_target
+    weight: 0.01
+  loss_weights:
+    region: 1.0
+    node_aux: 1.0
+    entropy: 0.0

@@ -21,8 +21,14 @@ from .components import (
     build_pooling,
     build_ssl,
 )
+from .bgrl_module import BGRLModule
+from .supervised_mean_module import SupervisedMeanModule
+from .supervised_mil_module import SupervisedMILModule
 
 __all__ = [
+    "BGRLModule",
+    "SupervisedMeanModule",
+    "SupervisedMILModule",
     "AttnNetGated",
     "AttnNetGatedProjected",
     "BGRL",
