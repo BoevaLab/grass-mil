@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 
 import lightning as L
 
-from .runtime import (
+from .training import (
     aggregate_bag_logits_mean,
     build_supervised_components,
     compute_binary_accuracy,

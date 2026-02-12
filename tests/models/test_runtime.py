@@ -2,7 +2,7 @@ import torch
 
 
 def test_remap_encoder_keys_auto_bgrl_or_identity():
-    from src.models.runtime import remap_encoder_keys
+    from src.models.training.checkpoint_init import remap_encoder_keys
 
     sd = {
         "online_encoder.layers.0.weight": torch.randn(4, 4),
@@ -21,7 +21,7 @@ def test_compute_supervised_loss_routes():
         WeightedBCEWithLogitsLoss,
         WeightedMSELoss,
     )
-    from src.models.runtime import compute_supervised_loss
+    from src.models.training.losses import compute_supervised_loss
 
     bce = compute_supervised_loss(
         loss_fn=WeightedBCEWithLogitsLoss(),
@@ -60,7 +60,7 @@ def test_compute_supervised_loss_routes():
 def test_attention_bag_aggregation_shapes():
     import torch
     from src.models.components.attention import AttnNetGatedProjected
-    from src.models.runtime import aggregate_bag_logits_attention
+    from src.models.training.bagging import aggregate_bag_logits_attention
 
     logits = torch.randn(5, 1)
     emb = torch.randn(5, 8)
@@ -83,7 +83,7 @@ def test_attention_bag_aggregation_shapes():
 
 
 def test_build_mil_aux_targets_attention_shaped():
-    from src.models.runtime import build_mil_aux_targets
+    from src.models.training.losses import build_mil_aux_targets
 
     bag_targets = torch.tensor([[1.0], [0.0]])
     bag_indices = [[0, 1], [2, 3, 4]]
@@ -106,7 +106,7 @@ def test_build_mil_aux_targets_attention_shaped():
 
 
 def test_compute_aux_and_entropy_terms():
-    from src.models.runtime import (
+    from src.models.training.losses import (
         compute_aux_node_loss,
         compute_entropy_regularization,
     )

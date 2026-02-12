@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-import warnings
 from typing import Any, Dict, Optional
 
 import lightning as L
 import torch
 
-from .runtime import (
+from .training import (
     aggregate_bag_logits_attention,
     build_mil_aux_targets,
     build_supervised_components,
@@ -63,13 +62,6 @@ class SupervisedMILModule(L.LightningModule):
         self.encoder_init_map = encoder_init_map
         self.freeze_encoder = freeze_encoder
         self.region_accum_cfg = dict(self.task_cfg.get("region_accumulation", {}))
-        legacy_hyperbatch = self.task_cfg.get("hyperbatch_size")
-        if legacy_hyperbatch is not None:
-            warnings.warn(
-                "task.hyperbatch_size is deprecated; use task.region_accumulation.hyperbatch_size.",
-                stacklevel=2,
-            )
-            self.region_accum_cfg.setdefault("hyperbatch_size", legacy_hyperbatch)
         self.region_accum_enabled = bool(self.region_accum_cfg.get("enabled", False))
         self.region_accum_hyperbatch_size = int(
             self.region_accum_cfg.get("hyperbatch_size", 8)

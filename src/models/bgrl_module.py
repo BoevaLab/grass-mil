@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 
 from .components import EncoderConfig, build_encoder, build_ssl
-from .runtime import (
+from .training import (
     CosineWarmup,
     augment_graph,
     infer_encoder_input_dim,
