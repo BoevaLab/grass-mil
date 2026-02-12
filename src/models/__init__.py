@@ -22,13 +22,11 @@ from .components import (
     build_ssl,
 )
 from .bgrl_module import BGRLModule
-from .supervised_mean_module import SupervisedMeanModule
-from .supervised_mil_module import SupervisedMILModule
+from .supervised_module import SupervisedModule
 
 __all__ = [
     "BGRLModule",
-    "SupervisedMeanModule",
-    "SupervisedMILModule",
+    "SupervisedModule",
     "AttnNetGated",
     "AttnNetGatedProjected",
     "BGRL",

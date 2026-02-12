@@ -44,9 +44,9 @@ def _cosine_step_cfg():
 
 def test_supervised_mil_uses_explicit_backbone_and_attention_lrs():
     pytest.importorskip("torch_geometric")
-    from src.models.supervised_mil_module import SupervisedMILModule
+    from src.models.supervised_module import SupervisedModule
 
-    module = SupervisedMILModule(
+    module = SupervisedModule(
         encoder=_encoder_cfg(),
         graph_head={
             "input_dim": 16,
@@ -67,6 +67,7 @@ def test_supervised_mil_uses_explicit_backbone_and_attention_lrs():
         optim=_optim_cfg(),
         scheduler=_cosine_epoch_cfg(),
         task={
+            "aggregation": "mil_attention",
             "target_type": "binary",
             "loss": "categorical_bce",
             "optimization": {"backbone_lr": 1e-3, "attention_lr": 4e-3},
@@ -85,7 +86,7 @@ def test_supervised_mil_uses_explicit_backbone_and_attention_lrs():
 
 def test_supervised_mean_warmup_is_opt_in():
     pytest.importorskip("torch_geometric")
-    from src.models.supervised_mean_module import SupervisedMeanModule
+    from src.models.supervised_module import SupervisedModule
 
     base_kwargs = dict(
         encoder=_encoder_cfg(),
@@ -99,13 +100,13 @@ def test_supervised_mean_warmup_is_opt_in():
         loss={"loss_type": "categorical_bce"},
         optim=_optim_cfg(),
         scheduler=_cosine_epoch_cfg(),
-        task={"target_type": "binary", "loss": "categorical_bce"},
     )
+    base_task = {"target_type": "binary", "loss": "categorical_bce"}
 
-    no_warmup = SupervisedMeanModule(
+    no_warmup = SupervisedModule(
         **base_kwargs,
         task={
-            **base_kwargs["task"],
+            **base_task,
             "lr_warmup": {"enabled": False, "warmup_steps": 0, "start_factor": 0.1},
         },
     )
@@ -114,10 +115,10 @@ def test_supervised_mean_warmup_is_opt_in():
     no_warmup_scheduler = no_warmup_out["lr_scheduler"]["scheduler"]
     assert isinstance(no_warmup_scheduler, torch.optim.lr_scheduler.CosineAnnealingLR)
 
-    with_warmup = SupervisedMeanModule(
+    with_warmup = SupervisedModule(
         **base_kwargs,
         task={
-            **base_kwargs["task"],
+            **base_task,
             "lr_warmup": {"enabled": True, "warmup_steps": 2, "start_factor": 0.1},
         },
     )

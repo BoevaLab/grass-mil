@@ -6,7 +6,7 @@ defaults:
   - _self_
   - data: spatial_omics
   - task: finetune_mean
-  - model: supervised_mean_module
+  - model: supervised_module
   - optim: adamw
   - scheduler: cosine_epoch
   - callbacks: default

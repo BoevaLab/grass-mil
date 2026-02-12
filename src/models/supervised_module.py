@@ -7,6 +7,7 @@ import torch
 
 from .training import (
     aggregate_bag_logits_attention,
+    aggregate_bag_logits_mean,
     build_mil_aux_targets,
     build_supervised_components,
     compute_aux_node_loss,
@@ -24,14 +25,25 @@ from .training import (
 )
 
 
-class SupervisedMILModule(L.LightningModule):
+class SupervisedModule(L.LightningModule):
+    """Unified supervised module supporting both mean-pooling and MIL-attention
+    aggregation.
+
+    Behaviour is controlled by ``task.aggregation``:
+
+    * ``"mean"`` -- simple mean-pooling over patch logits (no attention, no
+      auxiliary losses, no region accumulation).
+    * ``"mil_attention"`` -- attention-weighted MIL aggregation with optional
+      region accumulation, node auxiliary loss, and entropy regularisation.
+    """
+
     def __init__(
         self,
         encoder: Dict[str, Any],
         graph_head: Dict[str, Any],
-        attention: Dict[str, Any],
         loss: Dict[str, Any],
         optim: Dict[str, Any],
+        attention: Optional[Dict[str, Any]] = None,
         scheduler: Optional[Dict[str, Any]] = None,
         task: Optional[Dict[str, Any]] = None,
         flags: Optional[Dict[str, Any]] = None,
@@ -61,51 +73,86 @@ class SupervisedMILModule(L.LightningModule):
         self.init_strict = init_strict
         self.encoder_init_map = encoder_init_map
         self.freeze_encoder = freeze_encoder
-        self.region_accum_cfg = dict(self.task_cfg.get("region_accumulation", {}))
-        self.region_accum_enabled = bool(self.region_accum_cfg.get("enabled", False))
-        self.region_accum_hyperbatch_size = int(
-            self.region_accum_cfg.get("hyperbatch_size", 8)
-        )
-        self.region_accum_flush_on_epoch_end = bool(
-            self.region_accum_cfg.get("flush_on_epoch_end", True)
-        )
-        if self.region_accum_enabled and self.region_accum_hyperbatch_size < 1:
-            raise ValueError(
-                "task.region_accumulation.hyperbatch_size must be >= 1 when region accumulation is enabled."
+
+        # Derive the aggregation mode from the task config.
+        aggregation = self.task_cfg.get("aggregation", "mean")
+        self.use_attention = aggregation == "mil_attention"
+
+        # MIL-specific config -- only meaningful when use_attention is True.
+        if self.use_attention:
+            self.region_accum_cfg = dict(
+                self.task_cfg.get("region_accumulation", {})
             )
-        self.node_aux_cfg = dict(self.task_cfg.get("node_aux", {}))
-        self.entropy_reg_cfg = dict(self.task_cfg.get("entropy_reg", {}))
-        self.loss_weights_cfg = dict(self.task_cfg.get("loss_weights", {}))
+            self.region_accum_enabled = bool(
+                self.region_accum_cfg.get("enabled", False)
+            )
+            self.region_accum_hyperbatch_size = int(
+                self.region_accum_cfg.get("hyperbatch_size", 8)
+            )
+            self.region_accum_flush_on_epoch_end = bool(
+                self.region_accum_cfg.get("flush_on_epoch_end", True)
+            )
+            if self.region_accum_enabled and self.region_accum_hyperbatch_size < 1:
+                raise ValueError(
+                    "task.region_accumulation.hyperbatch_size must be >= 1 "
+                    "when region accumulation is enabled."
+                )
+            self.node_aux_cfg = dict(self.task_cfg.get("node_aux", {}))
+            self.entropy_reg_cfg = dict(self.task_cfg.get("entropy_reg", {}))
+            self.loss_weights_cfg = dict(self.task_cfg.get("loss_weights", {}))
+        else:
+            self.region_accum_cfg = {}
+            self.region_accum_enabled = False
+            self.region_accum_hyperbatch_size = 0
+            self.region_accum_flush_on_epoch_end = False
+            self.node_aux_cfg = {}
+            self.entropy_reg_cfg = {}
+            self.loss_weights_cfg = {}
 
         self._region_total_loss_buffer: list[torch.Tensor] = []
         self._manual_optimizer_steps = 0
 
+    # ------------------------------------------------------------------
+    # Lightning hooks
+    # ------------------------------------------------------------------
+
     @property
-    def automatic_optimization(self) -> bool:
+    def automatic_optimization(self) -> bool:  # noqa: D401
         return not self.region_accum_enabled
 
     def setup(self, stage: Optional[str] = None) -> None:
         if self._built:
             return
+
         loss_cfg = dict(self.hparams.loss)
-        loss_cfg.setdefault("loss_type", self.task_cfg.get("loss", "categorical_bce"))
-        attention_cfg = dict(self.hparams.attention)
-        attention_cfg.pop("_target_", None)
+        loss_cfg.setdefault(
+            "loss_type", self.task_cfg.get("loss", "categorical_bce")
+        )
+
+        # Build attention config only when MIL is active.
+        if self.use_attention:
+            attention_cfg = dict(self.hparams.attention)
+            attention_cfg.pop("_target_", None)
+        else:
+            attention_cfg = None
+
         components = build_supervised_components(
             module=self,
             encoder_cfg=dict(self.hparams.encoder),
             graph_head_cfg=dict(self.hparams.graph_head),
             attention_cfg=attention_cfg,
-            use_attention=True,
+            use_attention=self.use_attention,
             loss_cfg=loss_cfg,
             use_ssl=bool(self.flags_cfg.get("use_ssl", False)),
             ssl_cfg=dict(self.ssl_cfg),
         )
+
         self.encoder = components["encoder"]
         self.graph_head = components["graph_head"]
         self.loss_fn = components["loss_fn"]
         self.attention = components["attention"]
         self.ssl_model = components["ssl_model"]
+
         load_state_dict_with_optional_mapping(
             self,
             init_from_ckpt=self.init_from_ckpt,
@@ -116,6 +163,10 @@ class SupervisedMILModule(L.LightningModule):
             for p in self.encoder.parameters():
                 p.requires_grad = False
         self._built = True
+
+    # ------------------------------------------------------------------
+    # Forward helpers
+    # ------------------------------------------------------------------
 
     def _forward_instances(self, batch):
         _, graph_emb = self.encoder(
@@ -130,29 +181,46 @@ class SupervisedMILModule(L.LightningModule):
 
     def _forward_bags(self, batch):
         patch_logits, graph_emb = self._forward_instances(batch)
+
         bag_ids = extract_bag_ids(
             batch,
             bag_key=self.task_cfg.get("bag_key", "region_id"),
             bag_fallback_key=self.task_cfg.get("bag_fallback_key", "sample_id"),
         )
         bag_groups = group_instance_indices_by_bag(bag_ids)
-        bag_logits, ordered_bag_ids, bag_attention, bag_indices = (
-            aggregate_bag_logits_attention(
-                logits=patch_logits,
-                embeddings=graph_emb,
-                attention=self.attention,
-                bag_groups=bag_groups,
+
+        if self.use_attention:
+            bag_logits, ordered_bag_ids, bag_attention, bag_indices = (
+                aggregate_bag_logits_attention(
+                    logits=patch_logits,
+                    embeddings=graph_emb,
+                    attention=self.attention,
+                    bag_groups=bag_groups,
+                    max_instances_per_bag=int(
+                        self.task_cfg.get("max_instances_per_bag", 0)
+                    ),
+                    instance_sampling=self.task_cfg.get(
+                        "instance_sampling", "all"
+                    ),
+                )
+            )
+        else:
+            bag_logits, ordered_bag_ids, bag_indices = aggregate_bag_logits_mean(
+                patch_logits,
+                bag_groups,
                 max_instances_per_bag=int(
                     self.task_cfg.get("max_instances_per_bag", 0)
                 ),
                 instance_sampling=self.task_cfg.get("instance_sampling", "all"),
             )
-        )
+            bag_attention = None
+
         bag_targets, bag_weights = gather_bag_targets(
             batch=batch,
             bag_indices=bag_indices,
             target_columns=self.task_cfg.get("target_columns"),
         )
+
         return {
             "patch_logits": patch_logits,
             "bag_logits": bag_logits,
@@ -163,84 +231,9 @@ class SupervisedMILModule(L.LightningModule):
             "bag_weights": bag_weights,
         }
 
-    def _shared_step(self, batch, stage: str):
-        payload = self._forward_bags(batch)
-        patch_logits = payload["patch_logits"]
-        bag_logits = payload["bag_logits"]
-        ordered_bag_ids = payload["ordered_bag_ids"]
-        bag_attention = payload["bag_attention"]
-        bag_indices = payload["bag_indices"]
-        bag_targets = payload["bag_targets"]
-        bag_weights = payload["bag_weights"]
-        region_loss = self._compute_region_loss(
-            bag_logits=bag_logits,
-            bag_targets=bag_targets,
-            bag_weights=bag_weights,
-        )
-        node_aux_loss, entropy_reg = self._compute_optional_terms(
-            patch_logits=patch_logits,
-            bag_targets=bag_targets,
-            bag_ids=ordered_bag_ids,
-            bag_indices=bag_indices,
-            bag_attention=bag_attention,
-            stage=stage,
-        )
-        total_loss = self._compose_total_loss(region_loss, node_aux_loss, entropy_reg)
-        if stage in {"train", "val", "test"}:
-            self.log(
-                f"{stage}/loss",
-                total_loss if stage == "train" else region_loss,
-                on_step=stage == "train",
-                on_epoch=True,
-                prog_bar=True,
-            )
-            if stage == "train":
-                self.log(
-                    "train/region_loss",
-                    region_loss,
-                    on_step=True,
-                    on_epoch=True,
-                    prog_bar=False,
-                )
-                if node_aux_loss is not None:
-                    self.log(
-                        "train/node_aux_loss",
-                        node_aux_loss,
-                        on_step=True,
-                        on_epoch=True,
-                        prog_bar=False,
-                    )
-                if entropy_reg is not None:
-                    self.log(
-                        "train/entropy_reg",
-                        entropy_reg,
-                        on_step=True,
-                        on_epoch=True,
-                        prog_bar=False,
-                    )
-        if self.task_cfg["target_type"] == "binary" and stage in {
-            "train",
-            "val",
-            "test",
-        }:
-            acc = compute_binary_accuracy(bag_logits, bag_targets)
-            self.log(
-                f"{stage}/acc",
-                acc,
-                on_step=False,
-                on_epoch=True,
-                prog_bar=stage != "train",
-            )
-        return {
-            "loss": total_loss if stage == "train" else region_loss,
-            "bag_ids": list(ordered_bag_ids),
-            "bag_logits": bag_logits,
-            "bag_targets": bag_targets,
-            "bag_attention": bag_attention,
-            "region_loss": region_loss,
-            "node_aux_loss": node_aux_loss,
-            "entropy_reg": entropy_reg,
-        }
+    # ------------------------------------------------------------------
+    # Loss computation
+    # ------------------------------------------------------------------
 
     def _compute_region_loss(
         self,
@@ -267,6 +260,13 @@ class SupervisedMILModule(L.LightningModule):
         bag_attention: dict[str, torch.Tensor],
         stage: str,
     ) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """Compute node auxiliary loss and entropy regularisation.
+
+        Only active during training when MIL attention is enabled and the
+        relevant sub-configs are turned on.
+        """
+        if not self.use_attention:
+            return None, None
         if stage != "train" or self.task_cfg.get("target_type") != "binary":
             return None, None
 
@@ -303,13 +303,18 @@ class SupervisedMILModule(L.LightningModule):
             )
             if entropy_mode == "attention":
                 entropy_values = torch.cat(
-                    [bag_attention[bag_id].reshape(-1, 1) for bag_id in bag_ids], dim=0
+                    [
+                        bag_attention[bag_id].reshape(-1, 1)
+                        for bag_id in bag_ids
+                    ],
+                    dim=0,
                 )
             elif entropy_mode == "attention_shaped_target":
                 entropy_values = aux_targets
             else:
                 raise ValueError(
-                    "entropy_reg.mode must be one of ['attention', 'attention_shaped_target']"
+                    "entropy_reg.mode must be one of "
+                    "['attention', 'attention_shaped_target']"
                 )
             entropy_reg = compute_entropy_regularization(entropy_values)
 
@@ -321,9 +326,14 @@ class SupervisedMILModule(L.LightningModule):
         node_aux_loss: Optional[torch.Tensor],
         entropy_reg: Optional[torch.Tensor],
     ) -> torch.Tensor:
+        if not self.use_attention:
+            return region_loss
+
         region_w = float(self.loss_weights_cfg.get("region", 1.0))
         node_w = float(
-            self.node_aux_cfg.get("weight", self.loss_weights_cfg.get("node_aux", 1.0))
+            self.node_aux_cfg.get(
+                "weight", self.loss_weights_cfg.get("node_aux", 1.0)
+            )
         )
         entropy_w = float(
             self.entropy_reg_cfg.get(
@@ -337,10 +347,111 @@ class SupervisedMILModule(L.LightningModule):
             total = total + entropy_w * entropy_reg
         return total
 
+    # ------------------------------------------------------------------
+    # Shared step
+    # ------------------------------------------------------------------
+
+    def _shared_step(self, batch, stage: str):
+        payload = self._forward_bags(batch)
+        patch_logits = payload["patch_logits"]
+        bag_logits = payload["bag_logits"]
+        ordered_bag_ids = payload["ordered_bag_ids"]
+        bag_attention = payload["bag_attention"]
+        bag_indices = payload["bag_indices"]
+        bag_targets = payload["bag_targets"]
+        bag_weights = payload["bag_weights"]
+
+        region_loss = self._compute_region_loss(
+            bag_logits=bag_logits,
+            bag_targets=bag_targets,
+            bag_weights=bag_weights,
+        )
+        node_aux_loss, entropy_reg = self._compute_optional_terms(
+            patch_logits=patch_logits,
+            bag_targets=bag_targets,
+            bag_ids=ordered_bag_ids,
+            bag_indices=bag_indices,
+            bag_attention=bag_attention,
+            stage=stage,
+        )
+        total_loss = self._compose_total_loss(
+            region_loss, node_aux_loss, entropy_reg
+        )
+
+        # -- logging --------------------------------------------------
+        if stage in {"train", "val", "test"}:
+            self.log(
+                f"{stage}/loss",
+                total_loss if stage == "train" else region_loss,
+                on_step=stage == "train",
+                on_epoch=True,
+                prog_bar=True,
+            )
+            if self.use_attention and stage == "train":
+                self.log(
+                    "train/region_loss",
+                    region_loss,
+                    on_step=True,
+                    on_epoch=True,
+                    prog_bar=False,
+                )
+                if node_aux_loss is not None:
+                    self.log(
+                        "train/node_aux_loss",
+                        node_aux_loss,
+                        on_step=True,
+                        on_epoch=True,
+                        prog_bar=False,
+                    )
+                if entropy_reg is not None:
+                    self.log(
+                        "train/entropy_reg",
+                        entropy_reg,
+                        on_step=True,
+                        on_epoch=True,
+                        prog_bar=False,
+                    )
+
+        if self.task_cfg["target_type"] == "binary" and stage in {
+            "train",
+            "val",
+            "test",
+        }:
+            acc = compute_binary_accuracy(bag_logits, bag_targets)
+            self.log(
+                f"{stage}/acc",
+                acc,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=stage != "train",
+            )
+
+        result = {
+            "loss": total_loss if stage == "train" else region_loss,
+            "bag_ids": list(ordered_bag_ids),
+            "bag_logits": bag_logits,
+            "bag_targets": bag_targets,
+        }
+        if self.use_attention:
+            result.update(
+                {
+                    "bag_attention": bag_attention,
+                    "region_loss": region_loss,
+                    "node_aux_loss": node_aux_loss,
+                    "entropy_reg": entropy_reg,
+                }
+            )
+        return result
+
+    # ------------------------------------------------------------------
+    # Training / validation / test / predict steps
+    # ------------------------------------------------------------------
+
     def training_step(self, batch, batch_idx):
         if not self.region_accum_enabled:
             return self._shared_step(batch, "train")["loss"]
 
+        # ---------- Region accumulation path (MIL only) ---------------
         payload = self._forward_bags(batch)
         bag_logits = payload["bag_logits"]
         bag_targets = payload["bag_targets"]
@@ -350,12 +461,14 @@ class SupervisedMILModule(L.LightningModule):
         bag_attention = payload["bag_attention"]
         patch_logits = payload["patch_logits"]
 
-        region_losses = []
-        total_losses = []
-        node_losses = []
-        entropies = []
+        region_losses: list[torch.Tensor] = []
+        total_losses: list[torch.Tensor] = []
+        node_losses: list[torch.Tensor] = []
+        entropies: list[torch.Tensor] = []
         for idx, bag_id in enumerate(ordered_bag_ids):
-            region_w = bag_weights[idx : idx + 1] if bag_weights is not None else None
+            region_w = (
+                bag_weights[idx : idx + 1] if bag_weights is not None else None
+            )
             region_loss = self._compute_region_loss(
                 bag_logits=bag_logits[idx : idx + 1],
                 bag_targets=bag_targets[idx : idx + 1],
@@ -431,7 +544,9 @@ class SupervisedMILModule(L.LightningModule):
             )
         if self.task_cfg["target_type"] == "binary":
             acc = compute_binary_accuracy(bag_logits, bag_targets)
-            self.log("train/acc", acc, on_step=False, on_epoch=True, prog_bar=False)
+            self.log(
+                "train/acc", acc, on_step=False, on_epoch=True, prog_bar=False
+            )
 
         return torch.stack(total_losses).mean()
 
@@ -443,17 +558,27 @@ class SupervisedMILModule(L.LightningModule):
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         out = self._shared_step(batch, "predict")
+        keys = ["bag_ids", "bag_logits", "bag_targets"]
+        if self.use_attention:
+            keys.append("bag_attention")
         return {
             k: out[k].detach() if hasattr(out[k], "detach") else out[k]
-            for k in ["bag_ids", "bag_logits", "bag_targets", "bag_attention"]
+            for k in keys
         }
 
-    def _flush_region_buffer_if_needed(self, *, force: bool) -> Optional[torch.Tensor]:
+    # ------------------------------------------------------------------
+    # Region accumulation helpers (MIL only)
+    # ------------------------------------------------------------------
+
+    def _flush_region_buffer_if_needed(
+        self, *, force: bool
+    ) -> Optional[torch.Tensor]:
         if not self._region_total_loss_buffer:
             return None
         if (
             not force
-            and len(self._region_total_loss_buffer) < self.region_accum_hyperbatch_size
+            and len(self._region_total_loss_buffer)
+            < self.region_accum_hyperbatch_size
         ):
             return None
 
@@ -502,15 +627,25 @@ class SupervisedMILModule(L.LightningModule):
                     prog_bar=False,
                 )
 
+    # ------------------------------------------------------------------
+    # Optimizer / scheduler
+    # ------------------------------------------------------------------
+
     def configure_optimizers(self):
         if not self._built:
             self.setup("fit")
+
         optimization_cfg = dict(self.task_cfg.get("optimization", {}))
         backbone_lr = optimization_cfg.get("backbone_lr")
         attention_lr = optimization_cfg.get("attention_lr")
 
         params = [p for p in self.parameters() if p.requires_grad]
-        if backbone_lr is not None and attention_lr is not None:
+
+        if (
+            self.use_attention
+            and backbone_lr is not None
+            and attention_lr is not None
+        ):
             seen: set[int] = set()
 
             def _collect_params(module) -> list[torch.nn.Parameter]:
@@ -527,11 +662,11 @@ class SupervisedMILModule(L.LightningModule):
                     out.append(param)
                 return out
 
-            backbone_params = _collect_params(self.encoder) + _collect_params(
-                self.graph_head
-            )
+            backbone_params = _collect_params(
+                self.encoder
+            ) + _collect_params(self.graph_head)
             attention_params = _collect_params(self.attention)
-            param_groups = []
+            param_groups: list[dict] = []
             if backbone_params:
                 param_groups.append(
                     {"params": backbone_params, "lr": float(backbone_lr)}

@@ -1,4 +1,5 @@
 _target_: src.models.bgrl_module.BGRLModule
+_recursive_: false
 
 encoder:
   input_dim: 0
