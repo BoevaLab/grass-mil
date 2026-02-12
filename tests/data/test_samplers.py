@@ -41,6 +41,12 @@ def _toy_dataset_with_graph_attrs(n_graphs: int = 2, n_nodes: int = 20):
     return graphs
 
 
+def _attach_cell_type_metadata(data, labels):
+    data.categorical_index = torch.tensor(labels, dtype=torch.long).view(-1, 1)
+    data.categorical_slices = {"cell_type": 0}
+    return data
+
+
 def test_identity_sampler_strategy():
     pytest.importorskip("torch_geometric")
     from src.data.components.samplers import get_sampler_strategy
@@ -182,3 +188,149 @@ def test_shadow_runtime_normalizes_graph_level_metadata(monkeypatch):
     assert isinstance(batch.region_id, list) and len(batch.region_id) == 2
     assert batch.graph_y.size(0) == 2
     assert batch.graph_w.size(0) == 2
+
+
+def test_runtime_shadow_config_proportional_defaults():
+    from src.data.components.samplers import RuntimeShadowConfig
+
+    cfg = RuntimeShadowConfig.from_dict({})
+    assert cfg.proportional_root_sampling is True
+    assert cfg.property_name == "cell_type"
+    assert cfg.weight_mode == "inverse"
+    assert cfg.min_weight > 0
+
+
+def test_shadow_runtime_passes_weighted_node_idx(monkeypatch):
+    pytest.importorskip("torch_geometric")
+    from src.data.components.samplers import get_sampler_strategy
+
+    unit = _toy_dataset_with_graph_attrs(n_graphs=1, n_nodes=6)[0]
+    unit = _attach_cell_type_metadata(unit, [0, 0, 0, 0, 1, 1])
+    dataset = [unit]
+    strategy = get_sampler_strategy(
+        {
+            "name": "shadow_custom",
+            "kwargs": {},
+            "runtime": {
+                "enabled": True,
+                "depth": 2,
+                "num_neighbors": 8,
+                "subgraph_batch_size": 4,
+                "proportional_root_sampling": True,
+                "property_name": "cell_type",
+                "weight_mode": "inverse",
+            },
+        }
+    )
+
+    observed = {"node_idx": None}
+
+    def _fake_unit_loader(data, **kwargs):
+        observed["node_idx"] = kwargs.get("node_idx")
+        return [data]
+
+    monkeypatch.setattr(strategy, "build_unit_loader", _fake_unit_loader)
+    loader = strategy.build_dataset_loader(
+        dataset=dataset,
+        batch_size=1,
+        num_workers=0,
+        pin_memory=False,
+        shuffle=False,
+    )
+    _ = list(loader)
+    node_idx = observed["node_idx"]
+    assert isinstance(node_idx, torch.Tensor)
+    assert node_idx.dtype == torch.long
+    assert node_idx.numel() == unit.num_nodes
+
+
+def test_shadow_runtime_falls_back_to_none_when_property_missing(monkeypatch):
+    pytest.importorskip("torch_geometric")
+    from src.data.components.samplers import get_sampler_strategy
+
+    unit = _toy_dataset_with_graph_attrs(n_graphs=1, n_nodes=6)[0]
+    dataset = [unit]
+    strategy = get_sampler_strategy(
+        {
+            "name": "shadow_custom",
+            "kwargs": {},
+            "runtime": {
+                "enabled": True,
+                "depth": 2,
+                "num_neighbors": 8,
+                "subgraph_batch_size": 4,
+                "proportional_root_sampling": True,
+                "property_name": "cell_type",
+                "weight_mode": "inverse",
+                "node_idx": None,
+            },
+        }
+    )
+
+    observed = {"node_idx": "unset"}
+
+    def _fake_unit_loader(data, **kwargs):
+        observed["node_idx"] = kwargs.get("node_idx")
+        return [data]
+
+    monkeypatch.setattr(strategy, "build_unit_loader", _fake_unit_loader)
+    loader = strategy.build_dataset_loader(
+        dataset=dataset,
+        batch_size=1,
+        num_workers=0,
+        pin_memory=False,
+        shuffle=False,
+    )
+    _ = list(loader)
+    assert observed["node_idx"] is None
+
+
+def test_shadow_runtime_can_disable_proportional_sampling(monkeypatch):
+    pytest.importorskip("torch_geometric")
+    from src.data.components.samplers import get_sampler_strategy
+
+    unit = _toy_dataset_with_graph_attrs(n_graphs=1, n_nodes=6)[0]
+    unit = _attach_cell_type_metadata(unit, [0, 0, 0, 0, 1, 1])
+    dataset = [unit]
+    explicit_node_idx = torch.tensor([0, 1], dtype=torch.long)
+    strategy = get_sampler_strategy(
+        {
+            "name": "shadow_custom",
+            "kwargs": {},
+            "runtime": {
+                "enabled": True,
+                "depth": 2,
+                "num_neighbors": 8,
+                "subgraph_batch_size": 4,
+                "proportional_root_sampling": False,
+                "property_name": "cell_type",
+                "weight_mode": "inverse",
+                "node_idx": explicit_node_idx,
+            },
+        }
+    )
+
+    observed = {"node_idx": None}
+
+    def _fake_unit_loader(data, **kwargs):
+        observed["node_idx"] = kwargs.get("node_idx")
+        return [data]
+
+    monkeypatch.setattr(strategy, "build_unit_loader", _fake_unit_loader)
+    loader = strategy.build_dataset_loader(
+        dataset=dataset,
+        batch_size=1,
+        num_workers=0,
+        pin_memory=False,
+        shuffle=False,
+    )
+    _ = list(loader)
+    assert torch.equal(observed["node_idx"], explicit_node_idx)
+
+
+@pytest.mark.parametrize("weight_mode", ["inverse", "sqrt_inverse", "proportional"])
+def test_shadow_runtime_accepts_weight_modes(weight_mode):
+    from src.data.components.samplers import RuntimeShadowConfig
+
+    cfg = RuntimeShadowConfig.from_dict({"weight_mode": weight_mode})
+    assert cfg.weight_mode == weight_mode

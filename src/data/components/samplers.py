@@ -48,10 +48,24 @@ class RuntimeShadowConfig:
     replace: bool = False
     shuffle_subgraphs: bool = True
     node_idx: Optional[torch.Tensor] = None
+    proportional_root_sampling: bool = True
+    property_name: str = "cell_type"
+    weight_mode: str = "inverse"
+    min_weight: float = 1e-6
 
     @classmethod
     def from_dict(cls, cfg: Optional[Dict[str, Any]]) -> "RuntimeShadowConfig":
         cfg = cfg or {}
+        weight_mode = str(cfg.get("weight_mode", "inverse")).strip().lower()
+        allowed_weight_modes = {"inverse", "sqrt_inverse", "proportional"}
+        if weight_mode not in allowed_weight_modes:
+            raise ValueError(
+                f"Unsupported weight_mode '{weight_mode}'. "
+                f"Expected one of {sorted(allowed_weight_modes)}."
+            )
+        min_weight = float(cfg.get("min_weight", 1e-6))
+        if min_weight <= 0:
+            min_weight = 1e-6
         return cls(
             enabled=bool(cfg.get("enabled", False)),
             depth=int(cfg.get("depth", 2)),
@@ -60,7 +74,68 @@ class RuntimeShadowConfig:
             replace=bool(cfg.get("replace", False)),
             shuffle_subgraphs=bool(cfg.get("shuffle_subgraphs", True)),
             node_idx=cfg.get("node_idx"),
+            proportional_root_sampling=bool(cfg.get("proportional_root_sampling", True)),
+            property_name=str(cfg.get("property_name", "cell_type")),
+            weight_mode=weight_mode,
+            min_weight=min_weight,
         )
+
+
+def _build_weighted_node_idx(
+    data: Data, *, property_name: str, weight_mode: str, min_weight: float
+) -> Optional[torch.Tensor]:
+    if not hasattr(data, "categorical_index") or not hasattr(data, "categorical_slices"):
+        return None
+    categorical_index = getattr(data, "categorical_index")
+    categorical_slices = getattr(data, "categorical_slices")
+    if not isinstance(categorical_slices, dict):
+        return None
+    if property_name not in categorical_slices:
+        return None
+    if not isinstance(categorical_index, torch.Tensor) or categorical_index.numel() == 0:
+        return None
+    if categorical_index.dim() != 2:
+        return None
+
+    prop_col = int(categorical_slices[property_name])
+    if prop_col < 0 or prop_col >= int(categorical_index.size(1)):
+        return None
+
+    node_labels = categorical_index[:, prop_col].long().view(-1)
+    if node_labels.numel() == 0:
+        return None
+
+    unique_labels, inverse, counts = torch.unique(
+        node_labels, sorted=False, return_inverse=True, return_counts=True
+    )
+    if unique_labels.numel() == 0:
+        return None
+
+    counts = counts.float()
+    if weight_mode == "inverse":
+        class_weights = 1.0 / counts
+    elif weight_mode == "sqrt_inverse":
+        class_weights = 1.0 / torch.sqrt(counts)
+    elif weight_mode == "proportional":
+        class_weights = counts / counts.sum()
+    else:
+        return None
+
+    class_weights = torch.clamp(class_weights, min=float(min_weight))
+    node_weights = class_weights[inverse]
+    weight_sum = node_weights.sum()
+    if not torch.isfinite(weight_sum) or float(weight_sum) <= 0.0:
+        return None
+    probs = node_weights / weight_sum
+    if not torch.isfinite(probs).all():
+        return None
+
+    num_samples = int(getattr(data, "num_nodes", node_labels.numel()))
+    if num_samples <= 0:
+        num_samples = int(node_labels.numel())
+    if num_samples <= 0:
+        return None
+    return torch.multinomial(probs, num_samples=num_samples, replacement=True).long()
 
 
 class BaseSamplerStrategy:
@@ -124,12 +199,22 @@ class _RuntimeUnitShadowDatasetLoader:
 
         for idx in indices.tolist():
             unit_data = self.dataset[idx]
+            effective_node_idx = self.runtime.node_idx
+            if self.runtime.proportional_root_sampling:
+                computed_node_idx = _build_weighted_node_idx(
+                    unit_data,
+                    property_name=self.runtime.property_name,
+                    weight_mode=self.runtime.weight_mode,
+                    min_weight=self.runtime.min_weight,
+                )
+                if computed_node_idx is not None:
+                    effective_node_idx = computed_node_idx
             loader = self.strategy.build_unit_loader(
                 data=unit_data,
                 depth=int(self.runtime.depth),
                 num_neighbors=int(self.runtime.num_neighbors),
                 batch_size=subgraph_batch_size,
-                node_idx=self.runtime.node_idx,
+                node_idx=effective_node_idx,
                 replace=bool(self.runtime.replace),
                 shuffle=bool(self.runtime.shuffle_subgraphs and self.shuffle),
                 transform=self.kwargs.get("transform"),
