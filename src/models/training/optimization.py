@@ -12,6 +12,16 @@ def instantiate_optimizer(
     params: Iterable[torch.nn.Parameter],
 ) -> torch.optim.Optimizer:
     opt_cfg = cfg if isinstance(cfg, DictConfig) else OmegaConf.create(cfg)
+    # When *params* is a list of param-group dicts (used for per-component
+    # learning rates), Hydra's instantiate would wrap them into OmegaConf
+    # containers and lose tensor references.  Fall back to direct construction.
+    if isinstance(params, list) and params and isinstance(params[0], dict):
+        resolved = OmegaConf.to_container(opt_cfg, resolve=True)
+        target = resolved.pop("_target_")
+        resolved.pop("_recursive_", None)
+        resolved.pop("_convert_", None)
+        cls = hydra.utils.get_class(target)
+        return cls(params, **resolved)
     return hydra.utils.instantiate(opt_cfg, params=params)
 
 
