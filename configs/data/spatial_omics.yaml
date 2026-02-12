@@ -69,6 +69,13 @@ feature_reducer:
 sampler:
   name: shadow_custom
   kwargs: {}
+  runtime:
+    enabled: true
+    depth: 2
+    num_neighbors: 8
+    subgraph_batch_size: 32
+    replace: false
+    shuffle_subgraphs: true
 
 tiling:
   tile_size_um: 200.0

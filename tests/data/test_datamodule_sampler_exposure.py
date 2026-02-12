@@ -71,7 +71,24 @@ def test_datamodule_sampler_defaults_to_identity(tmp_path: Path):
 
 
 def test_datamodule_exposes_configured_sampler_strategy(tmp_path: Path):
-    dm = _minimal_datamodule(tmp_path, sampler={"name": "shadow_custom", "kwargs": {}})
+    dm = _minimal_datamodule(
+        tmp_path,
+        sampler={
+            "name": "shadow_custom",
+            "kwargs": {},
+            "runtime": {
+                "enabled": True,
+                "depth": 2,
+                "num_neighbors": 8,
+                "subgraph_batch_size": 4,
+                "replace": False,
+                "shuffle_subgraphs": True,
+            },
+        },
+    )
     strategy = dm._ensure_sampler_strategy()
     assert strategy.__class__.__name__ == "ShadowCustomStrategy"
     assert dm.sampler_strategy is strategy
+    assert strategy.runtime.enabled is True
+    assert strategy.runtime.depth == 2
+    assert strategy.runtime.num_neighbors == 8

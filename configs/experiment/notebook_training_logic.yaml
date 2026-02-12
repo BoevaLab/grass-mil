@@ -33,3 +33,12 @@ data:
       subgraph_batch_size: 8
       replace: false
       shuffle_subgraphs: true
+
+trainer:
+  accelerator: cpu
+  devices: 1
+  max_epochs: 1
+  limit_train_batches: 2
+  limit_val_batches: 1
+  limit_test_batches: 1
+  log_every_n_steps: 1

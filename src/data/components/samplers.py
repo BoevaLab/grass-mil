@@ -26,12 +26,41 @@ except Exception:  # pragma: no cover
 class SamplerConfig:
     name: str
     kwargs: Dict[str, Any]
+    runtime: Dict[str, Any]
 
     @classmethod
     def from_dict(cls, cfg: Optional[Dict[str, Any]]) -> "SamplerConfig":
         if cfg is None:
-            return cls(name="identity", kwargs={})
-        return cls(name=cfg.get("name", "identity"), kwargs=cfg.get("kwargs", {}))
+            return cls(name="identity", kwargs={}, runtime={})
+        return cls(
+            name=cfg.get("name", "identity"),
+            kwargs=cfg.get("kwargs", {}),
+            runtime=cfg.get("runtime", {}),
+        )
+
+
+@dataclass
+class RuntimeShadowConfig:
+    enabled: bool = False
+    depth: int = 2
+    num_neighbors: int = 8
+    subgraph_batch_size: int = 32
+    replace: bool = False
+    shuffle_subgraphs: bool = True
+    node_idx: Optional[torch.Tensor] = None
+
+    @classmethod
+    def from_dict(cls, cfg: Optional[Dict[str, Any]]) -> "RuntimeShadowConfig":
+        cfg = cfg or {}
+        return cls(
+            enabled=bool(cfg.get("enabled", False)),
+            depth=int(cfg.get("depth", 2)),
+            num_neighbors=int(cfg.get("num_neighbors", 8)),
+            subgraph_batch_size=int(cfg.get("subgraph_batch_size", 32)),
+            replace=bool(cfg.get("replace", False)),
+            shuffle_subgraphs=bool(cfg.get("shuffle_subgraphs", True)),
+            node_idx=cfg.get("node_idx"),
+        )
 
 
 class BaseSamplerStrategy:
@@ -53,6 +82,64 @@ class BaseSamplerStrategy:
 
     def build_unit_loader(self, data: Data, **kwargs: Any):
         raise NotImplementedError
+
+
+class _RuntimeUnitShadowDatasetLoader:
+    def __init__(
+        self,
+        *,
+        dataset: Dataset,
+        strategy: BaseSamplerStrategy,
+        batch_size: int,
+        runtime: RuntimeShadowConfig,
+        num_workers: int = 0,
+        pin_memory: bool = False,
+        shuffle: bool = True,
+        **kwargs: Any,
+    ):
+        self.dataset = dataset
+        self.strategy = strategy
+        self.dataset_batch_size = batch_size
+        self.runtime = runtime
+        self.num_workers = num_workers
+        self.pin_memory = pin_memory
+        self.shuffle = shuffle
+        self.kwargs = kwargs
+
+    def __len__(self) -> int:
+        # Estimated to keep Lightning progress plumbing stable.
+        return len(self.dataset)
+
+    def __iter__(self):
+        if len(self.dataset) == 0:
+            return
+
+        indices = torch.arange(len(self.dataset), dtype=torch.long)
+        if self.shuffle:
+            indices = indices[torch.randperm(len(indices))]
+
+        subgraph_batch_size = int(self.runtime.subgraph_batch_size)
+        if subgraph_batch_size <= 0:
+            subgraph_batch_size = max(1, int(self.dataset_batch_size))
+
+        for idx in indices.tolist():
+            unit_data = self.dataset[idx]
+            loader = self.strategy.build_unit_loader(
+                data=unit_data,
+                depth=int(self.runtime.depth),
+                num_neighbors=int(self.runtime.num_neighbors),
+                batch_size=subgraph_batch_size,
+                node_idx=self.runtime.node_idx,
+                replace=bool(self.runtime.replace),
+                shuffle=bool(self.runtime.shuffle_subgraphs and self.shuffle),
+                transform=self.kwargs.get("transform"),
+                num_workers=self.num_workers,
+                pin_memory=self.pin_memory,
+                persistent_workers=self.kwargs.get("persistent_workers", False),
+                prefetch_factor=self.kwargs.get("prefetch_factor", 2),
+            )
+            for sub_batch in loader:
+                yield _normalize_shadow_batch(sub_batch, unit_data)
 
 
 class IdentityBatchStrategy(BaseSamplerStrategy):
@@ -89,6 +176,9 @@ class IdentityBatchStrategy(BaseSamplerStrategy):
 
 class ShadowNativeStrategy(BaseSamplerStrategy):
     """Native PyG ShaDow sampler, to be used per graph unit."""
+    def __init__(self, runtime: Optional[Dict[str, Any]] = None, **kwargs: Any):
+        self.runtime = RuntimeShadowConfig.from_dict(runtime)
+        self.kwargs = kwargs
 
     def build_dataset_loader(
         self,
@@ -99,6 +189,17 @@ class ShadowNativeStrategy(BaseSamplerStrategy):
         shuffle: bool = True,
         **kwargs: Any,
     ):
+        if self.runtime.enabled:
+            return _RuntimeUnitShadowDatasetLoader(
+                dataset=dataset,
+                strategy=self,
+                batch_size=batch_size,
+                runtime=self.runtime,
+                num_workers=num_workers,
+                pin_memory=pin_memory,
+                shuffle=shuffle,
+                **kwargs,
+            )
         identity = IdentityBatchStrategy()
         return identity.build_dataset_loader(
             dataset=dataset,
@@ -145,6 +246,9 @@ class ShadowNativeStrategy(BaseSamplerStrategy):
 
 class ShadowCustomStrategy(BaseSamplerStrategy):
     """Custom ShaDow sampler with optional per-subgraph transform support."""
+    def __init__(self, runtime: Optional[Dict[str, Any]] = None, **kwargs: Any):
+        self.runtime = RuntimeShadowConfig.from_dict(runtime)
+        self.kwargs = kwargs
 
     def build_dataset_loader(
         self,
@@ -155,6 +259,17 @@ class ShadowCustomStrategy(BaseSamplerStrategy):
         shuffle: bool = True,
         **kwargs: Any,
     ):
+        if self.runtime.enabled:
+            return _RuntimeUnitShadowDatasetLoader(
+                dataset=dataset,
+                strategy=self,
+                batch_size=batch_size,
+                runtime=self.runtime,
+                num_workers=num_workers,
+                pin_memory=pin_memory,
+                shuffle=shuffle,
+                **kwargs,
+            )
         identity = IdentityBatchStrategy()
         return identity.build_dataset_loader(
             dataset=dataset,
@@ -177,6 +292,19 @@ class ShadowCustomStrategy(BaseSamplerStrategy):
         transform: Optional[Callable[[Data], Data]] = None,
         **kwargs: Any,
     ):
+        if not WITH_TORCH_SPARSE:
+            native = ShadowNativeStrategy(runtime={"enabled": False})
+            return native.build_unit_loader(
+                data=data,
+                depth=depth,
+                num_neighbors=num_neighbors,
+                batch_size=batch_size,
+                node_idx=node_idx,
+                replace=replace,
+                shuffle=shuffle,
+                transform=transform,
+                **kwargs,
+            )
         return _ShaDowKHopSamplerWithTransform(
             data=data,
             depth=depth,
@@ -191,6 +319,57 @@ class ShadowCustomStrategy(BaseSamplerStrategy):
             persistent_workers=kwargs.get("persistent_workers", False),
             prefetch_factor=kwargs.get("prefetch_factor", 2),
         )
+
+
+def _expand_graph_level_value(value: Any, count: int) -> Any:
+    if count <= 0:
+        return value
+    if isinstance(value, torch.Tensor):
+        if value.dim() == 0:
+            return value.repeat(count)
+        if value.size(0) == count:
+            return value
+        if value.size(0) == 1:
+            repeats = [count] + [1] * (value.dim() - 1)
+            return value.repeat(*repeats)
+        return value
+    if isinstance(value, (str, bytes)):
+        return [value] * count
+    if isinstance(value, (list, tuple)):
+        if len(value) == count:
+            return list(value)
+        if len(value) == 1:
+            return [value[0]] * count
+        return list(value)
+    return [value] * count
+
+
+def _ensure_edge_index(batch: Batch) -> Batch:
+    if hasattr(batch, "edge_index") and batch.edge_index is not None:
+        return batch
+    if not hasattr(batch, "adj_t"):
+        return batch
+    row, col, edge_val = batch.adj_t.t().coo()
+    batch.edge_index = torch.stack([row, col], dim=0)
+    if edge_val is not None and not hasattr(batch, "edge_attr"):
+        batch.edge_attr = edge_val
+    return batch
+
+
+def _normalize_shadow_batch(batch: Batch, source_data: Optional[Data] = None) -> Batch:
+    batch = _ensure_edge_index(batch)
+    num_subgraphs = int(len(batch.ptr) - 1) if hasattr(batch, "ptr") else 1
+
+    for key in ["graph_y", "graph_w", "sample_id", "region_id", "patch_id"]:
+        if hasattr(batch, key):
+            setattr(batch, key, _expand_graph_level_value(getattr(batch, key), num_subgraphs))
+        elif source_data is not None and hasattr(source_data, key):
+            setattr(
+                batch,
+                key,
+                _expand_graph_level_value(getattr(source_data, key), num_subgraphs),
+            )
+    return batch
 
 
 _SAMPLER_REGISTRY: Dict[str, Callable[..., BaseSamplerStrategy]] = {
@@ -219,7 +398,9 @@ def get_sampler_strategy(
         raise ValueError(
             f"Unknown sampler strategy '{cfg.name}'. Available: {sorted(_SAMPLER_REGISTRY)}"
         )
-    return _SAMPLER_REGISTRY[name](**cfg.kwargs)
+    if name == "identity":
+        return _SAMPLER_REGISTRY[name](**cfg.kwargs)
+    return _SAMPLER_REGISTRY[name](runtime=cfg.runtime, **cfg.kwargs)
 
 
 class _ShaDowKHopSamplerWithTransform(torch.utils.data.DataLoader):
@@ -306,6 +487,7 @@ class _ShaDowKHopSamplerWithTransform(torch.utils.data.DataLoader):
             else:
                 batch[key] = val
 
+        batch = _normalize_shadow_batch(batch, self.data)
         if self.transform is not None:
             batch = self._apply_transform_to_each_subgraph(batch)
         return batch
@@ -333,6 +515,11 @@ class _ShaDowKHopSamplerWithTransform(torch.utils.data.DataLoader):
             for key in ["graph_y", "graph_w", "sample_id", "region_id", "patch_id"]:
                 if hasattr(batch, key):
                     val = getattr(batch, key)
-                    setattr(sub_data, key, val)
+                    if isinstance(val, torch.Tensor) and val.dim() > 0 and val.size(0) > i:
+                        setattr(sub_data, key, val[i : i + 1])
+                    elif isinstance(val, list) and len(val) > i:
+                        setattr(sub_data, key, [val[i]])
+                    else:
+                        setattr(sub_data, key, val)
             processed.append(self.transform(sub_data))
         return Batch.from_data_list(processed)

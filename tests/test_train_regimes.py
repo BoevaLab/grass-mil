@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+import rootutils
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import OmegaConf, open_dict
 from src.train import train
@@ -104,6 +105,42 @@ def test_training_regimes_fast_dev_run(
         if use_pretrained:
             cfg_train.model.init_from_ckpt = _make_pretrain_ckpt(tmp_path)
             cfg_train.model.init_strict = False
+
+    HydraConfig().set_config(cfg_train)
+    metric_dict, _ = train(cfg_train)
+    assert "train/loss" in metric_dict
+
+
+def test_runtime_shadow_path_with_real_datamodule(cfg_train):
+    root = Path(rootutils.find_root(indicator=".project-root"))
+    with open_dict(cfg_train):
+        cfg_train.data = OmegaConf.load(Path("configs/data/spatial_omics.yaml"))
+        cfg_train.data.raw_manifest_path = str(root / "data" / "dummy" / "manifest.csv")
+        cfg_train.data.processed_dir = str(root / "data" / "dummy" / "processed")
+        cfg_train.data.num_workers = 0
+        cfg_train.data.pin_memory = False
+        cfg_train.data.sampler.runtime.enabled = True
+        cfg_train.data.sampler.runtime.depth = 2
+        cfg_train.data.sampler.runtime.num_neighbors = 8
+        cfg_train.data.sampler.runtime.subgraph_batch_size = 8
+
+        cfg_train.task = _load_task_cfg("finetune_mean")
+        cfg_train.model = _load_model_cfg("supervised_mean_module")
+        cfg_train.optim = OmegaConf.load(Path("configs/optim/adamw.yaml"))
+        cfg_train.scheduler = OmegaConf.load(Path("configs/scheduler/cosine_epoch.yaml"))
+        cfg_train.model.task = cfg_train.task
+        cfg_train.model.optim = cfg_train.optim
+        cfg_train.model.scheduler = cfg_train.scheduler
+        cfg_train.model.encoder.input_dim = 0
+        cfg_train.model._recursive_ = False
+
+        cfg_train.callbacks = OmegaConf.create({})
+        cfg_train.logger = None
+        cfg_train.trainer.fast_dev_run = True
+        cfg_train.trainer.accelerator = "cpu"
+        cfg_train.trainer.devices = 1
+        cfg_train.train = True
+        cfg_train.test = False
 
     HydraConfig().set_config(cfg_train)
     metric_dict, _ = train(cfg_train)
