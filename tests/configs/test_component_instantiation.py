@@ -32,6 +32,23 @@ def test_model_component_yaml_instantiation():
         assert obj is not None
 
 
+def test_training_module_yaml_instantiation():
+    base = Path("configs/model")
+    cases = [
+        ("bgrl_module.yaml", "pretrain_bgrl.yaml", "cosine_step.yaml"),
+        ("supervised_mean_module.yaml", "finetune_mean.yaml", "cosine_epoch.yaml"),
+        ("supervised_mil_module.yaml", "finetune_mil.yaml", "cosine_epoch.yaml"),
+    ]
+    for model_name, task_name, scheduler_name in cases:
+        path = base / model_name
+        cfg = OmegaConf.load(path)
+        cfg.optim = OmegaConf.load(Path("configs/optim/adamw.yaml"))
+        cfg.scheduler = OmegaConf.load(Path("configs/scheduler") / scheduler_name)
+        cfg.task = OmegaConf.load(Path("configs/task") / task_name).task
+        obj = hydra.utils.instantiate(cfg)
+        assert obj is not None
+
+
 def test_sampler_strategy_resolution():
     from src.data.components.samplers import get_sampler_strategy
 

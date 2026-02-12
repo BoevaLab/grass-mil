@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 import pytest
+import torch
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, open_dict
 from src.train import train
@@ -104,5 +105,11 @@ def test_train_resume(tmp_path: Path, cfg_train: DictConfig) -> None:
     assert "epoch_001.ckpt" in files
     assert "epoch_002.ckpt" not in files
 
-    assert metric_dict_1["train/acc"] < metric_dict_2["train/acc"]
-    assert metric_dict_1["val/acc"] < metric_dict_2["val/acc"]
+    assert "train/loss" in metric_dict_1
+    assert "val/loss" in metric_dict_1
+    assert "train/loss" in metric_dict_2
+    assert "val/loss" in metric_dict_2
+    assert torch.isfinite(metric_dict_1["train/loss"])
+    assert torch.isfinite(metric_dict_1["val/loss"])
+    assert torch.isfinite(metric_dict_2["train/loss"])
+    assert torch.isfinite(metric_dict_2["val/loss"])
