@@ -67,7 +67,9 @@ def validate_task_config(task_cfg: Dict[str, Any]) -> None:
         )
 
 
-def _resolve_encoder_cfg(encoder_cfg: Dict[str, Any], inferred_input_dim: int) -> Dict[str, Any]:
+def _resolve_encoder_cfg(
+    encoder_cfg: Dict[str, Any], inferred_input_dim: int
+) -> Dict[str, Any]:
     cfg = dict(encoder_cfg)
     if cfg.get("input_dim", 0) in (None, 0):
         if inferred_input_dim <= 0:
@@ -281,21 +283,6 @@ def compute_supervised_loss(
     )
 
 
-def reduce_region_losses_hyperbatch(
-    region_losses: Sequence[torch.Tensor], hyperbatch_size: int
-) -> torch.Tensor:
-    if not region_losses:
-        raise ValueError("region_losses must contain at least one loss tensor.")
-    stacked = torch.stack([loss.reshape(()) for loss in region_losses], dim=0)
-    if hyperbatch_size <= 1 or stacked.numel() <= hyperbatch_size:
-        return stacked.mean()
-
-    chunks = []
-    for start in range(0, stacked.numel(), hyperbatch_size):
-        chunks.append(stacked[start : start + hyperbatch_size].mean())
-    return torch.stack(chunks, dim=0).mean()
-
-
 def build_mil_aux_targets(
     *,
     bag_targets: torch.Tensor,
@@ -350,7 +337,9 @@ def compute_aux_node_loss(
     return loss.mean()
 
 
-def compute_entropy_regularization(values: torch.Tensor, eps: float = 1.0e-8) -> torch.Tensor:
+def compute_entropy_regularization(
+    values: torch.Tensor, eps: float = 1.0e-8
+) -> torch.Tensor:
     probs = values.float().clamp(min=eps, max=1.0)
     return -(probs * torch.log(probs + eps)).mean()
 
@@ -375,14 +364,14 @@ class CosineWarmup:
         step = max(0, min(step, self.total_steps))
         if self.warmup_steps > 0 and step < self.warmup_steps:
             return self.base_value * float(step + 1) / float(self.warmup_steps)
-        progress = (step - self.warmup_steps) / max(1, self.total_steps - self.warmup_steps)
+        progress = (step - self.warmup_steps) / max(
+            1, self.total_steps - self.warmup_steps
+        )
         cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
         return self.min_value + (self.base_value - self.min_value) * cosine
 
 
-def augment_graph(
-    batch: Data, *, drop_edge_p: float, drop_feat_p: float
-) -> Data:
+def augment_graph(batch: Data, *, drop_edge_p: float, drop_feat_p: float) -> Data:
     aug = batch.clone()
     if drop_feat_p > 0 and hasattr(aug, "x") and aug.x.numel() > 0:
         feat_mask = torch.rand_like(aug.x) > drop_feat_p
@@ -408,7 +397,9 @@ def load_state_dict_with_optional_mapping(
     if not ckpt_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {init_from_ckpt}")
     raw = torch.load(str(ckpt_path), map_location="cpu")
-    state_dict = raw["state_dict"] if isinstance(raw, dict) and "state_dict" in raw else raw
+    state_dict = (
+        raw["state_dict"] if isinstance(raw, dict) and "state_dict" in raw else raw
+    )
     if not isinstance(state_dict, dict):
         raise ValueError("Checkpoint must resolve to a state_dict dictionary.")
     remapped = remap_encoder_keys(state_dict, encoder_init_map=encoder_init_map)
@@ -429,11 +420,11 @@ def remap_encoder_keys(
     for key, value in state_dict.items():
         new_key = key
         if key.startswith("online_encoder."):
-            new_key = f"encoder.{key[len('online_encoder.'):]}"
+            new_key = f"encoder.{key[len('online_encoder.') :]}"
         elif key.startswith("ssl_model.online_encoder."):
-            new_key = f"encoder.{key[len('ssl_model.online_encoder.'):]}"
+            new_key = f"encoder.{key[len('ssl_model.online_encoder.') :]}"
         elif key.startswith("model.online_encoder."):
-            new_key = f"encoder.{key[len('model.online_encoder.'):]}"
+            new_key = f"encoder.{key[len('model.online_encoder.') :]}"
         remapped[new_key] = value
     return remapped
 

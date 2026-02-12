@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 import lightning as L
-import torch
 
 from .runtime import (
     aggregate_bag_logits_mean,
@@ -125,11 +124,25 @@ class SupervisedMeanModule(L.LightningModule):
         )
         if stage in {"train", "val", "test"}:
             self.log(
-                f"{stage}/loss", loss, on_step=stage == "train", on_epoch=True, prog_bar=True
+                f"{stage}/loss",
+                loss,
+                on_step=stage == "train",
+                on_epoch=True,
+                prog_bar=True,
             )
-        if self.task_cfg["target_type"] == "binary" and stage in {"train", "val", "test"}:
+        if self.task_cfg["target_type"] == "binary" and stage in {
+            "train",
+            "val",
+            "test",
+        }:
             acc = compute_binary_accuracy(bag_logits, bag_targets)
-            self.log(f"{stage}/acc", acc, on_step=False, on_epoch=True, prog_bar=stage != "train")
+            self.log(
+                f"{stage}/acc",
+                acc,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=stage != "train",
+            )
         return {
             "loss": loss,
             "bag_ids": ordered_bag_ids,
@@ -160,5 +173,9 @@ class SupervisedMeanModule(L.LightningModule):
             return optimizer
         return {
             "optimizer": optimizer,
-            "lr_scheduler": {"scheduler": scheduler, "interval": "epoch", "frequency": 1},
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",
+                "frequency": 1,
+            },
         }

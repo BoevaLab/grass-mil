@@ -3,7 +3,6 @@ from pathlib import Path
 import pytest
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import OmegaConf, open_dict
-
 from src.train import train
 
 
@@ -33,7 +32,10 @@ def _make_pretrain_ckpt(path: Path) -> str:
         },
         ssl={"method": "bgrl", "predictor": {"hidden_size": 64}},
         optim={"_target_": "torch.optim.AdamW", "lr": 1e-3, "weight_decay": 0.0},
-        scheduler={"_target_": "torch.optim.lr_scheduler.CosineAnnealingLR", "T_max": 10},
+        scheduler={
+            "_target_": "torch.optim.lr_scheduler.CosineAnnealingLR",
+            "T_max": 10,
+        },
         task={"total_steps": 10},
     )
     module.setup("fit")
@@ -71,14 +73,18 @@ def test_training_regimes_fast_dev_run(
         cfg_train.task = _load_task_cfg(task_name)
         cfg_train.model = _load_model_cfg(model_name)
         cfg_train.optim = OmegaConf.load(Path("configs/optim/adamw.yaml"))
-        scheduler_name = "cosine_step.yaml" if task_name == "pretrain_bgrl" else "cosine_epoch.yaml"
+        scheduler_name = (
+            "cosine_step.yaml" if task_name == "pretrain_bgrl" else "cosine_epoch.yaml"
+        )
         cfg_train.scheduler = OmegaConf.load(Path("configs/scheduler") / scheduler_name)
         cfg_train.model.encoder.input_dim = 8
         cfg_train.model.task = cfg_train.task
         cfg_train.model.optim = cfg_train.optim
         cfg_train.model.scheduler = cfg_train.scheduler
         if advanced_mil:
-            cfg_train.model.task.hyperbatch_size = 2
+            cfg_train.model.task.region_accumulation.enabled = True
+            cfg_train.model.task.region_accumulation.hyperbatch_size = 2
+            cfg_train.model.task.region_accumulation.flush_on_epoch_end = True
             cfg_train.model.task.node_aux.enabled = True
             cfg_train.model.task.node_aux.target_mode = "attention_shaped_ti"
             cfg_train.model.task.node_aux.loss_mode = "bce"

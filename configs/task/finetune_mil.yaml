@@ -10,8 +10,13 @@ task:
   target_type: binary
   target_columns: null
   loss: categorical_bce
-  # Optional hyperbatch-style reduction over region losses.
-  hyperbatch_size: 0
+  # Hyperbatch has one meaning only:
+  # number of regions accumulated before one optimizer/scheduler step.
+  region_accumulation:
+    enabled: false
+    mode: manual_region_buffer
+    hyperbatch_size: 8
+    flush_on_epoch_end: true
   node_aux:
     enabled: false
     # graph_label | attention_shaped_ti

@@ -59,13 +59,14 @@ def test_compute_supervised_loss_routes():
 
 def test_attention_bag_aggregation_shapes():
     import torch
-
     from src.models.components.attention import AttnNetGatedProjected
     from src.models.runtime import aggregate_bag_logits_attention
 
     logits = torch.randn(5, 1)
     emb = torch.randn(5, 8)
-    att = AttnNetGatedProjected(input_dim=8, projection_dim=4, hidden_dim=2, n_classes=1)
+    att = AttnNetGatedProjected(
+        input_dim=8, projection_dim=4, hidden_dim=2, n_classes=1
+    )
     grouped = {"r0": [0, 1, 2], "r1": [3, 4]}
     bag_logits, bag_ids, bag_attn, bag_indices = aggregate_bag_logits_attention(
         logits=logits,
@@ -102,15 +103,6 @@ def test_build_mil_aux_targets_attention_shaped():
     assert weights.shape == (5, 1)
     assert torch.all(targets[:2] >= 0.5)
     assert torch.all(targets[2:] <= 0.5)
-
-
-def test_reduce_region_losses_hyperbatch():
-    from src.models.runtime import reduce_region_losses_hyperbatch
-
-    losses = [torch.tensor(1.0), torch.tensor(2.0), torch.tensor(3.0), torch.tensor(4.0)]
-    reduced = reduce_region_losses_hyperbatch(losses, hyperbatch_size=2)
-    assert reduced.ndim == 0
-    assert abs(float(reduced) - 2.5) < 1e-6
 
 
 def test_compute_aux_and_entropy_terms():
