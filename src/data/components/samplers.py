@@ -74,7 +74,9 @@ class RuntimeShadowConfig:
             replace=bool(cfg.get("replace", False)),
             shuffle_subgraphs=bool(cfg.get("shuffle_subgraphs", True)),
             node_idx=cfg.get("node_idx"),
-            proportional_root_sampling=bool(cfg.get("proportional_root_sampling", True)),
+            proportional_root_sampling=bool(
+                cfg.get("proportional_root_sampling", True)
+            ),
             property_name=str(cfg.get("property_name", "cell_type")),
             weight_mode=weight_mode,
             min_weight=min_weight,
@@ -84,7 +86,9 @@ class RuntimeShadowConfig:
 def _build_weighted_node_idx(
     data: Data, *, property_name: str, weight_mode: str, min_weight: float
 ) -> Optional[torch.Tensor]:
-    if not hasattr(data, "categorical_index") or not hasattr(data, "categorical_slices"):
+    if not hasattr(data, "categorical_index") or not hasattr(
+        data, "categorical_slices"
+    ):
         return None
     categorical_index = getattr(data, "categorical_index")
     categorical_slices = getattr(data, "categorical_slices")
@@ -92,7 +96,10 @@ def _build_weighted_node_idx(
         return None
     if property_name not in categorical_slices:
         return None
-    if not isinstance(categorical_index, torch.Tensor) or categorical_index.numel() == 0:
+    if (
+        not isinstance(categorical_index, torch.Tensor)
+        or categorical_index.numel() == 0
+    ):
         return None
     if categorical_index.dim() != 2:
         return None
@@ -209,6 +216,15 @@ class _RuntimeUnitShadowDatasetLoader:
                 )
                 if computed_node_idx is not None:
                     effective_node_idx = computed_node_idx
+            unit_loader_kwargs: Dict[str, Any] = {
+                "num_workers": self.num_workers,
+                "pin_memory": self.pin_memory,
+                "persistent_workers": self.kwargs.get("persistent_workers", False)
+                if self.num_workers > 0
+                else False,
+            }
+            if self.num_workers > 0 and "prefetch_factor" in self.kwargs:
+                unit_loader_kwargs["prefetch_factor"] = self.kwargs["prefetch_factor"]
             loader = self.strategy.build_unit_loader(
                 data=unit_data,
                 depth=int(self.runtime.depth),
@@ -218,10 +234,7 @@ class _RuntimeUnitShadowDatasetLoader:
                 replace=bool(self.runtime.replace),
                 shuffle=bool(self.runtime.shuffle_subgraphs and self.shuffle),
                 transform=self.kwargs.get("transform"),
-                num_workers=self.num_workers,
-                pin_memory=self.pin_memory,
-                persistent_workers=self.kwargs.get("persistent_workers", False),
-                prefetch_factor=self.kwargs.get("prefetch_factor", 2),
+                **unit_loader_kwargs,
             )
             for sub_batch in loader:
                 yield _normalize_shadow_batch(sub_batch, unit_data)
@@ -261,6 +274,7 @@ class IdentityBatchStrategy(BaseSamplerStrategy):
 
 class ShadowNativeStrategy(BaseSamplerStrategy):
     """Native PyG ShaDow sampler, to be used per graph unit."""
+
     def __init__(self, runtime: Optional[Dict[str, Any]] = None, **kwargs: Any):
         self.runtime = RuntimeShadowConfig.from_dict(runtime)
         self.kwargs = kwargs
@@ -314,23 +328,29 @@ class ShadowNativeStrategy(BaseSamplerStrategy):
                 "ShadowNativeStrategy does not support strict post-hoc per-subgraph transforms. "
                 "Use ShadowCustomStrategy instead."
             )
-        return ShaDowKHopSampler(
-            data=data,
-            depth=depth,
-            num_neighbors=num_neighbors,
-            node_idx=node_idx,
-            replace=replace,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            num_workers=kwargs.get("num_workers", 0),
-            pin_memory=kwargs.get("pin_memory", False),
-            persistent_workers=kwargs.get("persistent_workers", False),
-            prefetch_factor=kwargs.get("prefetch_factor", 2),
-        )
+        num_workers = kwargs.get("num_workers", 0)
+        loader_kwargs: Dict[str, Any] = {
+            "data": data,
+            "depth": depth,
+            "num_neighbors": num_neighbors,
+            "node_idx": node_idx,
+            "replace": replace,
+            "batch_size": batch_size,
+            "shuffle": shuffle,
+            "num_workers": num_workers,
+            "pin_memory": kwargs.get("pin_memory", False),
+            "persistent_workers": kwargs.get("persistent_workers", False)
+            if num_workers > 0
+            else False,
+        }
+        if num_workers > 0 and "prefetch_factor" in kwargs:
+            loader_kwargs["prefetch_factor"] = kwargs["prefetch_factor"]
+        return ShaDowKHopSampler(**loader_kwargs)
 
 
 class ShadowCustomStrategy(BaseSamplerStrategy):
     """Custom ShaDow sampler with optional per-subgraph transform support."""
+
     def __init__(self, runtime: Optional[Dict[str, Any]] = None, **kwargs: Any):
         self.runtime = RuntimeShadowConfig.from_dict(runtime)
         self.kwargs = kwargs
@@ -390,20 +410,25 @@ class ShadowCustomStrategy(BaseSamplerStrategy):
                 transform=transform,
                 **kwargs,
             )
-        return _ShaDowKHopSamplerWithTransform(
-            data=data,
-            depth=depth,
-            num_neighbors=num_neighbors,
-            node_idx=node_idx,
-            replace=replace,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            transform=transform,
-            num_workers=kwargs.get("num_workers", 0),
-            pin_memory=kwargs.get("pin_memory", False),
-            persistent_workers=kwargs.get("persistent_workers", False),
-            prefetch_factor=kwargs.get("prefetch_factor", 2),
-        )
+        num_workers = kwargs.get("num_workers", 0)
+        loader_kwargs: Dict[str, Any] = {
+            "data": data,
+            "depth": depth,
+            "num_neighbors": num_neighbors,
+            "node_idx": node_idx,
+            "replace": replace,
+            "batch_size": batch_size,
+            "shuffle": shuffle,
+            "transform": transform,
+            "num_workers": num_workers,
+            "pin_memory": kwargs.get("pin_memory", False),
+            "persistent_workers": kwargs.get("persistent_workers", False)
+            if num_workers > 0
+            else False,
+        }
+        if num_workers > 0 and "prefetch_factor" in kwargs:
+            loader_kwargs["prefetch_factor"] = kwargs["prefetch_factor"]
+        return _ShaDowKHopSamplerWithTransform(**loader_kwargs)
 
 
 def _expand_graph_level_value(value: Any, count: int) -> Any:
@@ -447,7 +472,11 @@ def _normalize_shadow_batch(batch: Batch, source_data: Optional[Data] = None) ->
 
     for key in ["graph_y", "graph_w", "sample_id", "region_id", "patch_id"]:
         if hasattr(batch, key):
-            setattr(batch, key, _expand_graph_level_value(getattr(batch, key), num_subgraphs))
+            setattr(
+                batch,
+                key,
+                _expand_graph_level_value(getattr(batch, key), num_subgraphs),
+            )
         elif source_data is not None and hasattr(source_data, key):
             setattr(
                 batch,
@@ -600,7 +629,11 @@ class _ShaDowKHopSamplerWithTransform(torch.utils.data.DataLoader):
             for key in ["graph_y", "graph_w", "sample_id", "region_id", "patch_id"]:
                 if hasattr(batch, key):
                     val = getattr(batch, key)
-                    if isinstance(val, torch.Tensor) and val.dim() > 0 and val.size(0) > i:
+                    if (
+                        isinstance(val, torch.Tensor)
+                        and val.dim() > 0
+                        and val.size(0) > i
+                    ):
                         setattr(sub_data, key, val[i : i + 1])
                     elif isinstance(val, list) and len(val) > i:
                         setattr(sub_data, key, [val[i]])
