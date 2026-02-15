@@ -354,6 +354,88 @@ class SupervisedModule(L.LightningModule):
             total = total + entropy_w * entropy_reg
         return total
 
+    def _compute_losses(
+        self,
+        *,
+        patch_logits: torch.Tensor,
+        bag_logits: torch.Tensor,
+        bag_targets: torch.Tensor,
+        bag_weights: Optional[torch.Tensor],
+        ordered_bag_ids: list[str],
+        bag_indices: list[list[int]],
+        bag_attention: Optional[dict[str, torch.Tensor]],
+        stage: str,
+    ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor], torch.Tensor]:
+        region_loss = self._compute_region_loss(
+            bag_logits=bag_logits,
+            bag_targets=bag_targets,
+            bag_weights=bag_weights,
+        )
+        node_aux_loss, entropy_reg = self._compute_optional_terms(
+            patch_logits=patch_logits,
+            bag_targets=bag_targets,
+            bag_ids=ordered_bag_ids,
+            bag_indices=bag_indices,
+            bag_attention=bag_attention or {},
+            stage=stage,
+        )
+        total_loss = self._compose_total_loss(region_loss, node_aux_loss, entropy_reg)
+        return region_loss, node_aux_loss, entropy_reg, total_loss
+
+    def _log_stage_metrics(
+        self,
+        *,
+        stage: str,
+        loss_value: torch.Tensor,
+        bag_logits: torch.Tensor,
+        bag_targets: torch.Tensor,
+        region_loss: Optional[torch.Tensor] = None,
+        node_aux_loss: Optional[torch.Tensor] = None,
+        entropy_reg: Optional[torch.Tensor] = None,
+    ) -> None:
+        if stage not in {"train", "val", "test"}:
+            return
+        self.log(
+            f"{stage}/loss",
+            loss_value,
+            on_step=stage == "train",
+            on_epoch=True,
+            prog_bar=True,
+        )
+        if self.use_attention and stage == "train" and region_loss is not None:
+            self.log(
+                "train/region_loss",
+                region_loss,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=False,
+            )
+            if node_aux_loss is not None:
+                self.log(
+                    "train/node_aux_loss",
+                    node_aux_loss,
+                    on_step=True,
+                    on_epoch=True,
+                    prog_bar=False,
+                )
+            if entropy_reg is not None:
+                self.log(
+                    "train/entropy_reg",
+                    entropy_reg,
+                    on_step=True,
+                    on_epoch=True,
+                    prog_bar=False,
+                )
+        if self.task_cfg["target_type"] == "binary":
+            acc = compute_binary_accuracy(bag_logits, bag_targets)
+            self.log(
+                f"{stage}/acc",
+                acc,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=stage != "train",
+            )
+
     # ------------------------------------------------------------------
     # Shared step
     # ------------------------------------------------------------------
@@ -368,70 +450,25 @@ class SupervisedModule(L.LightningModule):
         bag_targets = payload["bag_targets"]
         bag_weights = payload["bag_weights"]
 
-        region_loss = self._compute_region_loss(
+        region_loss, node_aux_loss, entropy_reg, total_loss = self._compute_losses(
+            patch_logits=patch_logits,
             bag_logits=bag_logits,
             bag_targets=bag_targets,
             bag_weights=bag_weights,
-        )
-        node_aux_loss, entropy_reg = self._compute_optional_terms(
-            patch_logits=patch_logits,
-            bag_targets=bag_targets,
-            bag_ids=ordered_bag_ids,
+            ordered_bag_ids=ordered_bag_ids,
             bag_indices=bag_indices,
             bag_attention=bag_attention,
             stage=stage,
         )
-        total_loss = self._compose_total_loss(
-            region_loss, node_aux_loss, entropy_reg
+        self._log_stage_metrics(
+            stage=stage,
+            loss_value=total_loss if stage == "train" else region_loss,
+            bag_logits=bag_logits,
+            bag_targets=bag_targets,
+            region_loss=region_loss if self.use_attention else None,
+            node_aux_loss=node_aux_loss,
+            entropy_reg=entropy_reg,
         )
-
-        # -- logging --------------------------------------------------
-        if stage in {"train", "val", "test"}:
-            self.log(
-                f"{stage}/loss",
-                total_loss if stage == "train" else region_loss,
-                on_step=stage == "train",
-                on_epoch=True,
-                prog_bar=True,
-            )
-            if self.use_attention and stage == "train":
-                self.log(
-                    "train/region_loss",
-                    region_loss,
-                    on_step=True,
-                    on_epoch=True,
-                    prog_bar=False,
-                )
-                if node_aux_loss is not None:
-                    self.log(
-                        "train/node_aux_loss",
-                        node_aux_loss,
-                        on_step=True,
-                        on_epoch=True,
-                        prog_bar=False,
-                    )
-                if entropy_reg is not None:
-                    self.log(
-                        "train/entropy_reg",
-                        entropy_reg,
-                        on_step=True,
-                        on_epoch=True,
-                        prog_bar=False,
-                    )
-
-        if self.task_cfg["target_type"] == "binary" and stage in {
-            "train",
-            "val",
-            "test",
-        }:
-            acc = compute_binary_accuracy(bag_logits, bag_targets)
-            self.log(
-                f"{stage}/acc",
-                acc,
-                on_step=False,
-                on_epoch=True,
-                prog_bar=stage != "train",
-            )
 
         result = {
             "loss": total_loss if stage == "train" else region_loss,
@@ -476,21 +513,15 @@ class SupervisedModule(L.LightningModule):
             region_w = (
                 bag_weights[idx : idx + 1] if bag_weights is not None else None
             )
-            region_loss = self._compute_region_loss(
+            region_loss, node_aux_loss, entropy_reg, total_loss = self._compute_losses(
+                patch_logits=patch_logits,
                 bag_logits=bag_logits[idx : idx + 1],
                 bag_targets=bag_targets[idx : idx + 1],
                 bag_weights=region_w,
-            )
-            node_aux_loss, entropy_reg = self._compute_optional_terms(
-                patch_logits=patch_logits,
-                bag_targets=bag_targets[idx : idx + 1],
-                bag_ids=[bag_id],
                 bag_indices=[bag_indices[idx]],
+                ordered_bag_ids=[bag_id],
                 bag_attention={bag_id: bag_attention[bag_id]},
                 stage="train",
-            )
-            total_loss = self._compose_total_loss(
-                region_loss, node_aux_loss, entropy_reg
             )
             self._region_total_loss_buffer.append(total_loss)
             region_losses.append(region_loss.detach())
@@ -519,43 +550,21 @@ class SupervisedModule(L.LightningModule):
             on_epoch=False,
             prog_bar=False,
         )
-        self.log(
-            "train/loss",
-            torch.stack(total_losses).mean(),
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
+        mean_total_loss = torch.stack(total_losses).mean()
+        mean_region_loss = torch.stack(region_losses).mean()
+        mean_node_aux = torch.stack(node_losses).mean() if node_losses else None
+        mean_entropy = torch.stack(entropies).mean() if entropies else None
+        self._log_stage_metrics(
+            stage="train",
+            loss_value=mean_total_loss,
+            bag_logits=bag_logits,
+            bag_targets=bag_targets,
+            region_loss=mean_region_loss,
+            node_aux_loss=mean_node_aux,
+            entropy_reg=mean_entropy,
         )
-        self.log(
-            "train/region_loss",
-            torch.stack(region_losses).mean(),
-            on_step=True,
-            on_epoch=True,
-            prog_bar=False,
-        )
-        if node_losses:
-            self.log(
-                "train/node_aux_loss",
-                torch.stack(node_losses).mean(),
-                on_step=True,
-                on_epoch=True,
-                prog_bar=False,
-            )
-        if entropies:
-            self.log(
-                "train/entropy_reg",
-                torch.stack(entropies).mean(),
-                on_step=True,
-                on_epoch=True,
-                prog_bar=False,
-            )
-        if self.task_cfg["target_type"] == "binary":
-            acc = compute_binary_accuracy(bag_logits, bag_targets)
-            self.log(
-                "train/acc", acc, on_step=False, on_epoch=True, prog_bar=False
-            )
 
-        return torch.stack(total_losses).mean()
+        return mean_total_loss
 
     def validation_step(self, batch, batch_idx):
         return self._shared_step(batch, "val")
