@@ -98,10 +98,14 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             coord_scale_um=coord_scale_um,
             sample_unit=sample_unit,
             reducer_scope=reducer_scope,
+            reducer_fit_mode=str(feature_reducer.get("fit_mode", "train_only")),
             keep_raw_molecular=keep_raw_molecular,
             force=force_precompute,
             min_cells=min_cells,
             use_molecular_features=use_molecular_features,
+            split_by=self.split_config.split_by,
+            split_ratios=self.split_config.train_val_test_split,
+            split_seed=self.split_seed,
         )
         self.categorical_feature_config = CategoricalFeatureConfig.from_dict(
             categorical_features
@@ -129,33 +133,50 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         index_path = Path(self.processed_dir) / "processed_index.json"
         base_dataset = SpatialOmicsGraphDataset(index_path)
 
-        if self.split_config.split_by == "patch":
-            entries = base_dataset.entries
-        else:
-            entries = _group_entries_by_sample(base_dataset.entries)
-
-        total_entries = len(entries)
-        if (
-            self._cached_split_indices is None
-            or self._cached_split_total != total_entries
-        ):
-            self._cached_split_indices = _split_indices(
-                total_entries,
-                self.split_config.train_val_test_split,
-                seed=self.split_seed,
+        if _entries_have_persisted_splits(base_dataset.entries):
+            self.dataset_train = _subset_dataset_from_entries(
+                base_dataset,
+                [entry for entry in base_dataset.entries if entry.split == "train"],
+                self.transforms,
             )
-            self._cached_split_total = total_entries
-        train_idx, val_idx, test_idx = self._cached_split_indices
+            self.dataset_val = _subset_dataset_from_entries(
+                base_dataset,
+                [entry for entry in base_dataset.entries if entry.split == "val"],
+                self.transforms,
+            )
+            self.dataset_test = _subset_dataset_from_entries(
+                base_dataset,
+                [entry for entry in base_dataset.entries if entry.split == "test"],
+                self.transforms,
+            )
+        else:
+            if self.split_config.split_by == "patch":
+                entries = base_dataset.entries
+            else:
+                entries = _group_entries_by_sample(base_dataset.entries)
 
-        self.dataset_train = _subset_dataset(
-            base_dataset, entries, train_idx, self.transforms
-        )
-        self.dataset_val = _subset_dataset(
-            base_dataset, entries, val_idx, self.transforms
-        )
-        self.dataset_test = _subset_dataset(
-            base_dataset, entries, test_idx, self.transforms
-        )
+            total_entries = len(entries)
+            if (
+                self._cached_split_indices is None
+                or self._cached_split_total != total_entries
+            ):
+                self._cached_split_indices = _split_indices(
+                    total_entries,
+                    self.split_config.train_val_test_split,
+                    seed=self.split_seed,
+                )
+                self._cached_split_total = total_entries
+            train_idx, val_idx, test_idx = self._cached_split_indices
+
+            self.dataset_train = _subset_dataset(
+                base_dataset, entries, train_idx, self.transforms
+            )
+            self.dataset_val = _subset_dataset(
+                base_dataset, entries, val_idx, self.transforms
+            )
+            self.dataset_test = _subset_dataset(
+                base_dataset, entries, test_idx, self.transforms
+            )
         self._ensure_sampler_strategy()
 
     def _ensure_sampler_strategy(self) -> BaseSamplerStrategy:
@@ -282,3 +303,25 @@ def _subset_dataset(
     if transforms:
         return TransformDataset(subset, transforms)
     return subset
+
+
+def _subset_dataset_from_entries(
+    dataset: SpatialOmicsGraphDataset,
+    selected_entries,
+    transforms,
+) -> SpatialOmicsGraphDataset:
+    subset = SpatialOmicsGraphDataset(dataset.index_path)
+    subset.entries = list(selected_entries)
+    subset.label_maps = dataset.label_maps
+    subset.reducer_state = dataset.reducer_state
+    subset.graph_label_maps = dataset.graph_label_maps
+    if transforms:
+        return TransformDataset(subset, transforms)
+    return subset
+
+
+def _entries_have_persisted_splits(entries) -> bool:
+    if not entries:
+        return False
+    valid = {"train", "val", "test"}
+    return all(getattr(entry, "split", None) in valid for entry in entries)
