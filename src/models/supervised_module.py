@@ -179,7 +179,7 @@ class SupervisedModule(L.LightningModule):
         patch_logits = self.graph_head(graph_emb)
         return patch_logits, graph_emb
 
-    def _forward_bags(self, batch):
+    def _forward_bags(self, batch, *, allow_missing_targets: bool = False):
         patch_logits, graph_emb = self._forward_instances(batch)
 
         bag_ids = extract_bag_ids(
@@ -215,11 +215,18 @@ class SupervisedModule(L.LightningModule):
             )
             bag_attention = None
 
-        bag_targets, bag_weights = gather_bag_targets(
-            batch=batch,
-            bag_indices=bag_indices,
-            target_columns=self.task_cfg.get("target_columns"),
-        )
+        bag_targets = None
+        bag_weights = None
+        if hasattr(batch, "graph_y"):
+            bag_targets, bag_weights = gather_bag_targets(
+                batch=batch,
+                bag_indices=bag_indices,
+                target_columns=self.task_cfg.get("target_columns"),
+            )
+        elif not allow_missing_targets:
+            raise ValueError(
+                "Batch is missing graph_y required for supervised loss computation."
+            )
 
         return {
             "patch_logits": patch_logits,
@@ -557,12 +564,16 @@ class SupervisedModule(L.LightningModule):
         return self._shared_step(batch, "test")
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        out = self._shared_step(batch, "predict")
-        keys = ["bag_ids", "bag_logits", "bag_targets"]
+        out = self._forward_bags(batch, allow_missing_targets=True)
+        keys = ["ordered_bag_ids", "bag_logits"]
+        if out["bag_targets"] is not None:
+            keys.append("bag_targets")
         if self.use_attention:
             keys.append("bag_attention")
         return {
-            k: out[k].detach() if hasattr(out[k], "detach") else out[k]
+            ("bag_ids" if k == "ordered_bag_ids" else k): (
+                out[k].detach() if hasattr(out[k], "detach") else out[k]
+            )
             for k in keys
         }
 

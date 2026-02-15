@@ -1,4 +1,5 @@
 import torch
+import pytest
 
 
 def test_remap_encoder_keys_auto_bgrl_or_identity():
@@ -127,3 +128,35 @@ def test_compute_aux_and_entropy_terms():
     assert bce.ndim == 0
     assert weighted.ndim == 0
     assert ent.ndim == 0
+
+
+def test_supervised_predict_step_allows_missing_targets():
+    pytest.importorskip("lightning")
+    pytest.importorskip("torch_geometric")
+    from src.models.supervised_module import SupervisedModule
+
+    module = SupervisedModule(
+        encoder={},
+        graph_head={},
+        loss={},
+        optim={},
+        task={"aggregation": "mean", "target_type": "binary"},
+    )
+
+    def _forward_bags(_batch, *, allow_missing_targets=False):
+        assert allow_missing_targets is True
+        return {
+            "patch_logits": torch.randn(4, 1),
+            "bag_logits": torch.randn(2, 1),
+            "ordered_bag_ids": ["b0", "b1"],
+            "bag_attention": None,
+            "bag_indices": [[0, 1], [2, 3]],
+            "bag_targets": None,
+            "bag_weights": None,
+        }
+
+    module._forward_bags = _forward_bags  # type: ignore[method-assign]
+    out = module.predict_step(batch=None, batch_idx=0)
+    assert out["bag_ids"] == ["b0", "b1"]
+    assert out["bag_logits"].shape == (2, 1)
+    assert "bag_targets" not in out
