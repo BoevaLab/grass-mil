@@ -50,7 +50,12 @@ def build_mil_aux_targets(
             aux_weights.append(torch.ones_like(repeated_target))
             continue
         if target_mode == "attention_shaped_ti":
-            attn = bag_attention[bag_id].reshape(-1, 1).to(repeated_target.device)
+            attn = (
+                bag_attention[bag_id]
+                .detach()
+                .reshape(-1, 1)
+                .to(repeated_target.device)
+            )
             target = 0.5 + (repeated_target - 0.5) * attn
             aux_targets.append(target)
             aux_weights.append(attn)

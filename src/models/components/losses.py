@@ -130,10 +130,13 @@ class CoxSGDLoss(nn.Module):
         n_samples = y_pred.shape[0]
         pair_mat = (length.view(1, -1) - length.view(-1, 1) > 0) * event.view(-1, 1)
 
-        if self.top_n > 0:
+        if self.top_n > 0 and n_samples > 1:
+            top_k = min(int(self.top_n), n_samples - 1)
+            if top_k <= 0:
+                top_k = 1
             noise = 1 + torch.rand_like(pair_mat.float())
             p_with_rand = pair_mat.float() * noise
-            rand_thr_ind = torch.argsort(p_with_rand, dim=1)[:, -(self.top_n + 1)]
+            rand_thr_ind = torch.argsort(p_with_rand, dim=1)[:, -(top_k + 1)]
             rand_thr = p_with_rand[torch.arange(n_samples), rand_thr_ind].view(-1, 1)
             pair_mat = pair_mat * (p_with_rand > rand_thr)
 
