@@ -129,7 +129,14 @@ def select_target_columns(
     if not target_columns:
         return graph_y
     label_names = getattr(batch, "graph_label_names", None)
-    if isinstance(label_names, list) and len(label_names) == graph_y.shape[0]:
+    # PyG collation may produce a list-of-lists (one per graph). Normalize to one
+    # shared label-name list, but do not collapse plain list[str] labels.
+    if (
+        isinstance(label_names, list)
+        and len(label_names) == graph_y.shape[0]
+        and label_names
+        and isinstance(label_names[0], (list, tuple))
+    ):
         label_names = label_names[0]
     indices = [_find_label_index_by_name(label_names, name) for name in target_columns]
     return graph_y[:, indices]
