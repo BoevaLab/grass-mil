@@ -130,6 +130,18 @@ def test_compute_aux_and_entropy_terms():
     assert ent.ndim == 0
 
 
+def test_select_target_columns_handles_single_label_list():
+    from types import SimpleNamespace
+
+    from src.models.training.bagging import select_target_columns
+
+    graph_y = torch.tensor([[1.0]])
+    batch = SimpleNamespace(graph_label_names=["label"])
+    selected = select_target_columns(graph_y, batch, target_columns=["label"])
+    assert selected.shape == (1, 1)
+    assert torch.equal(selected, graph_y)
+
+
 def test_supervised_predict_step_allows_missing_targets():
     pytest.importorskip("lightning")
     pytest.importorskip("torch_geometric")

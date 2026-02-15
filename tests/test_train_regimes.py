@@ -128,10 +128,10 @@ def test_runtime_shadow_path_with_real_datamodule(cfg_train):
         cfg_train.data.sampler.runtime.num_neighbors = 8
         cfg_train.data.sampler.runtime.subgraph_batch_size = 8
 
-        cfg_train.task = _load_task_cfg("finetune_mean")
-        cfg_train.model = _load_model_cfg("supervised_module")
+        cfg_train.task = _load_task_cfg("pretrain_bgrl")
+        cfg_train.model = _load_model_cfg("bgrl_module")
         cfg_train.optim = OmegaConf.load(Path("configs/optim/adamw.yaml"))
-        cfg_train.scheduler = OmegaConf.load(Path("configs/scheduler/cosine_epoch.yaml"))
+        cfg_train.scheduler = OmegaConf.load(Path("configs/scheduler/cosine_step.yaml"))
         cfg_train.model.task = cfg_train.task
         cfg_train.model.optim = cfg_train.optim
         cfg_train.model.scheduler = cfg_train.scheduler

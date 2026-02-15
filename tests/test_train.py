@@ -1,4 +1,5 @@
 import os
+import socket
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,17 @@ from omegaconf import DictConfig, open_dict
 from src.train import train
 
 from tests.helpers.run_if import RunIf
+
+
+def _can_bind_local_port() -> bool:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.bind(("127.0.0.1", 0))
+    except OSError:
+        return False
+    finally:
+        sock.close()
+    return True
 
 
 def test_train_fast_dev_run(cfg_train: DictConfig) -> None:
@@ -20,6 +32,18 @@ def test_train_fast_dev_run(cfg_train: DictConfig) -> None:
         cfg_train.trainer.fast_dev_run = True
         cfg_train.trainer.accelerator = "cpu"
     train(cfg_train)
+
+
+def test_train_test_mode_without_checkpoint_callback(cfg_train: DictConfig) -> None:
+    """Training with `test=True` should not fail when checkpoint callback is absent."""
+    HydraConfig().set_config(cfg_train)
+    with open_dict(cfg_train):
+        cfg_train.trainer.fast_dev_run = True
+        cfg_train.trainer.accelerator = "cpu"
+        cfg_train.callbacks = None
+        cfg_train.test = True
+    metric_dict, _ = train(cfg_train)
+    assert "test/loss" in metric_dict
 
 
 @RunIf(min_gpus=1)
@@ -69,6 +93,8 @@ def test_train_ddp_sim(cfg_train: DictConfig) -> None:
 
     :param cfg_train: A DictConfig containing a valid training configuration.
     """
+    if not _can_bind_local_port():
+        pytest.skip("Local port binding is not permitted in this environment")
     HydraConfig().set_config(cfg_train)
     with open_dict(cfg_train):
         cfg_train.trainer.max_epochs = 2

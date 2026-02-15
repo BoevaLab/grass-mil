@@ -389,3 +389,16 @@ def test_split_is_stable_across_setup_calls(tmp_path: Path) -> None:
     assert first_train == second_train
     assert first_val == second_val
     assert first_test == second_test
+
+
+def test_split_indices_keeps_train_non_empty_for_tiny_totals() -> None:
+    from src.data.spatial_omics_datamodule import _split_indices
+
+    train_idx, val_idx, test_idx = _split_indices(1, (0.8, 0.1, 0.1), seed=123)
+    assert len(train_idx) == 1
+    assert len(val_idx) == 0
+    assert len(test_idx) == 0
+
+    train_idx, val_idx, test_idx = _split_indices(3, (0.8, 0.1, 0.1), seed=123)
+    assert len(train_idx) >= 1
+    assert len(train_idx) + len(val_idx) + len(test_idx) == 3
