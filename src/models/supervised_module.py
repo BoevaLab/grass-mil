@@ -534,11 +534,11 @@ class SupervisedModule(L.LightningModule):
         if not total_losses:
             return torch.zeros((), device=self.device)
 
-        flush_loss = self._flush_region_buffer_if_needed(force=False)
-        if flush_loss is not None:
+        flush_losses = self._flush_region_buffer_if_needed(force=False)
+        for flush_loss in flush_losses:
             self.log(
                 "train/flush_loss",
-                flush_loss.detach(),
+                flush_loss,
                 on_step=True,
                 on_epoch=True,
                 prog_bar=False,
@@ -592,42 +592,58 @@ class SupervisedModule(L.LightningModule):
 
     def _flush_region_buffer_if_needed(
         self, *, force: bool
-    ) -> Optional[torch.Tensor]:
+    ) -> list[torch.Tensor]:
         if not self._region_total_loss_buffer:
-            return None
+            return []
         if (
             not force
             and len(self._region_total_loss_buffer)
             < self.region_accum_hyperbatch_size
         ):
-            return None
+            return []
 
         optimizer = self.optimizers()
         if isinstance(optimizer, (list, tuple)):
             optimizer = optimizer[0]
-        total_loss = torch.stack(self._region_total_loss_buffer, dim=0).mean()
-        self.manual_backward(total_loss)
-        optimizer.step()
-        optimizer.zero_grad(set_to_none=True)
+        flush_losses: list[torch.Tensor] = []
 
-        scheduler = self.lr_schedulers()
-        if scheduler is not None:
-            if isinstance(scheduler, (list, tuple)):
-                for sch in scheduler:
-                    sch.step()
+        while self._region_total_loss_buffer:
+            if force:
+                chunk = self._region_total_loss_buffer
             else:
-                scheduler.step()
-        self._manual_optimizer_steps += 1
-        self.log(
-            "train/manual_optimizer_steps",
-            float(self._manual_optimizer_steps),
-            on_step=not force,
-            on_epoch=force,
-            prog_bar=False,
-        )
+                if len(self._region_total_loss_buffer) < self.region_accum_hyperbatch_size:
+                    break
+                chunk = self._region_total_loss_buffer[
+                    : self.region_accum_hyperbatch_size
+                ]
 
-        self._region_total_loss_buffer.clear()
-        return total_loss.detach()
+            total_loss = torch.stack(chunk, dim=0).mean()
+            self.manual_backward(total_loss)
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+
+            scheduler = self.lr_schedulers()
+            if scheduler is not None:
+                if isinstance(scheduler, (list, tuple)):
+                    for sch in scheduler:
+                        sch.step()
+                else:
+                    scheduler.step()
+            self._manual_optimizer_steps += 1
+            self.log(
+                "train/manual_optimizer_steps",
+                float(self._manual_optimizer_steps),
+                on_step=not force,
+                on_epoch=force,
+                prog_bar=False,
+            )
+            flush_losses.append(total_loss.detach())
+
+            del self._region_total_loss_buffer[: len(chunk)]
+            if force:
+                break
+
+        return flush_losses
 
     def on_train_start(self) -> None:
         if self.region_accum_enabled:
@@ -636,16 +652,15 @@ class SupervisedModule(L.LightningModule):
     def on_train_epoch_end(self) -> None:
         if not self.region_accum_enabled:
             return
-        if self.region_accum_flush_on_epoch_end:
-            flush_loss = self._flush_region_buffer_if_needed(force=True)
-            if flush_loss is not None:
-                self.log(
-                    "train/epoch_end_flush_loss",
-                    flush_loss,
-                    on_step=False,
-                    on_epoch=True,
-                    prog_bar=False,
-                )
+        flush_losses = self._flush_region_buffer_if_needed(force=True)
+        for flush_loss in flush_losses:
+            self.log(
+                "train/epoch_end_flush_loss",
+                flush_loss,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=False,
+            )
 
     # ------------------------------------------------------------------
     # Optimizer / scheduler
