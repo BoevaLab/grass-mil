@@ -622,7 +622,7 @@ class SupervisedModule(L.LightningModule):
             "train/manual_optimizer_steps",
             float(self._manual_optimizer_steps),
             on_step=not force,
-            on_epoch=False,
+            on_epoch=force,
             prog_bar=False,
         )
 
