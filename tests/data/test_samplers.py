@@ -109,6 +109,24 @@ def test_shadow_custom_unit_loader():
     assert hasattr(batch, "edge_index")
 
 
+def test_shadow_custom_without_torch_sparse_rejects_transform(monkeypatch):
+    pytest.importorskip("torch_geometric")
+    from src.data.components import samplers as samplers_mod
+    from src.data.components.samplers import ShadowCustomStrategy
+
+    data = _toy_dataset(n_graphs=1)[0]
+    monkeypatch.setattr(samplers_mod, "WITH_TORCH_SPARSE", False)
+    strategy = ShadowCustomStrategy(runtime={"enabled": False})
+    with pytest.raises(ValueError, match="requires torch-sparse"):
+        strategy.build_unit_loader(
+            data=data,
+            depth=2,
+            num_neighbors=8,
+            batch_size=4,
+            transform=lambda d: d,
+        )
+
+
 def test_shadow_custom_runtime_dataset_loader_uses_unit_loader(monkeypatch):
     pytest.importorskip("torch_geometric")
     from src.data.components.samplers import get_sampler_strategy

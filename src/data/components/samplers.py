@@ -398,6 +398,11 @@ class ShadowCustomStrategy(BaseSamplerStrategy):
         **kwargs: Any,
     ):
         if not WITH_TORCH_SPARSE:
+            if transform is not None:
+                raise ValueError(
+                    "ShadowCustomStrategy transform support requires torch-sparse. "
+                    "Install torch-sparse or disable transforms."
+                )
             native = ShadowNativeStrategy(runtime={"enabled": False})
             return native.build_unit_loader(
                 data=data,
@@ -407,7 +412,7 @@ class ShadowCustomStrategy(BaseSamplerStrategy):
                 node_idx=node_idx,
                 replace=replace,
                 shuffle=shuffle,
-                transform=transform,
+                transform=None,
                 **kwargs,
             )
         num_workers = kwargs.get("num_workers", 0)
