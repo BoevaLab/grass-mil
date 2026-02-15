@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -61,10 +61,14 @@ class PrecomputeConfig:
     coord_scale_um: float
     sample_unit: str
     reducer_scope: str
+    reducer_fit_mode: str
     keep_raw_molecular: bool
     force: bool
     min_cells: int
     use_molecular_features: bool
+    split_by: str
+    split_ratios: Tuple[float, float, float]
+    split_seed: int
 
     @classmethod
     def from_args(
@@ -74,10 +78,14 @@ class PrecomputeConfig:
         coord_scale_um: float,
         sample_unit: str,
         reducer_scope: str,
+        reducer_fit_mode: str,
         keep_raw_molecular: bool,
         force: bool,
         min_cells: int,
         use_molecular_features: bool,
+        split_by: str,
+        split_ratios: Tuple[float, float, float],
+        split_seed: int,
     ) -> "PrecomputeConfig":
         return cls(
             raw_manifest_path=raw_manifest_path,
@@ -85,10 +93,14 @@ class PrecomputeConfig:
             coord_scale_um=coord_scale_um,
             sample_unit=sample_unit,
             reducer_scope=reducer_scope,
+            reducer_fit_mode=reducer_fit_mode,
             keep_raw_molecular=keep_raw_molecular,
             force=force,
             min_cells=min_cells,
             use_molecular_features=use_molecular_features,
+            split_by=split_by,
+            split_ratios=split_ratios,
+            split_seed=split_seed,
         )
 
 
@@ -100,6 +112,26 @@ class CategoricalFeatureConfig:
     def from_dict(cls, data: Optional[Dict[str, object]]) -> "CategoricalFeatureConfig":
         data = data or {}
         return cls(include_labels=data.get("include_labels", []))
+
+
+@dataclass
+class PreparedSample:
+    table_idx: int
+    table: SpatialOmicsTable
+    sample_id: str
+    region_id: Optional[str]
+    patch_indices: List[np.ndarray]
+
+
+@dataclass
+class GraphUnitSpec:
+    table_idx: int
+    sample_id: str
+    region_id: Optional[str]
+    patch_idx: int
+    patch_id: str
+    indices: np.ndarray
+    split: str
 
 
 class SpatialOmicsPreprocessor:
@@ -137,60 +169,56 @@ class SpatialOmicsPreprocessor:
         if index_path.exists() and not self.precompute_config.force:
             return index_path
 
-        manifest_rows = self._load_manifest(
-            Path(self.precompute_config.raw_manifest_path)
-        )
-        tables = self._load_tables(manifest_rows)
-        label_maps = self._build_label_maps(tables)
+        manifest_rows = self._load_manifest(Path(self.precompute_config.raw_manifest_path))
+        raw_tables = self._load_tables(manifest_rows)
+
+        prepared = self._prepare_samples(manifest_rows, raw_tables)
+        units = self._build_unit_specs(prepared)
+        label_maps = self._build_label_maps([item.table for item in prepared])
+
         graph_label_maps: Dict[str, Dict[str, int]] = {}
         graph_label_df = self._load_graph_labels()
 
-        reducer_state, reducer = self._prepare_reducer(tables)
+        reducer_state, reducer = self._prepare_reducer(prepared, units)
+
+        table_embeddings: Dict[int, Optional[np.ndarray]] = {}
+        for sample in prepared:
+            table_embeddings[sample.table_idx] = self._compute_molecular_embedding(
+                table=sample.table,
+                reducer=reducer,
+                reducer_state=reducer_state,
+                sample_id=sample.sample_id,
+            )
 
         entries: List[Dict[str, object]] = []
-        reducer_state["by_sample"] = {}
-
-        for row, table in zip(manifest_rows, tables):
-            sample_id = table.sample_id or str(row[self.manifest_config.sample_id])
-            region_id = table.region_id or row.get(self.manifest_config.region_id)
-            polygons_path = self._resolve_manifest_relative_path(
-                row.get(self.manifest_config.polygons_path)
+        for unit in units:
+            sample = prepared[unit.table_idx]
+            embedded = table_embeddings[unit.table_idx]
+            data = self._build_pyg_data(
+                table=sample.table,
+                indices=unit.indices,
+                embedded=embedded[unit.indices] if embedded is not None else None,
+                sample_id=unit.sample_id,
+                region_id=unit.region_id,
+                patch_id=unit.patch_id,
+                label_maps=label_maps,
+                graph_label_df=graph_label_df,
+                graph_label_maps=graph_label_maps,
             )
 
-            table = _apply_coord_scale(table, self.precompute_config.coord_scale_um)
-            table, polygons = self._apply_polygons(table, polygons_path)
-
-            embedded = self._compute_molecular_embedding(
-                table, reducer, reducer_state, sample_id
+            graph_path = processed_dir / "graphs" / unit.sample_id
+            graph_path.mkdir(parents=True, exist_ok=True)
+            data_path = graph_path / f"{unit.patch_id}.pt"
+            torch.save(data, data_path)
+            entries.append(
+                {
+                    "path": str(data_path),
+                    "sample_id": unit.sample_id,
+                    "region_id": unit.region_id,
+                    "patch_id": unit.patch_id,
+                    "split": unit.split,
+                }
             )
-            patch_indices = self._compute_patch_indices(table, polygons)
-
-            for patch_idx, indices in enumerate(patch_indices):
-                patch_id = _build_patch_id(sample_id, region_id, patch_idx)
-                data = self._build_pyg_data(
-                    table=table,
-                    indices=indices,
-                    embedded=embedded[indices] if embedded is not None else None,
-                    sample_id=sample_id,
-                    region_id=region_id,
-                    patch_id=patch_id,
-                    label_maps=label_maps,
-                    graph_label_df=graph_label_df,
-                    graph_label_maps=graph_label_maps,
-                )
-
-                graph_path = processed_dir / "graphs" / sample_id
-                graph_path.mkdir(parents=True, exist_ok=True)
-                data_path = graph_path / f"{patch_id}.pt"
-                torch.save(data, data_path)
-                entries.append(
-                    {
-                        "path": str(data_path),
-                        "sample_id": sample_id,
-                        "region_id": region_id,
-                        "patch_id": patch_id,
-                    }
-                )
 
         index_payload = {
             "entries": entries,
@@ -200,44 +228,138 @@ class SpatialOmicsPreprocessor:
             "categorical_features": {
                 "include_labels": list(self.categorical_feature_config.include_labels),
             },
+            "split": {
+                "split_by": self.precompute_config.split_by,
+                "ratios": list(self.precompute_config.split_ratios),
+                "seed": int(self.precompute_config.split_seed),
+            },
         }
         index_path.write_text(json.dumps(index_payload, indent=2))
+
         metadata = self._build_metadata(
             entries=entries,
-            tables=tables,
+            tables=[item.table for item in prepared],
             label_maps=label_maps,
             graph_label_maps=graph_label_maps,
         )
         metadata_path.write_text(json.dumps(metadata, indent=2))
         return index_path
 
-    def _load_tables(
-        self, manifest_rows: List[Dict[str, str]]
-    ) -> List[SpatialOmicsTable]:
+    def _prepare_samples(
+        self,
+        manifest_rows: List[Dict[str, str]],
+        tables: List[SpatialOmicsTable],
+    ) -> List[PreparedSample]:
+        prepared: List[PreparedSample] = []
+        for table_idx, (row, table) in enumerate(zip(manifest_rows, tables)):
+            sample_id = table.sample_id or str(row[self.manifest_config.sample_id])
+            region_id = table.region_id or row.get(self.manifest_config.region_id)
+            polygons_path = self._resolve_manifest_relative_path(
+                row.get(self.manifest_config.polygons_path)
+            )
+
+            table = _apply_coord_scale(table, self.precompute_config.coord_scale_um)
+            table, polygons = self._apply_polygons(table, polygons_path)
+            patch_indices = self._compute_patch_indices(table, polygons)
+            prepared.append(
+                PreparedSample(
+                    table_idx=table_idx,
+                    table=table,
+                    sample_id=sample_id,
+                    region_id=region_id,
+                    patch_indices=patch_indices,
+                )
+            )
+        return prepared
+
+    def _build_unit_specs(self, prepared: Sequence[PreparedSample]) -> List[GraphUnitSpec]:
+        units: List[GraphUnitSpec] = []
+        for sample in prepared:
+            for patch_idx, indices in enumerate(sample.patch_indices):
+                patch_id = _build_patch_id(sample.sample_id, sample.region_id, patch_idx)
+                units.append(
+                    GraphUnitSpec(
+                        table_idx=sample.table_idx,
+                        sample_id=sample.sample_id,
+                        region_id=sample.region_id,
+                        patch_idx=patch_idx,
+                        patch_id=patch_id,
+                        indices=indices,
+                        split="train",  # assigned below
+                    )
+                )
+
+        split_labels = _assign_split_labels(
+            units=units,
+            split_by=self.precompute_config.split_by,
+            split_ratios=self.precompute_config.split_ratios,
+            seed=self.precompute_config.split_seed,
+        )
+        for i, split in enumerate(split_labels):
+            units[i].split = split
+        return units
+
+    def _load_tables(self, manifest_rows: List[Dict[str, str]]) -> List[SpatialOmicsTable]:
         return [self._load_table(row) for row in manifest_rows]
 
     def _prepare_reducer(
-        self, tables: List[SpatialOmicsTable]
+        self,
+        prepared: Sequence[PreparedSample],
+        units: Sequence[GraphUnitSpec],
     ) -> tuple[Dict[str, object], object]:
         reducer_state: Dict[str, object] = {
-            "scope": self.precompute_config.reducer_scope
+            "scope": self.precompute_config.reducer_scope,
+            "fit_mode": self.precompute_config.reducer_fit_mode,
         }
         reducer = get_feature_reducer(self.feature_reducer_config)
-        if (
-            self.precompute_config.use_molecular_features
-            and self.precompute_config.reducer_scope == "dataset"
-        ):
-            all_features = np.concatenate(
-                [
-                    t.molecular_features
-                    for t in tables
-                    if t.molecular_features is not None
-                ],
-                axis=0,
-            )
-            reducer.fit(all_features)
-            reducer_state["global"] = reducer.state_dict()
+
         reducer_state["by_sample"] = {}
+        if not self.precompute_config.use_molecular_features:
+            return reducer_state, reducer
+
+        if self.precompute_config.reducer_scope != "dataset":
+            return reducer_state, reducer
+
+        fit_mode = str(self.precompute_config.reducer_fit_mode).strip().lower()
+        if fit_mode not in {"global", "train_only"}:
+            raise ValueError(
+                "feature_reducer.fit_mode must be one of ['global', 'train_only']."
+            )
+
+        if fit_mode == "global":
+            features = [
+                sample.table.molecular_features
+                for sample in prepared
+                if sample.table.molecular_features is not None
+            ]
+            fitted_on = "global"
+        else:
+            selected_by_table: Dict[int, List[np.ndarray]] = {}
+            for unit in units:
+                if unit.split != "train":
+                    continue
+                selected_by_table.setdefault(unit.table_idx, []).append(unit.indices)
+            features = []
+            for sample in prepared:
+                if sample.table.molecular_features is None:
+                    continue
+                train_indices = selected_by_table.get(sample.table_idx, [])
+                if not train_indices:
+                    continue
+                uniq = np.unique(np.concatenate(train_indices, axis=0))
+                if uniq.size == 0:
+                    continue
+                features.append(sample.table.molecular_features[uniq])
+            fitted_on = "train_only"
+
+        if not features:
+            raise ValueError(
+                "No molecular features available for reducer fitting with the current split and fit_mode."
+            )
+
+        reducer.fit(np.concatenate(features, axis=0))
+        reducer_state["global"] = reducer.state_dict()
+        reducer_state["fitted_on"] = fitted_on
         return reducer_state, reducer
 
     def _apply_polygons(
@@ -533,7 +655,11 @@ class SpatialOmicsPreprocessor:
             "graph_label_maps": graph_label_maps,
             "use_molecular_features": self.precompute_config.use_molecular_features,
             "reducer_scope": self.precompute_config.reducer_scope,
+            "reducer_fit_mode": self.precompute_config.reducer_fit_mode,
             "sample_unit": self.precompute_config.sample_unit,
+            "split_by": self.precompute_config.split_by,
+            "split_ratios": list(self.precompute_config.split_ratios),
+            "split_seed": int(self.precompute_config.split_seed),
         }
 
 
@@ -568,6 +694,110 @@ def _subset_table(table: SpatialOmicsTable, indices: np.ndarray) -> SpatialOmics
         sample_id=table.sample_id,
         region_id=table.region_id,
     )
+
+
+def _split_indices(
+    total: int,
+    ratios: Tuple[float, float, float],
+    seed: int,
+) -> Tuple[List[int], List[int], List[int]]:
+    train_r, val_r, test_r = ratios
+    if not np.isclose(train_r + val_r + test_r, 1.0):
+        raise ValueError("train_val_test_split must sum to 1.0")
+    if total <= 0:
+        return [], [], []
+
+    ratio_arr = np.asarray([train_r, val_r, test_r], dtype=float)
+    raw_counts = ratio_arr * float(total)
+    counts = np.floor(raw_counts).astype(int)
+
+    remainder = int(total - counts.sum())
+    if remainder > 0:
+        fractions = raw_counts - counts
+        fractions[ratio_arr <= 0.0] = -1.0
+        order = np.argsort(-fractions)
+        ptr = 0
+        while remainder > 0 and ptr < len(order):
+            idx = int(order[ptr])
+            if fractions[idx] < 0:
+                break
+            counts[idx] += 1
+            remainder -= 1
+            ptr += 1
+        while remainder > 0:
+            counts[0] += 1
+            remainder -= 1
+
+    if ratio_arr[0] > 0.0 and counts[0] == 0:
+        donor_idx = int(np.argmax(counts[1:]) + 1) if counts[1:].sum() > 0 else -1
+        if donor_idx >= 0 and counts[donor_idx] > 0:
+            counts[donor_idx] -= 1
+            counts[0] += 1
+        else:
+            counts[0] = 1
+            overflow = int(counts.sum() - total)
+            for idx in (2, 1):
+                if overflow <= 0:
+                    break
+                take = min(overflow, counts[idx])
+                counts[idx] -= take
+                overflow -= take
+
+    indices = np.arange(total)
+    rng = np.random.default_rng(seed)
+    rng.shuffle(indices)
+
+    train_end = int(counts[0])
+    val_end = train_end + int(counts[1])
+    return (
+        indices[:train_end].tolist(),
+        indices[train_end:val_end].tolist(),
+        indices[val_end:].tolist(),
+    )
+
+
+def _assign_split_labels(
+    units: Sequence[GraphUnitSpec],
+    split_by: str,
+    split_ratios: Tuple[float, float, float],
+    seed: int,
+) -> List[str]:
+    labels = ["train"] * len(units)
+    if not units:
+        return labels
+
+    if split_by == "sample":
+        by_sample: Dict[str, List[int]] = {}
+        for idx, unit in enumerate(units):
+            by_sample.setdefault(unit.sample_id, []).append(idx)
+        sample_keys = list(by_sample)
+        train_idx, val_idx, test_idx = _split_indices(
+            total=len(sample_keys), ratios=split_ratios, seed=seed
+        )
+        for i in train_idx:
+            for unit_idx in by_sample[sample_keys[i]]:
+                labels[unit_idx] = "train"
+        for i in val_idx:
+            for unit_idx in by_sample[sample_keys[i]]:
+                labels[unit_idx] = "val"
+        for i in test_idx:
+            for unit_idx in by_sample[sample_keys[i]]:
+                labels[unit_idx] = "test"
+        return labels
+
+    if split_by != "patch":
+        raise ValueError("split_by must be one of ['sample', 'patch']")
+
+    train_idx, val_idx, test_idx = _split_indices(
+        total=len(units), ratios=split_ratios, seed=seed
+    )
+    for i in train_idx:
+        labels[i] = "train"
+    for i in val_idx:
+        labels[i] = "val"
+    for i in test_idx:
+        labels[i] = "test"
+    return labels
 
 
 def _select_graph_label_id(
