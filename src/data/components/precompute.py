@@ -165,12 +165,6 @@ class SpatialOmicsPreprocessor:
             )
             patch_indices = self._compute_patch_indices(table, polygons)
 
-            patch_indices = [
-                idx
-                for idx in patch_indices
-                if idx.size >= self.precompute_config.min_cells
-            ]
-
             for patch_idx, indices in enumerate(patch_indices):
                 patch_id = _build_patch_id(sample_id, region_id, patch_idx)
                 data = self._build_pyg_data(
