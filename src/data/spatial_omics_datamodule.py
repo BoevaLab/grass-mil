@@ -202,11 +202,54 @@ def _split_indices(
     train_r, val_r, test_r = ratios
     if not np.isclose(train_r + val_r + test_r, 1.0):
         raise ValueError("train_val_test_split must sum to 1.0")
+    if total <= 0:
+        return [], [], []
+
+    ratio_arr = np.asarray([train_r, val_r, test_r], dtype=float)
+    raw_counts = ratio_arr * float(total)
+    counts = np.floor(raw_counts).astype(int)
+
+    remainder = int(total - counts.sum())
+    if remainder > 0:
+        fractions = raw_counts - counts
+        # Never assign remainder to splits explicitly configured with zero ratio.
+        fractions[ratio_arr <= 0.0] = -1.0
+        order = np.argsort(-fractions)
+        ptr = 0
+        while remainder > 0 and ptr < len(order):
+            idx = int(order[ptr])
+            if fractions[idx] < 0:
+                break
+            counts[idx] += 1
+            remainder -= 1
+            ptr += 1
+        # Fallback in pathological numeric cases.
+        while remainder > 0:
+            counts[0] += 1
+            remainder -= 1
+
+    # Keep train split usable whenever train ratio is non-zero and data exists.
+    if ratio_arr[0] > 0.0 and counts[0] == 0:
+        donor_idx = int(np.argmax(counts[1:]) + 1) if counts[1:].sum() > 0 else -1
+        if donor_idx >= 0 and counts[donor_idx] > 0:
+            counts[donor_idx] -= 1
+            counts[0] += 1
+        else:
+            counts[0] = 1
+            # Maintain exact total by clipping other counts to zero.
+            overflow = int(counts.sum() - total)
+            for idx in (2, 1):
+                if overflow <= 0:
+                    break
+                take = min(overflow, counts[idx])
+                counts[idx] -= take
+                overflow -= take
+
     indices = np.arange(total)
     rng = np.random.default_rng(seed)
     rng.shuffle(indices)
-    train_end = int(total * train_r)
-    val_end = train_end + int(total * val_r)
+    train_end = int(counts[0])
+    val_end = train_end + int(counts[1])
     return (
         indices[:train_end].tolist(),
         indices[train_end:val_end].tolist(),
