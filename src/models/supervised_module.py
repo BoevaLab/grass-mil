@@ -1,0 +1,731 @@
+from __future__ import annotations
+
+from typing import Any, Dict, Optional
+
+import lightning as L
+import torch
+
+from .training import (
+    aggregate_bag_logits_attention,
+    aggregate_bag_logits_mean,
+    build_mil_aux_targets,
+    build_supervised_components,
+    compute_aux_node_loss,
+    compute_binary_accuracy,
+    compute_entropy_regularization,
+    compute_supervised_loss,
+    extract_bag_ids,
+    gather_bag_targets,
+    gather_instance_logits,
+    group_instance_indices_by_bag,
+    instantiate_optimizer,
+    instantiate_scheduler_with_warmup,
+    load_state_dict_with_optional_mapping,
+    validate_task_config,
+)
+
+
+class SupervisedModule(L.LightningModule):
+    """Unified supervised module supporting both mean-pooling and MIL-attention
+    aggregation.
+
+    Behaviour is controlled by ``task.aggregation``:
+
+    * ``"mean"`` -- simple mean-pooling over patch logits (no attention, no
+      auxiliary losses, no region accumulation).
+    * ``"mil_attention"`` -- attention-weighted MIL aggregation with optional
+      region accumulation, node auxiliary loss, and entropy regularisation.
+    """
+
+    def __init__(
+        self,
+        encoder: Dict[str, Any],
+        graph_head: Dict[str, Any],
+        loss: Dict[str, Any],
+        optim: Dict[str, Any],
+        attention: Optional[Dict[str, Any]] = None,
+        scheduler: Optional[Dict[str, Any]] = None,
+        task: Optional[Dict[str, Any]] = None,
+        flags: Optional[Dict[str, Any]] = None,
+        ssl: Optional[Dict[str, Any]] = None,
+        init_from_ckpt: Optional[str] = None,
+        init_strict: bool = False,
+        encoder_init_map: str = "auto_bgrl_or_identity",
+        freeze_encoder: bool = False,
+    ) -> None:
+        super().__init__()
+        self.save_hyperparameters(logger=False)
+
+        self._built = False
+        self.encoder = None
+        self.graph_head = None
+        self.loss_fn = None
+        self.attention = None
+        self.ssl_model = None
+
+        self.optim_cfg = optim
+        self.scheduler_cfg = scheduler
+        self.task_cfg = task or {}
+        validate_task_config(self.task_cfg)
+        self.flags_cfg = flags or {}
+        self.ssl_cfg = ssl or {}
+        self.init_from_ckpt = init_from_ckpt
+        self.init_strict = init_strict
+        self.encoder_init_map = encoder_init_map
+        self.freeze_encoder = freeze_encoder
+
+        # Derive the aggregation mode from the task config.
+        aggregation = self.task_cfg.get("aggregation", "mean")
+        self.use_attention = aggregation == "mil_attention"
+
+        # MIL-specific config -- only meaningful when use_attention is True.
+        if self.use_attention:
+            self.region_accum_cfg = dict(
+                self.task_cfg.get("region_accumulation", {})
+            )
+            self.region_accum_enabled = bool(
+                self.region_accum_cfg.get("enabled", False)
+            )
+            self.region_accum_hyperbatch_size = int(
+                self.region_accum_cfg.get("hyperbatch_size", 8)
+            )
+            self.region_accum_flush_on_epoch_end = bool(
+                self.region_accum_cfg.get("flush_on_epoch_end", True)
+            )
+            if self.region_accum_enabled and self.region_accum_hyperbatch_size < 1:
+                raise ValueError(
+                    "task.region_accumulation.hyperbatch_size must be >= 1 "
+                    "when region accumulation is enabled."
+                )
+            self.node_aux_cfg = dict(self.task_cfg.get("node_aux", {}))
+            self.entropy_reg_cfg = dict(self.task_cfg.get("entropy_reg", {}))
+            self.loss_weights_cfg = dict(self.task_cfg.get("loss_weights", {}))
+        else:
+            self.region_accum_cfg = {}
+            self.region_accum_enabled = False
+            self.region_accum_hyperbatch_size = 0
+            self.region_accum_flush_on_epoch_end = False
+            self.node_aux_cfg = {}
+            self.entropy_reg_cfg = {}
+            self.loss_weights_cfg = {}
+
+        self._region_total_loss_buffer: list[torch.Tensor] = []
+        self._manual_optimizer_steps = 0
+
+    # ------------------------------------------------------------------
+    # Lightning hooks
+    # ------------------------------------------------------------------
+
+    @property
+    def automatic_optimization(self) -> bool:  # noqa: D401
+        return not self.region_accum_enabled
+
+    def setup(self, stage: Optional[str] = None) -> None:
+        if self._built:
+            return
+
+        loss_cfg = dict(self.hparams.loss)
+        loss_cfg.setdefault(
+            "loss_type", self.task_cfg.get("loss", "categorical_bce")
+        )
+
+        # Build attention config only when MIL is active.
+        if self.use_attention:
+            attention_cfg = dict(self.hparams.attention)
+            attention_cfg.pop("_target_", None)
+        else:
+            attention_cfg = None
+
+        components = build_supervised_components(
+            module=self,
+            encoder_cfg=dict(self.hparams.encoder),
+            graph_head_cfg=dict(self.hparams.graph_head),
+            attention_cfg=attention_cfg,
+            use_attention=self.use_attention,
+            loss_cfg=loss_cfg,
+            use_ssl=bool(self.flags_cfg.get("use_ssl", False)),
+            ssl_cfg=dict(self.ssl_cfg),
+        )
+
+        self.encoder = components["encoder"]
+        self.graph_head = components["graph_head"]
+        self.loss_fn = components["loss_fn"]
+        self.attention = components["attention"]
+        self.ssl_model = components["ssl_model"]
+
+        load_state_dict_with_optional_mapping(
+            self,
+            init_from_ckpt=self.init_from_ckpt,
+            init_strict=self.init_strict,
+            encoder_init_map=self.encoder_init_map,
+        )
+        if self.freeze_encoder:
+            for p in self.encoder.parameters():
+                p.requires_grad = False
+        self._built = True
+
+    # ------------------------------------------------------------------
+    # Forward helpers
+    # ------------------------------------------------------------------
+
+    def _forward_instances(self, batch):
+        _, graph_emb = self.encoder(
+            batch.x,
+            batch.edge_index,
+            edge_attr=getattr(batch, "edge_attr", None),
+            batch=getattr(batch, "batch", None),
+            return_graph_embedding=True,
+        )
+        patch_logits = self.graph_head(graph_emb)
+        return patch_logits, graph_emb
+
+    def _forward_bags(self, batch, *, allow_missing_targets: bool = False):
+        patch_logits, graph_emb = self._forward_instances(batch)
+
+        bag_ids = extract_bag_ids(
+            batch,
+            bag_key=self.task_cfg.get("bag_key", "region_id"),
+            bag_fallback_key=self.task_cfg.get("bag_fallback_key", "sample_id"),
+        )
+        bag_groups = group_instance_indices_by_bag(bag_ids)
+
+        if self.use_attention:
+            bag_logits, ordered_bag_ids, bag_attention, bag_indices = (
+                aggregate_bag_logits_attention(
+                    logits=patch_logits,
+                    embeddings=graph_emb,
+                    attention=self.attention,
+                    bag_groups=bag_groups,
+                    max_instances_per_bag=int(
+                        self.task_cfg.get("max_instances_per_bag", 0)
+                    ),
+                    instance_sampling=self.task_cfg.get(
+                        "instance_sampling", "all"
+                    ),
+                )
+            )
+        else:
+            bag_logits, ordered_bag_ids, bag_indices = aggregate_bag_logits_mean(
+                patch_logits,
+                bag_groups,
+                max_instances_per_bag=int(
+                    self.task_cfg.get("max_instances_per_bag", 0)
+                ),
+                instance_sampling=self.task_cfg.get("instance_sampling", "all"),
+            )
+            bag_attention = None
+
+        bag_targets = None
+        bag_weights = None
+        if hasattr(batch, "graph_y"):
+            bag_targets, bag_weights = gather_bag_targets(
+                batch=batch,
+                bag_indices=bag_indices,
+                target_columns=self.task_cfg.get("target_columns"),
+            )
+        elif not allow_missing_targets:
+            raise ValueError(
+                "Batch is missing graph_y required for supervised loss computation."
+            )
+
+        return {
+            "patch_logits": patch_logits,
+            "bag_logits": bag_logits,
+            "ordered_bag_ids": ordered_bag_ids,
+            "bag_attention": bag_attention,
+            "bag_indices": bag_indices,
+            "bag_targets": bag_targets,
+            "bag_weights": bag_weights,
+        }
+
+    # ------------------------------------------------------------------
+    # Loss computation
+    # ------------------------------------------------------------------
+
+    def _compute_region_loss(
+        self,
+        *,
+        bag_logits: torch.Tensor,
+        bag_targets: torch.Tensor,
+        bag_weights: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        return compute_supervised_loss(
+            loss_fn=self.loss_fn,
+            task_cfg=self.task_cfg,
+            bag_logits=bag_logits,
+            bag_targets=bag_targets,
+            bag_weights=bag_weights,
+        )
+
+    def _compute_optional_terms(
+        self,
+        *,
+        patch_logits: torch.Tensor,
+        bag_targets: torch.Tensor,
+        bag_ids: list[str],
+        bag_indices: list[list[int]],
+        bag_attention: dict[str, torch.Tensor],
+        stage: str,
+    ) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """Compute node auxiliary loss and entropy regularisation.
+
+        Only active during training when MIL attention is enabled and the
+        relevant sub-configs are turned on.
+        """
+        if not self.use_attention:
+            return None, None
+        if stage != "train" or self.task_cfg.get("target_type") != "binary":
+            return None, None
+
+        node_aux_enabled = bool(self.node_aux_cfg.get("enabled", False))
+        entropy_enabled = bool(self.entropy_reg_cfg.get("enabled", False))
+        if not node_aux_enabled and not entropy_enabled:
+            return None, None
+
+        aux_logits = gather_instance_logits(patch_logits, bag_indices)
+        aux_targets, aux_weights = build_mil_aux_targets(
+            bag_targets=bag_targets,
+            bag_indices=bag_indices,
+            bag_ids=bag_ids,
+            bag_attention=bag_attention,
+            target_mode=str(
+                self.node_aux_cfg.get("target_mode", "attention_shaped_ti")
+            ),
+        )
+
+        node_aux_loss = None
+        if node_aux_enabled:
+            loss_mode = str(self.node_aux_cfg.get("loss_mode", "bce"))
+            node_aux_loss = compute_aux_node_loss(
+                aux_logits=aux_logits,
+                aux_targets=aux_targets,
+                aux_weights=aux_weights if loss_mode == "weighted_bce" else None,
+                loss_mode=loss_mode,
+            )
+
+        entropy_reg = None
+        if entropy_enabled:
+            entropy_mode = str(
+                self.entropy_reg_cfg.get("mode", "attention_shaped_target")
+            )
+            if entropy_mode == "attention":
+                entropy_values = torch.cat(
+                    [
+                        bag_attention[bag_id].reshape(-1, 1)
+                        for bag_id in bag_ids
+                    ],
+                    dim=0,
+                )
+            elif entropy_mode == "attention_shaped_target":
+                entropy_values = aux_targets
+            else:
+                raise ValueError(
+                    "entropy_reg.mode must be one of "
+                    "['attention', 'attention_shaped_target']"
+                )
+            entropy_reg = compute_entropy_regularization(entropy_values)
+
+        return node_aux_loss, entropy_reg
+
+    def _compose_total_loss(
+        self,
+        region_loss: torch.Tensor,
+        node_aux_loss: Optional[torch.Tensor],
+        entropy_reg: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        if not self.use_attention:
+            return region_loss
+
+        region_w = float(self.loss_weights_cfg.get("region", 1.0))
+        node_w = float(
+            self.node_aux_cfg.get(
+                "weight", self.loss_weights_cfg.get("node_aux", 1.0)
+            )
+        )
+        entropy_w = float(
+            self.entropy_reg_cfg.get(
+                "weight", self.loss_weights_cfg.get("entropy", 0.0)
+            )
+        )
+        total = region_w * region_loss
+        if node_aux_loss is not None:
+            total = total + node_w * node_aux_loss
+        if entropy_reg is not None:
+            total = total + entropy_w * entropy_reg
+        return total
+
+    def _compute_losses(
+        self,
+        *,
+        patch_logits: torch.Tensor,
+        bag_logits: torch.Tensor,
+        bag_targets: torch.Tensor,
+        bag_weights: Optional[torch.Tensor],
+        ordered_bag_ids: list[str],
+        bag_indices: list[list[int]],
+        bag_attention: Optional[dict[str, torch.Tensor]],
+        stage: str,
+    ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor], torch.Tensor]:
+        region_loss = self._compute_region_loss(
+            bag_logits=bag_logits,
+            bag_targets=bag_targets,
+            bag_weights=bag_weights,
+        )
+        node_aux_loss, entropy_reg = self._compute_optional_terms(
+            patch_logits=patch_logits,
+            bag_targets=bag_targets,
+            bag_ids=ordered_bag_ids,
+            bag_indices=bag_indices,
+            bag_attention=bag_attention or {},
+            stage=stage,
+        )
+        total_loss = self._compose_total_loss(region_loss, node_aux_loss, entropy_reg)
+        return region_loss, node_aux_loss, entropy_reg, total_loss
+
+    def _log_stage_metrics(
+        self,
+        *,
+        stage: str,
+        loss_value: torch.Tensor,
+        bag_logits: torch.Tensor,
+        bag_targets: torch.Tensor,
+        region_loss: Optional[torch.Tensor] = None,
+        node_aux_loss: Optional[torch.Tensor] = None,
+        entropy_reg: Optional[torch.Tensor] = None,
+    ) -> None:
+        if stage not in {"train", "val", "test"}:
+            return
+        self.log(
+            f"{stage}/loss",
+            loss_value,
+            on_step=stage == "train",
+            on_epoch=True,
+            prog_bar=True,
+        )
+        if self.use_attention and stage == "train" and region_loss is not None:
+            self.log(
+                "train/region_loss",
+                region_loss,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=False,
+            )
+            if node_aux_loss is not None:
+                self.log(
+                    "train/node_aux_loss",
+                    node_aux_loss,
+                    on_step=True,
+                    on_epoch=True,
+                    prog_bar=False,
+                )
+            if entropy_reg is not None:
+                self.log(
+                    "train/entropy_reg",
+                    entropy_reg,
+                    on_step=True,
+                    on_epoch=True,
+                    prog_bar=False,
+                )
+        if self.task_cfg["target_type"] == "binary":
+            acc = compute_binary_accuracy(bag_logits, bag_targets)
+            self.log(
+                f"{stage}/acc",
+                acc,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=stage != "train",
+            )
+
+    # ------------------------------------------------------------------
+    # Shared step
+    # ------------------------------------------------------------------
+
+    def _shared_step(self, batch, stage: str):
+        payload = self._forward_bags(batch)
+        patch_logits = payload["patch_logits"]
+        bag_logits = payload["bag_logits"]
+        ordered_bag_ids = payload["ordered_bag_ids"]
+        bag_attention = payload["bag_attention"]
+        bag_indices = payload["bag_indices"]
+        bag_targets = payload["bag_targets"]
+        bag_weights = payload["bag_weights"]
+
+        region_loss, node_aux_loss, entropy_reg, total_loss = self._compute_losses(
+            patch_logits=patch_logits,
+            bag_logits=bag_logits,
+            bag_targets=bag_targets,
+            bag_weights=bag_weights,
+            ordered_bag_ids=ordered_bag_ids,
+            bag_indices=bag_indices,
+            bag_attention=bag_attention,
+            stage=stage,
+        )
+        self._log_stage_metrics(
+            stage=stage,
+            loss_value=total_loss if stage == "train" else region_loss,
+            bag_logits=bag_logits,
+            bag_targets=bag_targets,
+            region_loss=region_loss if self.use_attention else None,
+            node_aux_loss=node_aux_loss,
+            entropy_reg=entropy_reg,
+        )
+
+        result = {
+            "loss": total_loss if stage == "train" else region_loss,
+            "bag_ids": list(ordered_bag_ids),
+            "bag_logits": bag_logits,
+            "bag_targets": bag_targets,
+        }
+        if self.use_attention:
+            result.update(
+                {
+                    "bag_attention": bag_attention,
+                    "region_loss": region_loss,
+                    "node_aux_loss": node_aux_loss,
+                    "entropy_reg": entropy_reg,
+                }
+            )
+        return result
+
+    # ------------------------------------------------------------------
+    # Training / validation / test / predict steps
+    # ------------------------------------------------------------------
+
+    def training_step(self, batch, batch_idx):
+        if not self.region_accum_enabled:
+            return self._shared_step(batch, "train")["loss"]
+
+        # ---------- Region accumulation path (MIL only) ---------------
+        payload = self._forward_bags(batch)
+        bag_logits = payload["bag_logits"]
+        bag_targets = payload["bag_targets"]
+        bag_weights = payload["bag_weights"]
+        ordered_bag_ids = payload["ordered_bag_ids"]
+        bag_indices = payload["bag_indices"]
+        bag_attention = payload["bag_attention"]
+        patch_logits = payload["patch_logits"]
+
+        region_losses: list[torch.Tensor] = []
+        total_losses: list[torch.Tensor] = []
+        node_losses: list[torch.Tensor] = []
+        entropies: list[torch.Tensor] = []
+        for idx, bag_id in enumerate(ordered_bag_ids):
+            region_w = (
+                bag_weights[idx : idx + 1] if bag_weights is not None else None
+            )
+            region_loss, node_aux_loss, entropy_reg, total_loss = self._compute_losses(
+                patch_logits=patch_logits,
+                bag_logits=bag_logits[idx : idx + 1],
+                bag_targets=bag_targets[idx : idx + 1],
+                bag_weights=region_w,
+                bag_indices=[bag_indices[idx]],
+                ordered_bag_ids=[bag_id],
+                bag_attention={bag_id: bag_attention[bag_id]},
+                stage="train",
+            )
+            self._region_total_loss_buffer.append(total_loss)
+            region_losses.append(region_loss.detach())
+            total_losses.append(total_loss.detach())
+            if node_aux_loss is not None:
+                node_losses.append(node_aux_loss.detach())
+            if entropy_reg is not None:
+                entropies.append(entropy_reg.detach())
+
+        if not total_losses:
+            return torch.zeros((), device=self.device)
+
+        flush_losses = self._flush_region_buffer_if_needed(force=False)
+        for flush_loss in flush_losses:
+            self.log(
+                "train/flush_loss",
+                flush_loss,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=False,
+            )
+        self.log(
+            "train/region_buffer_size",
+            float(len(self._region_total_loss_buffer)),
+            on_step=True,
+            on_epoch=False,
+            prog_bar=False,
+        )
+        mean_total_loss = torch.stack(total_losses).mean()
+        mean_region_loss = torch.stack(region_losses).mean()
+        mean_node_aux = torch.stack(node_losses).mean() if node_losses else None
+        mean_entropy = torch.stack(entropies).mean() if entropies else None
+        self._log_stage_metrics(
+            stage="train",
+            loss_value=mean_total_loss,
+            bag_logits=bag_logits,
+            bag_targets=bag_targets,
+            region_loss=mean_region_loss,
+            node_aux_loss=mean_node_aux,
+            entropy_reg=mean_entropy,
+        )
+
+        return mean_total_loss
+
+    def validation_step(self, batch, batch_idx):
+        return self._shared_step(batch, "val")
+
+    def test_step(self, batch, batch_idx):
+        return self._shared_step(batch, "test")
+
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        out = self._forward_bags(batch, allow_missing_targets=True)
+        keys = ["ordered_bag_ids", "bag_logits"]
+        if out["bag_targets"] is not None:
+            keys.append("bag_targets")
+        if self.use_attention:
+            keys.append("bag_attention")
+        return {
+            ("bag_ids" if k == "ordered_bag_ids" else k): (
+                out[k].detach() if hasattr(out[k], "detach") else out[k]
+            )
+            for k in keys
+        }
+
+    # ------------------------------------------------------------------
+    # Region accumulation helpers (MIL only)
+    # ------------------------------------------------------------------
+
+    def _flush_region_buffer_if_needed(
+        self, *, force: bool
+    ) -> list[torch.Tensor]:
+        if not self._region_total_loss_buffer:
+            return []
+        if (
+            not force
+            and len(self._region_total_loss_buffer)
+            < self.region_accum_hyperbatch_size
+        ):
+            return []
+
+        optimizer = self.optimizers()
+        if isinstance(optimizer, (list, tuple)):
+            optimizer = optimizer[0]
+        flush_losses: list[torch.Tensor] = []
+
+        while self._region_total_loss_buffer:
+            if force:
+                chunk = self._region_total_loss_buffer
+            else:
+                if len(self._region_total_loss_buffer) < self.region_accum_hyperbatch_size:
+                    break
+                chunk = self._region_total_loss_buffer[
+                    : self.region_accum_hyperbatch_size
+                ]
+
+            total_loss = torch.stack(chunk, dim=0).mean()
+            self.manual_backward(total_loss)
+            optimizer.step()
+            optimizer.zero_grad(set_to_none=True)
+
+            scheduler = self.lr_schedulers()
+            if scheduler is not None:
+                if isinstance(scheduler, (list, tuple)):
+                    for sch in scheduler:
+                        sch.step()
+                else:
+                    scheduler.step()
+            self._manual_optimizer_steps += 1
+            self.log(
+                "train/manual_optimizer_steps",
+                float(self._manual_optimizer_steps),
+                on_step=not force,
+                on_epoch=force,
+                prog_bar=False,
+            )
+            flush_losses.append(total_loss.detach())
+
+            del self._region_total_loss_buffer[: len(chunk)]
+            if force:
+                break
+
+        return flush_losses
+
+    def on_train_start(self) -> None:
+        if self.region_accum_enabled:
+            self._region_total_loss_buffer.clear()
+
+    def on_train_epoch_end(self) -> None:
+        if not self.region_accum_enabled:
+            return
+        flush_losses = self._flush_region_buffer_if_needed(force=True)
+        for flush_loss in flush_losses:
+            self.log(
+                "train/epoch_end_flush_loss",
+                flush_loss,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=False,
+            )
+
+    # ------------------------------------------------------------------
+    # Optimizer / scheduler
+    # ------------------------------------------------------------------
+
+    def configure_optimizers(self):
+        if not self._built:
+            self.setup("fit")
+
+        optimization_cfg = dict(self.task_cfg.get("optimization", {}))
+        backbone_lr = optimization_cfg.get("backbone_lr")
+        attention_lr = optimization_cfg.get("attention_lr")
+
+        params = [p for p in self.parameters() if p.requires_grad]
+
+        if (
+            self.use_attention
+            and backbone_lr is not None
+            and attention_lr is not None
+        ):
+            seen: set[int] = set()
+
+            def _collect_params(module) -> list[torch.nn.Parameter]:
+                out: list[torch.nn.Parameter] = []
+                if module is None:
+                    return out
+                for param in module.parameters():
+                    if not param.requires_grad:
+                        continue
+                    pid = id(param)
+                    if pid in seen:
+                        continue
+                    seen.add(pid)
+                    out.append(param)
+                return out
+
+            backbone_params = _collect_params(
+                self.encoder
+            ) + _collect_params(self.graph_head)
+            attention_params = _collect_params(self.attention)
+            param_groups: list[dict] = []
+            if backbone_params:
+                param_groups.append(
+                    {"params": backbone_params, "lr": float(backbone_lr)}
+                )
+            if attention_params:
+                param_groups.append(
+                    {"params": attention_params, "lr": float(attention_lr)}
+                )
+            if param_groups:
+                params = param_groups
+
+        optimizer = instantiate_optimizer(self.optim_cfg, params)
+        scheduler = instantiate_scheduler_with_warmup(
+            self.scheduler_cfg,
+            optimizer,
+            warmup_cfg=self.task_cfg.get("lr_warmup"),
+        )
+        if scheduler is None:
+            return optimizer
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",
+                "frequency": 1,
+            },
+        }

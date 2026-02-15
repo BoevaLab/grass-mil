@@ -109,6 +109,24 @@ def test_shadow_custom_unit_loader():
     assert hasattr(batch, "edge_index")
 
 
+def test_shadow_custom_without_torch_sparse_rejects_transform(monkeypatch):
+    pytest.importorskip("torch_geometric")
+    from src.data.components import samplers as samplers_mod
+    from src.data.components.samplers import ShadowCustomStrategy
+
+    data = _toy_dataset(n_graphs=1)[0]
+    monkeypatch.setattr(samplers_mod, "WITH_TORCH_SPARSE", False)
+    strategy = ShadowCustomStrategy(runtime={"enabled": False})
+    with pytest.raises(ValueError, match="requires torch-sparse"):
+        strategy.build_unit_loader(
+            data=data,
+            depth=2,
+            num_neighbors=8,
+            batch_size=4,
+            transform=lambda d: d,
+        )
+
+
 def test_shadow_custom_runtime_dataset_loader_uses_unit_loader(monkeypatch):
     pytest.importorskip("torch_geometric")
     from src.data.components.samplers import get_sampler_strategy
@@ -188,6 +206,47 @@ def test_shadow_runtime_normalizes_graph_level_metadata(monkeypatch):
     assert isinstance(batch.region_id, list) and len(batch.region_id) == 2
     assert batch.graph_y.size(0) == 2
     assert batch.graph_w.size(0) == 2
+
+
+def test_runtime_loader_len_matches_yielded_batches(monkeypatch):
+    pytest.importorskip("torch_geometric")
+    from src.data.components.samplers import get_sampler_strategy
+
+    dataset = _toy_dataset_with_graph_attrs(n_graphs=2, n_nodes=6)
+    strategy = get_sampler_strategy(
+        {
+            "name": "shadow_custom",
+            "kwargs": {},
+            "runtime": {
+                "enabled": True,
+                "depth": 2,
+                "num_neighbors": 8,
+                "subgraph_batch_size": 4,
+                "proportional_root_sampling": False,
+            },
+        }
+    )
+
+    def _fake_unit_loader(data, **kwargs):
+        roots = kwargs.get("node_idx")
+        if roots is None:
+            n_roots = int(data.num_nodes)
+        else:
+            n_roots = int(roots.numel())
+        bs = int(kwargs["batch_size"])
+        n_batches = (n_roots + bs - 1) // bs
+        return [data] * n_batches
+
+    monkeypatch.setattr(strategy, "build_unit_loader", _fake_unit_loader)
+    loader = strategy.build_dataset_loader(
+        dataset=dataset,
+        batch_size=1,
+        num_workers=0,
+        pin_memory=False,
+        shuffle=False,
+    )
+    yielded = sum(1 for _ in loader)
+    assert len(loader) == yielded
 
 
 def test_runtime_shadow_config_proportional_defaults():

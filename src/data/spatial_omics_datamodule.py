@@ -60,6 +60,7 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         manifest: Optional[Dict[str, Any]] = None,
         graph_labels: Optional[Dict[str, Any]] = None,
         transforms: Optional[list[Dict[str, Any]]] = None,
+        split_seed: int = 42,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False)
@@ -71,6 +72,9 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         self.dataset_train: Optional[SpatialOmicsGraphDataset] = None
         self.dataset_val: Optional[SpatialOmicsGraphDataset] = None
         self.dataset_test: Optional[SpatialOmicsGraphDataset] = None
+        self.split_seed = int(split_seed)
+        self._cached_split_indices: Optional[Tuple[list[int], list[int], list[int]]] = None
+        self._cached_split_total: Optional[int] = None
 
         self.split_config = SplitConfig(
             train_val_test_split=tuple(split["train_val_test_split"]),
@@ -94,10 +98,14 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             coord_scale_um=coord_scale_um,
             sample_unit=sample_unit,
             reducer_scope=reducer_scope,
+            reducer_fit_mode=str(feature_reducer.get("fit_mode", "train_only")),
             keep_raw_molecular=keep_raw_molecular,
             force=force_precompute,
             min_cells=min_cells,
             use_molecular_features=use_molecular_features,
+            split_by=self.split_config.split_by,
+            split_ratios=self.split_config.train_val_test_split,
+            split_seed=self.split_seed,
         )
         self.categorical_feature_config = CategoricalFeatureConfig.from_dict(
             categorical_features
@@ -125,25 +133,50 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         index_path = Path(self.processed_dir) / "processed_index.json"
         base_dataset = SpatialOmicsGraphDataset(index_path)
 
-        if self.split_config.split_by == "patch":
-            entries = base_dataset.entries
+        if _entries_have_persisted_splits(base_dataset.entries):
+            self.dataset_train = _subset_dataset_from_entries(
+                base_dataset,
+                [entry for entry in base_dataset.entries if entry.split == "train"],
+                self.transforms,
+            )
+            self.dataset_val = _subset_dataset_from_entries(
+                base_dataset,
+                [entry for entry in base_dataset.entries if entry.split == "val"],
+                self.transforms,
+            )
+            self.dataset_test = _subset_dataset_from_entries(
+                base_dataset,
+                [entry for entry in base_dataset.entries if entry.split == "test"],
+                self.transforms,
+            )
         else:
-            entries = _group_entries_by_sample(base_dataset.entries)
+            if self.split_config.split_by == "patch":
+                entries = base_dataset.entries
+            else:
+                entries = _group_entries_by_sample(base_dataset.entries)
 
-        train_idx, val_idx, test_idx = _split_indices(
-            len(entries),
-            self.split_config.train_val_test_split,
-        )
+            total_entries = len(entries)
+            if (
+                self._cached_split_indices is None
+                or self._cached_split_total != total_entries
+            ):
+                self._cached_split_indices = _split_indices(
+                    total_entries,
+                    self.split_config.train_val_test_split,
+                    seed=self.split_seed,
+                )
+                self._cached_split_total = total_entries
+            train_idx, val_idx, test_idx = self._cached_split_indices
 
-        self.dataset_train = _subset_dataset(
-            base_dataset, entries, train_idx, self.transforms
-        )
-        self.dataset_val = _subset_dataset(
-            base_dataset, entries, val_idx, self.transforms
-        )
-        self.dataset_test = _subset_dataset(
-            base_dataset, entries, test_idx, self.transforms
-        )
+            self.dataset_train = _subset_dataset(
+                base_dataset, entries, train_idx, self.transforms
+            )
+            self.dataset_val = _subset_dataset(
+                base_dataset, entries, val_idx, self.transforms
+            )
+            self.dataset_test = _subset_dataset(
+                base_dataset, entries, test_idx, self.transforms
+            )
         self._ensure_sampler_strategy()
 
     def _ensure_sampler_strategy(self) -> BaseSamplerStrategy:
@@ -183,17 +216,61 @@ class SpatialOmicsDataModule(L.LightningDataModule):
 
 
 def _split_indices(
-    total: int, ratios: Tuple[float, float, float]
+    total: int, ratios: Tuple[float, float, float], seed: int = 42
 ) -> Tuple[list[int], list[int], list[int]]:
     import numpy as np
 
     train_r, val_r, test_r = ratios
     if not np.isclose(train_r + val_r + test_r, 1.0):
         raise ValueError("train_val_test_split must sum to 1.0")
+    if total <= 0:
+        return [], [], []
+
+    ratio_arr = np.asarray([train_r, val_r, test_r], dtype=float)
+    raw_counts = ratio_arr * float(total)
+    counts = np.floor(raw_counts).astype(int)
+
+    remainder = int(total - counts.sum())
+    if remainder > 0:
+        fractions = raw_counts - counts
+        # Never assign remainder to splits explicitly configured with zero ratio.
+        fractions[ratio_arr <= 0.0] = -1.0
+        order = np.argsort(-fractions)
+        ptr = 0
+        while remainder > 0 and ptr < len(order):
+            idx = int(order[ptr])
+            if fractions[idx] < 0:
+                break
+            counts[idx] += 1
+            remainder -= 1
+            ptr += 1
+        # Fallback in pathological numeric cases.
+        while remainder > 0:
+            counts[0] += 1
+            remainder -= 1
+
+    # Keep train split usable whenever train ratio is non-zero and data exists.
+    if ratio_arr[0] > 0.0 and counts[0] == 0:
+        donor_idx = int(np.argmax(counts[1:]) + 1) if counts[1:].sum() > 0 else -1
+        if donor_idx >= 0 and counts[donor_idx] > 0:
+            counts[donor_idx] -= 1
+            counts[0] += 1
+        else:
+            counts[0] = 1
+            # Maintain exact total by clipping other counts to zero.
+            overflow = int(counts.sum() - total)
+            for idx in (2, 1):
+                if overflow <= 0:
+                    break
+                take = min(overflow, counts[idx])
+                counts[idx] -= take
+                overflow -= take
+
     indices = np.arange(total)
-    np.random.shuffle(indices)
-    train_end = int(total * train_r)
-    val_end = train_end + int(total * val_r)
+    rng = np.random.default_rng(seed)
+    rng.shuffle(indices)
+    train_end = int(counts[0])
+    val_end = train_end + int(counts[1])
     return (
         indices[:train_end].tolist(),
         indices[train_end:val_end].tolist(),
@@ -226,3 +303,25 @@ def _subset_dataset(
     if transforms:
         return TransformDataset(subset, transforms)
     return subset
+
+
+def _subset_dataset_from_entries(
+    dataset: SpatialOmicsGraphDataset,
+    selected_entries,
+    transforms,
+) -> SpatialOmicsGraphDataset:
+    subset = SpatialOmicsGraphDataset(dataset.index_path)
+    subset.entries = list(selected_entries)
+    subset.label_maps = dataset.label_maps
+    subset.reducer_state = dataset.reducer_state
+    subset.graph_label_maps = dataset.graph_label_maps
+    if transforms:
+        return TransformDataset(subset, transforms)
+    return subset
+
+
+def _entries_have_persisted_splits(entries) -> bool:
+    if not entries:
+        return False
+    valid = {"train", "val", "test"}
+    return all(getattr(entry, "split", None) in valid for entry in entries)

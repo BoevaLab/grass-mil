@@ -1,4 +1,5 @@
-_target_: src.models.supervised_mil_module.SupervisedMILModule
+_target_: src.models.supervised_module.SupervisedModule
+_recursive_: false
 
 flags:
   use_ssl: false
@@ -20,6 +21,7 @@ encoder:
   edge_weight_index: 0
   edge_attr_dim: null
 
+# Attention block -- only used when task.aggregation == mil_attention.
 attention:
   attention_type: gated_projected
   input_dim: 128

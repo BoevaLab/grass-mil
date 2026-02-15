@@ -64,6 +64,7 @@ graph_builder:
 
 feature_reducer:
   name: identity
+  fit_mode: train_only # train_only | global
   kwargs: {}
 
 sampler:

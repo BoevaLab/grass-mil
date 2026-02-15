@@ -36,8 +36,8 @@ def test_training_module_yaml_instantiation():
     base = Path("configs/model")
     cases = [
         ("bgrl_module.yaml", "pretrain_bgrl.yaml", "cosine_step.yaml"),
-        ("supervised_mean_module.yaml", "finetune_mean.yaml", "cosine_epoch.yaml"),
-        ("supervised_mil_module.yaml", "finetune_mil.yaml", "cosine_epoch.yaml"),
+        ("supervised_module.yaml", "finetune_mean.yaml", "cosine_epoch.yaml"),
+        ("supervised_module.yaml", "finetune_mil.yaml", "cosine_epoch.yaml"),
     ]
     for model_name, task_name, scheduler_name in cases:
         path = base / model_name

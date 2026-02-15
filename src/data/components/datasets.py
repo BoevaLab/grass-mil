@@ -15,6 +15,7 @@ class ProcessedIndexEntry:
     sample_id: str
     region_id: Optional[str]
     patch_id: str
+    split: Optional[str] = None
 
 
 class SpatialOmicsGraphDataset(Dataset):

@@ -74,7 +74,9 @@ class RuntimeShadowConfig:
             replace=bool(cfg.get("replace", False)),
             shuffle_subgraphs=bool(cfg.get("shuffle_subgraphs", True)),
             node_idx=cfg.get("node_idx"),
-            proportional_root_sampling=bool(cfg.get("proportional_root_sampling", True)),
+            proportional_root_sampling=bool(
+                cfg.get("proportional_root_sampling", True)
+            ),
             property_name=str(cfg.get("property_name", "cell_type")),
             weight_mode=weight_mode,
             min_weight=min_weight,
@@ -84,7 +86,9 @@ class RuntimeShadowConfig:
 def _build_weighted_node_idx(
     data: Data, *, property_name: str, weight_mode: str, min_weight: float
 ) -> Optional[torch.Tensor]:
-    if not hasattr(data, "categorical_index") or not hasattr(data, "categorical_slices"):
+    if not hasattr(data, "categorical_index") or not hasattr(
+        data, "categorical_slices"
+    ):
         return None
     categorical_index = getattr(data, "categorical_index")
     categorical_slices = getattr(data, "categorical_slices")
@@ -92,7 +96,10 @@ def _build_weighted_node_idx(
         return None
     if property_name not in categorical_slices:
         return None
-    if not isinstance(categorical_index, torch.Tensor) or categorical_index.numel() == 0:
+    if (
+        not isinstance(categorical_index, torch.Tensor)
+        or categorical_index.numel() == 0
+    ):
         return None
     if categorical_index.dim() != 2:
         return None
@@ -182,8 +189,28 @@ class _RuntimeUnitShadowDatasetLoader:
         self.kwargs = kwargs
 
     def __len__(self) -> int:
-        # Estimated to keep Lightning progress plumbing stable.
-        return len(self.dataset)
+        if len(self.dataset) == 0:
+            return 0
+        subgraph_batch_size = int(self.runtime.subgraph_batch_size)
+        if subgraph_batch_size <= 0:
+            subgraph_batch_size = max(1, int(self.dataset_batch_size))
+
+        total_batches = 0
+        for idx in range(len(self.dataset)):
+            unit_data = self.dataset[idx]
+            effective_node_idx = self.runtime.node_idx
+            if self.runtime.proportional_root_sampling:
+                computed_node_idx = _build_weighted_node_idx(
+                    unit_data,
+                    property_name=self.runtime.property_name,
+                    weight_mode=self.runtime.weight_mode,
+                    min_weight=self.runtime.min_weight,
+                )
+                if computed_node_idx is not None:
+                    effective_node_idx = computed_node_idx
+            num_roots = _resolve_num_roots(unit_data, effective_node_idx)
+            total_batches += int((num_roots + subgraph_batch_size - 1) // subgraph_batch_size)
+        return total_batches
 
     def __iter__(self):
         if len(self.dataset) == 0:
@@ -209,6 +236,15 @@ class _RuntimeUnitShadowDatasetLoader:
                 )
                 if computed_node_idx is not None:
                     effective_node_idx = computed_node_idx
+            unit_loader_kwargs: Dict[str, Any] = {
+                "num_workers": self.num_workers,
+                "pin_memory": self.pin_memory,
+                "persistent_workers": self.kwargs.get("persistent_workers", False)
+                if self.num_workers > 0
+                else False,
+            }
+            if self.num_workers > 0 and "prefetch_factor" in self.kwargs:
+                unit_loader_kwargs["prefetch_factor"] = self.kwargs["prefetch_factor"]
             loader = self.strategy.build_unit_loader(
                 data=unit_data,
                 depth=int(self.runtime.depth),
@@ -218,10 +254,7 @@ class _RuntimeUnitShadowDatasetLoader:
                 replace=bool(self.runtime.replace),
                 shuffle=bool(self.runtime.shuffle_subgraphs and self.shuffle),
                 transform=self.kwargs.get("transform"),
-                num_workers=self.num_workers,
-                pin_memory=self.pin_memory,
-                persistent_workers=self.kwargs.get("persistent_workers", False),
-                prefetch_factor=self.kwargs.get("prefetch_factor", 2),
+                **unit_loader_kwargs,
             )
             for sub_batch in loader:
                 yield _normalize_shadow_batch(sub_batch, unit_data)
@@ -261,6 +294,7 @@ class IdentityBatchStrategy(BaseSamplerStrategy):
 
 class ShadowNativeStrategy(BaseSamplerStrategy):
     """Native PyG ShaDow sampler, to be used per graph unit."""
+
     def __init__(self, runtime: Optional[Dict[str, Any]] = None, **kwargs: Any):
         self.runtime = RuntimeShadowConfig.from_dict(runtime)
         self.kwargs = kwargs
@@ -314,23 +348,29 @@ class ShadowNativeStrategy(BaseSamplerStrategy):
                 "ShadowNativeStrategy does not support strict post-hoc per-subgraph transforms. "
                 "Use ShadowCustomStrategy instead."
             )
-        return ShaDowKHopSampler(
-            data=data,
-            depth=depth,
-            num_neighbors=num_neighbors,
-            node_idx=node_idx,
-            replace=replace,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            num_workers=kwargs.get("num_workers", 0),
-            pin_memory=kwargs.get("pin_memory", False),
-            persistent_workers=kwargs.get("persistent_workers", False),
-            prefetch_factor=kwargs.get("prefetch_factor", 2),
-        )
+        num_workers = kwargs.get("num_workers", 0)
+        loader_kwargs: Dict[str, Any] = {
+            "data": data,
+            "depth": depth,
+            "num_neighbors": num_neighbors,
+            "node_idx": node_idx,
+            "replace": replace,
+            "batch_size": batch_size,
+            "shuffle": shuffle,
+            "num_workers": num_workers,
+            "pin_memory": kwargs.get("pin_memory", False),
+            "persistent_workers": kwargs.get("persistent_workers", False)
+            if num_workers > 0
+            else False,
+        }
+        if num_workers > 0 and "prefetch_factor" in kwargs:
+            loader_kwargs["prefetch_factor"] = kwargs["prefetch_factor"]
+        return ShaDowKHopSampler(**loader_kwargs)
 
 
 class ShadowCustomStrategy(BaseSamplerStrategy):
     """Custom ShaDow sampler with optional per-subgraph transform support."""
+
     def __init__(self, runtime: Optional[Dict[str, Any]] = None, **kwargs: Any):
         self.runtime = RuntimeShadowConfig.from_dict(runtime)
         self.kwargs = kwargs
@@ -378,6 +418,11 @@ class ShadowCustomStrategy(BaseSamplerStrategy):
         **kwargs: Any,
     ):
         if not WITH_TORCH_SPARSE:
+            if transform is not None:
+                raise ValueError(
+                    "ShadowCustomStrategy transform support requires torch-sparse. "
+                    "Install torch-sparse or disable transforms."
+                )
             native = ShadowNativeStrategy(runtime={"enabled": False})
             return native.build_unit_loader(
                 data=data,
@@ -387,23 +432,28 @@ class ShadowCustomStrategy(BaseSamplerStrategy):
                 node_idx=node_idx,
                 replace=replace,
                 shuffle=shuffle,
-                transform=transform,
+                transform=None,
                 **kwargs,
             )
-        return _ShaDowKHopSamplerWithTransform(
-            data=data,
-            depth=depth,
-            num_neighbors=num_neighbors,
-            node_idx=node_idx,
-            replace=replace,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            transform=transform,
-            num_workers=kwargs.get("num_workers", 0),
-            pin_memory=kwargs.get("pin_memory", False),
-            persistent_workers=kwargs.get("persistent_workers", False),
-            prefetch_factor=kwargs.get("prefetch_factor", 2),
-        )
+        num_workers = kwargs.get("num_workers", 0)
+        loader_kwargs: Dict[str, Any] = {
+            "data": data,
+            "depth": depth,
+            "num_neighbors": num_neighbors,
+            "node_idx": node_idx,
+            "replace": replace,
+            "batch_size": batch_size,
+            "shuffle": shuffle,
+            "transform": transform,
+            "num_workers": num_workers,
+            "pin_memory": kwargs.get("pin_memory", False),
+            "persistent_workers": kwargs.get("persistent_workers", False)
+            if num_workers > 0
+            else False,
+        }
+        if num_workers > 0 and "prefetch_factor" in kwargs:
+            loader_kwargs["prefetch_factor"] = kwargs["prefetch_factor"]
+        return _ShaDowKHopSamplerWithTransform(**loader_kwargs)
 
 
 def _expand_graph_level_value(value: Any, count: int) -> Any:
@@ -447,7 +497,11 @@ def _normalize_shadow_batch(batch: Batch, source_data: Optional[Data] = None) ->
 
     for key in ["graph_y", "graph_w", "sample_id", "region_id", "patch_id"]:
         if hasattr(batch, key):
-            setattr(batch, key, _expand_graph_level_value(getattr(batch, key), num_subgraphs))
+            setattr(
+                batch,
+                key,
+                _expand_graph_level_value(getattr(batch, key), num_subgraphs),
+            )
         elif source_data is not None and hasattr(source_data, key):
             setattr(
                 batch,
@@ -581,6 +635,17 @@ class _ShaDowKHopSamplerWithTransform(torch.utils.data.DataLoader):
         from torch_geometric.utils import subgraph
 
         processed = []
+        num_subgraphs = len(batch.ptr) - 1
+        skip_keys = {
+            "x",
+            "edge_index",
+            "edge_attr",
+            "batch",
+            "ptr",
+            "root_n_id",
+            "adj_t",
+            "num_nodes",
+        }
         for i in range(len(batch.ptr) - 1):
             node_start = int(batch.ptr[i])
             node_end = int(batch.ptr[i + 1])
@@ -597,14 +662,44 @@ class _ShaDowKHopSamplerWithTransform(torch.utils.data.DataLoader):
                 edge_attr=sub_edge_attr,
                 root_n_id=batch.root_n_id[i : i + 1],
             )
-            for key in ["graph_y", "graph_w", "sample_id", "region_id", "patch_id"]:
-                if hasattr(batch, key):
-                    val = getattr(batch, key)
-                    if isinstance(val, torch.Tensor) and val.dim() > 0 and val.size(0) > i:
+            for key, val in batch:
+                if key in skip_keys:
+                    continue
+                if isinstance(val, torch.Tensor):
+                    if val.dim() > 0 and val.size(0) == num_subgraphs:
                         setattr(sub_data, key, val[i : i + 1])
-                    elif isinstance(val, list) and len(val) > i:
+                    elif val.dim() == 0:
+                        setattr(sub_data, key, val)
+                    elif val.dim() > 0 and val.size(0) == batch.x.size(0):
+                        # Node-level feature tensors are already represented by `x`.
+                        continue
+                    elif val.dim() > 0 and "edge_attr" in batch and val.size(0) == batch.edge_index.size(1):
+                        continue
+                    else:
+                        setattr(sub_data, key, val)
+                elif isinstance(val, list):
+                    if len(val) == num_subgraphs and len(val) > i:
                         setattr(sub_data, key, [val[i]])
                     else:
                         setattr(sub_data, key, val)
+                elif isinstance(val, tuple):
+                    if len(val) == num_subgraphs and len(val) > i:
+                        setattr(sub_data, key, (val[i],))
+                    else:
+                        setattr(sub_data, key, val)
+                else:
+                    setattr(sub_data, key, val)
             processed.append(self.transform(sub_data))
         return Batch.from_data_list(processed)
+
+
+def _resolve_num_roots(data: Data, node_idx: Optional[torch.Tensor]) -> int:
+    if node_idx is None:
+        return int(getattr(data, "num_nodes", 0))
+    if isinstance(node_idx, torch.Tensor):
+        if node_idx.dtype == torch.bool:
+            return int(node_idx.sum().item())
+        return int(node_idx.numel())
+    if hasattr(node_idx, "__len__"):
+        return int(len(node_idx))
+    return int(getattr(data, "num_nodes", 0))

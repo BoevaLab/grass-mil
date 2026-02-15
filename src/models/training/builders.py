@@ -16,10 +16,18 @@ from src.models.components import (
 
 
 def infer_encoder_input_dim(module: L.LightningModule, fallback: int = 0) -> int:
-    trainer = module.trainer
+    try:
+        trainer = module.trainer
+    except RuntimeError:
+        return fallback
     if trainer is None or trainer.datamodule is None:
         return fallback
     datamodule = trainer.datamodule
+    if not hasattr(datamodule, "dataset_train") or datamodule.dataset_train is None:
+        # Datamodule may not have been set up yet; trigger setup so we can
+        # inspect the first sample and infer input_dim.
+        if hasattr(datamodule, "setup"):
+            datamodule.setup("fit")
     if not hasattr(datamodule, "dataset_train") or datamodule.dataset_train is None:
         return fallback
     dataset = datamodule.dataset_train

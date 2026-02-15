@@ -51,11 +51,11 @@ def _make_pretrain_ckpt(path: Path) -> str:
     "task_name,model_name,use_pretrained,advanced_mil",
     [
         ("pretrain_bgrl", "bgrl_module", False, False),
-        ("finetune_mean", "supervised_mean_module", False, False),
-        ("finetune_mil", "supervised_mil_module", False, False),
-        ("finetune_mil", "supervised_mil_module", False, True),
-        ("finetune_mean", "supervised_mean_module", True, False),
-        ("finetune_mil", "supervised_mil_module", True, False),
+        ("finetune_mean", "supervised_module", False, False),
+        ("finetune_mil", "supervised_module", False, False),
+        ("finetune_mil", "supervised_module", False, True),
+        ("finetune_mean", "supervised_module", True, False),
+        ("finetune_mil", "supervised_module", True, False),
     ],
 )
 def test_training_regimes_fast_dev_run(
@@ -93,8 +93,15 @@ def test_training_regimes_fast_dev_run(
             cfg_train.model.task.entropy_reg.enabled = True
             cfg_train.model.task.entropy_reg.mode = "attention_shaped_target"
             cfg_train.model.task.entropy_reg.weight = 0.01
+        if use_pretrained:
+            cfg_train.model.init_from_ckpt = _make_pretrain_ckpt(tmp_path)
+            cfg_train.model.init_strict = False
+            # Align encoder dims with the mock checkpoint (hidden_dim=32, out_dim=32).
+            cfg_train.model.encoder.hidden_dim = 32
+            cfg_train.model.encoder.out_dim = 32
         if "graph_head" in cfg_train.model:
             cfg_train.model.graph_head.input_dim = cfg_train.model.encoder.out_dim
+            cfg_train.model.graph_head.hidden_dim = cfg_train.model.encoder.out_dim
         if "attention" in cfg_train.model:
             cfg_train.model.attention.input_dim = cfg_train.model.encoder.out_dim
         cfg_train.trainer.fast_dev_run = True
@@ -102,9 +109,6 @@ def test_training_regimes_fast_dev_run(
         cfg_train.trainer.devices = 1
         cfg_train.train = True
         cfg_train.test = False
-        if use_pretrained:
-            cfg_train.model.init_from_ckpt = _make_pretrain_ckpt(tmp_path)
-            cfg_train.model.init_strict = False
 
     HydraConfig().set_config(cfg_train)
     metric_dict, _ = train(cfg_train)
@@ -124,10 +128,10 @@ def test_runtime_shadow_path_with_real_datamodule(cfg_train):
         cfg_train.data.sampler.runtime.num_neighbors = 8
         cfg_train.data.sampler.runtime.subgraph_batch_size = 8
 
-        cfg_train.task = _load_task_cfg("finetune_mean")
-        cfg_train.model = _load_model_cfg("supervised_mean_module")
+        cfg_train.task = _load_task_cfg("pretrain_bgrl")
+        cfg_train.model = _load_model_cfg("bgrl_module")
         cfg_train.optim = OmegaConf.load(Path("configs/optim/adamw.yaml"))
-        cfg_train.scheduler = OmegaConf.load(Path("configs/scheduler/cosine_epoch.yaml"))
+        cfg_train.scheduler = OmegaConf.load(Path("configs/scheduler/cosine_step.yaml"))
         cfg_train.model.task = cfg_train.task
         cfg_train.model.optim = cfg_train.optim
         cfg_train.model.scheduler = cfg_train.scheduler

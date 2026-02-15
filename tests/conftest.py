@@ -6,7 +6,7 @@ import pytest
 import rootutils
 from hydra import compose, initialize
 from hydra.core.global_hydra import GlobalHydra
-from omegaconf import DictConfig, open_dict
+from omegaconf import DictConfig, OmegaConf, open_dict
 
 
 @pytest.fixture(scope="package")
@@ -22,13 +22,22 @@ def cfg_train_global() -> DictConfig:
         with open_dict(cfg):
             cfg.paths.root_dir = str(rootutils.find_root(indicator=".project-root"))
             cfg.trainer.max_epochs = 1
-            cfg.trainer.limit_train_batches = 0.01
-            cfg.trainer.limit_val_batches = 0.1
-            cfg.trainer.limit_test_batches = 0.1
+            cfg.trainer.limit_train_batches = 1.0
+            cfg.trainer.limit_val_batches = 1.0
+            cfg.trainer.limit_test_batches = 1.0
             cfg.trainer.accelerator = "cpu"
             cfg.trainer.devices = 1
-            cfg.data.num_workers = 0
-            cfg.data.pin_memory = False
+            # Use self-contained synthetic data instead of real manifest
+            cfg.data = OmegaConf.create(
+                {
+                    "_target_": "tests.helpers.synthetic_datamodule.SyntheticBagDataModule",
+                    "batch_size": 4,
+                    "num_workers": 0,
+                    "pin_memory": False,
+                    "input_dim": 8,
+                }
+            )
+            cfg.model.encoder.input_dim = 8
             cfg.extras.print_config = False
             cfg.extras.enforce_tags = False
             cfg.logger = None
@@ -51,11 +60,20 @@ def cfg_eval_global() -> DictConfig:
         with open_dict(cfg):
             cfg.paths.root_dir = str(rootutils.find_root(indicator=".project-root"))
             cfg.trainer.max_epochs = 1
-            cfg.trainer.limit_test_batches = 0.1
+            cfg.trainer.limit_test_batches = 1.0
             cfg.trainer.accelerator = "cpu"
             cfg.trainer.devices = 1
-            cfg.data.num_workers = 0
-            cfg.data.pin_memory = False
+            # Use self-contained synthetic data instead of real manifest
+            cfg.data = OmegaConf.create(
+                {
+                    "_target_": "tests.helpers.synthetic_datamodule.SyntheticBagDataModule",
+                    "batch_size": 4,
+                    "num_workers": 0,
+                    "pin_memory": False,
+                    "input_dim": 8,
+                }
+            )
+            cfg.model.encoder.input_dim = 8
             cfg.extras.print_config = False
             cfg.extras.enforce_tags = False
             cfg.logger = None

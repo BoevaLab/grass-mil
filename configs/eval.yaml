@@ -4,7 +4,7 @@ defaults:
   - _self_
   - data: spatial_omics # choose datamodule with `test_dataloader()` for evaluation
   - task: finetune_mean
-  - model: supervised_mean_module
+  - model: supervised_module
   - optim: adamw
   - scheduler: cosine_epoch
   - logger: null
