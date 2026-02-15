@@ -456,6 +456,7 @@ class SpatialOmicsPreprocessor:
                     cell_id_column=cfg.cell_id_column,
                     categorical_label_columns=cfg.categorical_label_columns,
                     molecular_columns=cfg.molecular_columns,
+                    use_molecular_features=cfg.use_molecular_features,
                     sep="\t",
                 )
             return load_csv_table(

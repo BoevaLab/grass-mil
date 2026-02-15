@@ -62,3 +62,24 @@ def test_ssl_factory_requires_hidden_size():
     )
     with pytest.raises(ValueError, match="ssl.predictor.hidden_size is required"):
         build_ssl(True, encoder, {"method": "bgrl", "predictor": {}})
+
+
+def test_ssl_factory_accepts_hydra_target_in_predictor_cfg():
+    from src.models.components.backbones import EncoderConfig, GNNEncoder
+    from src.models.components.factory import build_ssl
+
+    encoder = GNNEncoder(
+        EncoderConfig(input_dim=4, hidden_dim=8, out_dim=8, num_layers=1)
+    )
+    ssl_model = build_ssl(
+        True,
+        encoder,
+        {
+            "method": "bgrl",
+            "predictor": {
+                "_target_": "src.models.components.ssl.MLPPredictor",
+                "hidden_size": 16,
+            },
+        },
+    )
+    assert ssl_model is not None

@@ -62,6 +62,9 @@ def build_ssl(use_ssl: bool, encoder, ssl_config: Optional[Dict[str, Any]] = Non
     if "hidden_size" not in predictor_cfg:
         raise ValueError("ssl.predictor.hidden_size is required when use_ssl=True.")
     predictor_cfg = dict(predictor_cfg)
+    predictor_cfg.pop("_target_", None)
+    predictor_cfg.pop("_recursive_", None)
+    predictor_cfg.pop("_convert_", None)
     predictor_cfg.setdefault("input_size", encoder.output_dim)
     predictor_cfg.setdefault("output_size", encoder.output_dim)
     predictor = MLPPredictor(**predictor_cfg)
