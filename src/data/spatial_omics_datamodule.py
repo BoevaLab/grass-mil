@@ -60,6 +60,7 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         manifest: Optional[Dict[str, Any]] = None,
         graph_labels: Optional[Dict[str, Any]] = None,
         transforms: Optional[list[Dict[str, Any]]] = None,
+        split_seed: int = 42,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(logger=False)
@@ -71,6 +72,9 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         self.dataset_train: Optional[SpatialOmicsGraphDataset] = None
         self.dataset_val: Optional[SpatialOmicsGraphDataset] = None
         self.dataset_test: Optional[SpatialOmicsGraphDataset] = None
+        self.split_seed = int(split_seed)
+        self._cached_split_indices: Optional[Tuple[list[int], list[int], list[int]]] = None
+        self._cached_split_total: Optional[int] = None
 
         self.split_config = SplitConfig(
             train_val_test_split=tuple(split["train_val_test_split"]),
@@ -130,10 +134,18 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         else:
             entries = _group_entries_by_sample(base_dataset.entries)
 
-        train_idx, val_idx, test_idx = _split_indices(
-            len(entries),
-            self.split_config.train_val_test_split,
-        )
+        total_entries = len(entries)
+        if (
+            self._cached_split_indices is None
+            or self._cached_split_total != total_entries
+        ):
+            self._cached_split_indices = _split_indices(
+                total_entries,
+                self.split_config.train_val_test_split,
+                seed=self.split_seed,
+            )
+            self._cached_split_total = total_entries
+        train_idx, val_idx, test_idx = self._cached_split_indices
 
         self.dataset_train = _subset_dataset(
             base_dataset, entries, train_idx, self.transforms
@@ -183,7 +195,7 @@ class SpatialOmicsDataModule(L.LightningDataModule):
 
 
 def _split_indices(
-    total: int, ratios: Tuple[float, float, float]
+    total: int, ratios: Tuple[float, float, float], seed: int = 42
 ) -> Tuple[list[int], list[int], list[int]]:
     import numpy as np
 
@@ -191,7 +203,8 @@ def _split_indices(
     if not np.isclose(train_r + val_r + test_r, 1.0):
         raise ValueError("train_val_test_split must sum to 1.0")
     indices = np.arange(total)
-    np.random.shuffle(indices)
+    rng = np.random.default_rng(seed)
+    rng.shuffle(indices)
     train_end = int(total * train_r)
     val_end = train_end + int(total * val_r)
     return (

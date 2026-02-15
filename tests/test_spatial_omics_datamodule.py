@@ -297,3 +297,95 @@ def test_h5ad_obsm_spatial_coords(tmp_path: Path) -> None:
     assert np.allclose(table.coords, coords)
     assert table.molecular_features.shape[1] == 2
     assert list(table.molecular_feature_names) == ["0", "2"]
+
+
+def test_split_is_stable_across_setup_calls(tmp_path: Path) -> None:
+    pytest.importorskip("lightning")
+    pytest.importorskip("torch_geometric")
+
+    processed_dir = tmp_path / "processed"
+    processed_dir.mkdir(parents=True)
+    index_path = processed_dir / "processed_index.json"
+
+    entries = [
+        {
+            "path": str(tmp_path / f"graph_{i}.pt"),
+            "sample_id": f"sample_{i % 3}",
+            "region_id": f"region_{i % 2}",
+            "patch_id": f"patch_{i}",
+        }
+        for i in range(12)
+    ]
+    index_path.write_text(
+        json.dumps(
+            {
+                "entries": entries,
+                "label_maps": {},
+                "graph_label_maps": {},
+                "reducer_state": {},
+            }
+        )
+    )
+
+    from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
+
+    dm = SpatialOmicsDataModule(
+        data_dir=str(tmp_path),
+        raw_manifest_path=str(tmp_path / "unused_manifest.csv"),
+        processed_dir=str(processed_dir),
+        coord_scale_um=1.0,
+        sample_unit="tile",
+        batch_size=1,
+        num_workers=0,
+        pin_memory=False,
+        reducer_scope="sample",
+        keep_raw_molecular=False,
+        force_precompute=False,
+        min_cells=1,
+        use_molecular_features=False,
+        categorical_features={"include_labels": []},
+        split={"train_val_test_split": [0.5, 0.25, 0.25], "split_by": "patch"},
+        csv={
+            "sep": ",",
+            "coord_columns": ["x", "y"],
+            "cell_id_column": "cell_id",
+            "categorical_label_columns": [],
+            "molecular_columns": None,
+        },
+        h5ad={
+            "coord_columns": ["x", "y"],
+            "cell_id_column": None,
+            "categorical_label_columns": [],
+            "molecular_layer": None,
+        },
+        sce={
+            "assay_name": None,
+            "coord_source": "colData",
+            "coord_key": None,
+            "coord_columns": ["x", "y"],
+            "cell_id_column": None,
+            "categorical_label_columns": [],
+            "transpose_assay": True,
+        },
+        graph_builder={"name": "delaunay", "kwargs": {}},
+        feature_reducer={"name": "identity", "kwargs": {}},
+        tiling={"tile_size_um": 50.0, "stride_um": 50.0, "min_cells": 1},
+        manifest=None,
+        graph_labels=None,
+        transforms=[],
+        split_seed=7,
+    )
+
+    dm.setup()
+    first_train = [entry.patch_id for entry in dm.dataset_train.entries]
+    first_val = [entry.patch_id for entry in dm.dataset_val.entries]
+    first_test = [entry.patch_id for entry in dm.dataset_test.entries]
+
+    dm.setup()
+    second_train = [entry.patch_id for entry in dm.dataset_train.entries]
+    second_val = [entry.patch_id for entry in dm.dataset_val.entries]
+    second_test = [entry.patch_id for entry in dm.dataset_test.entries]
+
+    assert first_train == second_train
+    assert first_val == second_val
+    assert first_test == second_test
