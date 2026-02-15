@@ -22,7 +22,7 @@ def test_compute_supervised_loss_routes():
         WeightedBCEWithLogitsLoss,
         WeightedMSELoss,
     )
-    from src.models.training.losses import compute_supervised_loss
+    from src.models.training.loss_utils import compute_supervised_loss
 
     bce = compute_supervised_loss(
         loss_fn=WeightedBCEWithLogitsLoss(),
@@ -84,7 +84,7 @@ def test_attention_bag_aggregation_shapes():
 
 
 def test_build_mil_aux_targets_attention_shaped():
-    from src.models.training.losses import build_mil_aux_targets
+    from src.models.training.loss_utils import build_mil_aux_targets
 
     bag_targets = torch.tensor([[1.0], [0.0]])
     bag_indices = [[0, 1], [2, 3, 4]]
@@ -107,7 +107,7 @@ def test_build_mil_aux_targets_attention_shaped():
 
 
 def test_compute_aux_and_entropy_terms():
-    from src.models.training.losses import (
+    from src.models.training.loss_utils import (
         compute_aux_node_loss,
         compute_entropy_regularization,
     )
@@ -172,3 +172,109 @@ def test_supervised_predict_step_allows_missing_targets():
     assert out["bag_ids"] == ["b0", "b1"]
     assert out["bag_logits"].shape == (2, 1)
     assert "bag_targets" not in out
+
+
+def test_extract_bag_ids_falls_back_per_item_when_primary_missing():
+    from types import SimpleNamespace
+
+    from src.models.training.bagging import extract_bag_ids
+
+    batch = SimpleNamespace(region_id=[None, "", "r2"], sample_id=["s0", "s1", "s2"])
+    bag_ids = extract_bag_ids(batch, bag_key="region_id", bag_fallback_key="sample_id")
+    assert bag_ids == ["s0", "s1", "r2"]
+
+
+def test_gather_bag_targets_requires_consistent_labels_within_bag():
+    from types import SimpleNamespace
+
+    from src.models.training.bagging import gather_bag_targets
+
+    batch = SimpleNamespace(
+        graph_y=torch.tensor([[0.0], [1.0], [1.0]], dtype=torch.float32),
+        graph_w=torch.ones(3, 1),
+    )
+    with pytest.raises(ValueError, match="Inconsistent graph_y"):
+        gather_bag_targets(
+            batch=batch,
+            bag_indices=[[0, 1], [2]],
+            target_columns=None,
+        )
+
+
+def test_attention_shaped_aux_targets_are_detached():
+    from src.models.training.loss_utils import build_mil_aux_targets
+
+    bag_targets = torch.tensor([[1.0]], dtype=torch.float32)
+    bag_attention = {"b0": torch.tensor([0.2, 0.8], requires_grad=True)}
+    targets, weights = build_mil_aux_targets(
+        bag_targets=bag_targets,
+        bag_indices=[[0, 1]],
+        bag_ids=["b0"],
+        bag_attention=bag_attention,
+        target_mode="attention_shaped_ti",
+    )
+    assert targets.requires_grad is False
+    assert weights.requires_grad is False
+
+
+def test_region_buffer_flushes_in_hyperbatch_chunks():
+    pytest.importorskip("lightning")
+    pytest.importorskip("torch_geometric")
+    from src.models.supervised_module import SupervisedModule
+
+    module = SupervisedModule(
+        encoder={},
+        graph_head={},
+        attention={"input_dim": 1},
+        loss={},
+        optim={},
+        task={
+            "aggregation": "mil_attention",
+            "target_type": "binary",
+            "region_accumulation": {"enabled": True, "hyperbatch_size": 2},
+        },
+    )
+
+    class _Opt:
+        def __init__(self):
+            self.steps = 0
+            self.zeroes = 0
+
+        def step(self):
+            self.steps += 1
+
+        def zero_grad(self, set_to_none=True):
+            self.zeroes += 1
+
+    class _Sched:
+        def __init__(self):
+            self.steps = 0
+
+        def step(self):
+            self.steps += 1
+
+    opt = _Opt()
+    sch = _Sched()
+    module.optimizers = lambda: opt  # type: ignore[method-assign]
+    module.lr_schedulers = lambda: sch  # type: ignore[method-assign]
+    module.manual_backward = lambda loss: None  # type: ignore[method-assign]
+    module.log = lambda *args, **kwargs: None  # type: ignore[method-assign]
+
+    module._region_total_loss_buffer = [
+        torch.tensor(1.0),
+        torch.tensor(2.0),
+        torch.tensor(3.0),
+        torch.tensor(4.0),
+        torch.tensor(5.0),
+    ]
+    flushes = module._flush_region_buffer_if_needed(force=False)
+    assert len(flushes) == 2
+    assert len(module._region_total_loss_buffer) == 1
+    assert opt.steps == 2
+    assert sch.steps == 2
+
+    flushes = module._flush_region_buffer_if_needed(force=True)
+    assert len(flushes) == 1
+    assert len(module._region_total_loss_buffer) == 0
+    assert opt.steps == 3
+    assert sch.steps == 3

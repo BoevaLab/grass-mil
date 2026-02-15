@@ -16,7 +16,7 @@ from .checkpoint_init import (
     load_state_dict_with_optional_mapping,
     remap_encoder_keys,
 )
-from .losses import (
+from .loss_utils import (
     build_mil_aux_targets,
     compute_aux_node_loss,
     compute_binary_accuracy,

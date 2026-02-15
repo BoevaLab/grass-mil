@@ -153,6 +153,9 @@ def test_spatial_omics_datamodule_precompute(tmp_path: Path) -> None:
     assert data.categorical_index.shape[1] == 1
     assert data.categorical_slices["cell_type"] == 0
 
+    index_payload = json.loads((data_dir / "processed" / "processed_index.json").read_text())
+    assert all(entry.get("split") in {"train", "val", "test"} for entry in index_payload["entries"])
+
 
 def test_spatial_omics_datamodule_indices_no_molecular(tmp_path: Path) -> None:
     pytest.importorskip("torch_geometric")
@@ -402,3 +405,86 @@ def test_split_indices_keeps_train_non_empty_for_tiny_totals() -> None:
     train_idx, val_idx, test_idx = _split_indices(3, (0.8, 0.1, 0.1), seed=123)
     assert len(train_idx) >= 1
     assert len(train_idx) + len(val_idx) + len(test_idx) == 3
+
+
+def test_datamodule_uses_persisted_splits(tmp_path: Path) -> None:
+    pytest.importorskip("lightning")
+    pytest.importorskip("torch_geometric")
+
+    processed_dir = tmp_path / "processed"
+    processed_dir.mkdir(parents=True)
+    index_path = processed_dir / "processed_index.json"
+    entries = []
+    for i, split in enumerate(["train", "train", "val", "test", "test"]):
+        entries.append(
+            {
+                "path": str(tmp_path / f"graph_{i}.pt"),
+                "sample_id": f"sample_{i}",
+                "region_id": f"region_{i}",
+                "patch_id": f"patch_{i}",
+                "split": split,
+            }
+        )
+    index_path.write_text(
+        json.dumps(
+            {
+                "entries": entries,
+                "label_maps": {},
+                "graph_label_maps": {},
+                "reducer_state": {},
+            }
+        )
+    )
+
+    from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
+
+    dm = SpatialOmicsDataModule(
+        data_dir=str(tmp_path),
+        raw_manifest_path=str(tmp_path / "unused_manifest.csv"),
+        processed_dir=str(processed_dir),
+        coord_scale_um=1.0,
+        sample_unit="tile",
+        batch_size=1,
+        num_workers=0,
+        pin_memory=False,
+        reducer_scope="sample",
+        keep_raw_molecular=False,
+        force_precompute=False,
+        min_cells=1,
+        use_molecular_features=False,
+        categorical_features={"include_labels": []},
+        split={"train_val_test_split": [1.0, 0.0, 0.0], "split_by": "patch"},
+        csv={
+            "sep": ",",
+            "coord_columns": ["x", "y"],
+            "cell_id_column": "cell_id",
+            "categorical_label_columns": [],
+            "molecular_columns": None,
+        },
+        h5ad={
+            "coord_columns": ["x", "y"],
+            "cell_id_column": None,
+            "categorical_label_columns": [],
+            "molecular_layer": None,
+        },
+        sce={
+            "assay_name": None,
+            "coord_source": "colData",
+            "coord_key": None,
+            "coord_columns": ["x", "y"],
+            "cell_id_column": None,
+            "categorical_label_columns": [],
+            "transpose_assay": True,
+        },
+        graph_builder={"name": "delaunay", "kwargs": {}},
+        feature_reducer={"name": "identity", "fit_mode": "train_only", "kwargs": {}},
+        tiling={"tile_size_um": 50.0, "stride_um": 50.0, "min_cells": 1},
+        manifest=None,
+        graph_labels=None,
+        transforms=[],
+        split_seed=999,
+    )
+    dm.setup()
+    assert len(dm.dataset_train.entries) == 2
+    assert len(dm.dataset_val.entries) == 1
+    assert len(dm.dataset_test.entries) == 2

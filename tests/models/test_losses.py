@@ -49,3 +49,15 @@ def test_coxsgd_loss():
     loss = loss_fn(y_pred, length, event)
     assert loss.ndim == 0
     assert torch.isfinite(loss)
+
+
+def test_coxsgd_top_n_handles_tiny_batches():
+    from src.models.components.losses import CoxSGDLoss
+
+    loss_fn = CoxSGDLoss(top_n=10, regularizer_weight=0.01)
+    y_pred = torch.randn(1, 1)
+    length = torch.tensor([1.0])
+    event = torch.tensor([1.0])
+    loss = loss_fn(y_pred, length, event)
+    assert loss.ndim == 0
+    assert torch.isfinite(loss)
