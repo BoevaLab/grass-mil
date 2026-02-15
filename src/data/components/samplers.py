@@ -189,8 +189,28 @@ class _RuntimeUnitShadowDatasetLoader:
         self.kwargs = kwargs
 
     def __len__(self) -> int:
-        # Estimated to keep Lightning progress plumbing stable.
-        return len(self.dataset)
+        if len(self.dataset) == 0:
+            return 0
+        subgraph_batch_size = int(self.runtime.subgraph_batch_size)
+        if subgraph_batch_size <= 0:
+            subgraph_batch_size = max(1, int(self.dataset_batch_size))
+
+        total_batches = 0
+        for idx in range(len(self.dataset)):
+            unit_data = self.dataset[idx]
+            effective_node_idx = self.runtime.node_idx
+            if self.runtime.proportional_root_sampling:
+                computed_node_idx = _build_weighted_node_idx(
+                    unit_data,
+                    property_name=self.runtime.property_name,
+                    weight_mode=self.runtime.weight_mode,
+                    min_weight=self.runtime.min_weight,
+                )
+                if computed_node_idx is not None:
+                    effective_node_idx = computed_node_idx
+            num_roots = _resolve_num_roots(unit_data, effective_node_idx)
+            total_batches += int((num_roots + subgraph_batch_size - 1) // subgraph_batch_size)
+        return total_batches
 
     def __iter__(self):
         if len(self.dataset) == 0:
@@ -615,6 +635,17 @@ class _ShaDowKHopSamplerWithTransform(torch.utils.data.DataLoader):
         from torch_geometric.utils import subgraph
 
         processed = []
+        num_subgraphs = len(batch.ptr) - 1
+        skip_keys = {
+            "x",
+            "edge_index",
+            "edge_attr",
+            "batch",
+            "ptr",
+            "root_n_id",
+            "adj_t",
+            "num_nodes",
+        }
         for i in range(len(batch.ptr) - 1):
             node_start = int(batch.ptr[i])
             node_end = int(batch.ptr[i + 1])
@@ -631,18 +662,44 @@ class _ShaDowKHopSamplerWithTransform(torch.utils.data.DataLoader):
                 edge_attr=sub_edge_attr,
                 root_n_id=batch.root_n_id[i : i + 1],
             )
-            for key in ["graph_y", "graph_w", "sample_id", "region_id", "patch_id"]:
-                if hasattr(batch, key):
-                    val = getattr(batch, key)
-                    if (
-                        isinstance(val, torch.Tensor)
-                        and val.dim() > 0
-                        and val.size(0) > i
-                    ):
+            for key, val in batch:
+                if key in skip_keys:
+                    continue
+                if isinstance(val, torch.Tensor):
+                    if val.dim() > 0 and val.size(0) == num_subgraphs:
                         setattr(sub_data, key, val[i : i + 1])
-                    elif isinstance(val, list) and len(val) > i:
+                    elif val.dim() == 0:
+                        setattr(sub_data, key, val)
+                    elif val.dim() > 0 and val.size(0) == batch.x.size(0):
+                        # Node-level feature tensors are already represented by `x`.
+                        continue
+                    elif val.dim() > 0 and "edge_attr" in batch and val.size(0) == batch.edge_index.size(1):
+                        continue
+                    else:
+                        setattr(sub_data, key, val)
+                elif isinstance(val, list):
+                    if len(val) == num_subgraphs and len(val) > i:
                         setattr(sub_data, key, [val[i]])
                     else:
                         setattr(sub_data, key, val)
+                elif isinstance(val, tuple):
+                    if len(val) == num_subgraphs and len(val) > i:
+                        setattr(sub_data, key, (val[i],))
+                    else:
+                        setattr(sub_data, key, val)
+                else:
+                    setattr(sub_data, key, val)
             processed.append(self.transform(sub_data))
         return Batch.from_data_list(processed)
+
+
+def _resolve_num_roots(data: Data, node_idx: Optional[torch.Tensor]) -> int:
+    if node_idx is None:
+        return int(getattr(data, "num_nodes", 0))
+    if isinstance(node_idx, torch.Tensor):
+        if node_idx.dtype == torch.bool:
+            return int(node_idx.sum().item())
+        return int(node_idx.numel())
+    if hasattr(node_idx, "__len__"):
+        return int(len(node_idx))
+    return int(getattr(data, "num_nodes", 0))
