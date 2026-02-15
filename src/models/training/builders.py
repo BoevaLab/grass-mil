@@ -24,6 +24,11 @@ def infer_encoder_input_dim(module: L.LightningModule, fallback: int = 0) -> int
         return fallback
     datamodule = trainer.datamodule
     if not hasattr(datamodule, "dataset_train") or datamodule.dataset_train is None:
+        # Datamodule may not have been set up yet; trigger setup so we can
+        # inspect the first sample and infer input_dim.
+        if hasattr(datamodule, "setup"):
+            datamodule.setup("fit")
+    if not hasattr(datamodule, "dataset_train") or datamodule.dataset_train is None:
         return fallback
     dataset = datamodule.dataset_train
     if len(dataset) == 0:
