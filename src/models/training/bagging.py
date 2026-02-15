@@ -18,18 +18,30 @@ def extract_bag_ids(
     bag_key: str,
     bag_fallback_key: str,
 ) -> List[str]:
-    bag_values = getattr(batch, bag_key, None)
-    if bag_values is None:
-        bag_values = getattr(batch, bag_fallback_key, None)
-    if bag_values is None:
+    bag_values = _to_list(getattr(batch, bag_key, None))
+    fallback_values = _to_list(getattr(batch, bag_fallback_key, None))
+    if bag_values is None and fallback_values is None:
         raise ValueError(
             f"Batch is missing both '{bag_key}' and '{bag_fallback_key}' for bagging."
         )
-    if isinstance(bag_values, torch.Tensor):
-        bag_values = bag_values.tolist()
-    if isinstance(bag_values, (str, bytes)):
-        bag_values = [bag_values]
-    return [str(v) for v in bag_values]
+    if bag_values is None:
+        return [str(v) for v in fallback_values]
+    if fallback_values is None:
+        return [str(v) for v in bag_values]
+    if len(bag_values) != len(fallback_values):
+        raise ValueError(
+            f"Batch key lengths mismatch for bagging: '{bag_key}' has {len(bag_values)} "
+            f"values while fallback '{bag_fallback_key}' has {len(fallback_values)}."
+        )
+    resolved = []
+    for primary, fallback in zip(bag_values, fallback_values):
+        use_fallback = _is_missing_value(primary)
+        if use_fallback and _is_missing_value(fallback):
+            raise ValueError(
+                f"Both '{bag_key}' and '{bag_fallback_key}' are missing for at least one instance."
+            )
+        resolved.append(fallback if use_fallback else primary)
+    return [str(v) for v in resolved]
 
 
 def group_instance_indices_by_bag(bag_ids: Sequence[str]) -> Dict[str, List[int]]:
@@ -152,8 +164,55 @@ def gather_bag_targets(
         raise ValueError("Batch is missing graph_y required for supervised training.")
     graph_y = select_target_columns(batch.graph_y.float(), batch, target_columns)
     graph_w = batch.graph_w.float() if hasattr(batch, "graph_w") else None
-    bag_targets = torch.cat([graph_y[idxs[:1]] for idxs in bag_indices], dim=0)
+    bag_targets: List[torch.Tensor] = []
     bag_weights = None
+    bag_weight_rows: List[torch.Tensor] = []
+    for idxs in bag_indices:
+        bag_y = graph_y[idxs]
+        ref_y = bag_y[:1]
+        if bag_y.shape[0] > 1 and not torch.isclose(
+            bag_y, ref_y.expand_as(bag_y), atol=0.0, rtol=0.0
+        ).all():
+            raise ValueError(
+                "Inconsistent graph_y values detected within the same bag. "
+                "All instances in a bag must share one graph target."
+            )
+        bag_targets.append(ref_y)
+        if graph_w is not None:
+            bag_w = graph_w[idxs]
+            ref_w = bag_w[:1]
+            if bag_w.shape[0] > 1 and not torch.isclose(
+                bag_w, ref_w.expand_as(bag_w), atol=0.0, rtol=0.0
+            ).all():
+                raise ValueError(
+                    "Inconsistent graph_w values detected within the same bag."
+                )
+            bag_weight_rows.append(ref_w)
+    bag_targets_t = torch.cat(bag_targets, dim=0)
     if graph_w is not None:
-        bag_weights = torch.cat([graph_w[idxs[:1]] for idxs in bag_indices], dim=0)
-    return bag_targets, bag_weights
+        bag_weights = torch.cat(bag_weight_rows, dim=0)
+    return bag_targets_t, bag_weights
+
+
+def _to_list(values: Any) -> Optional[List[Any]]:
+    if values is None:
+        return None
+    if isinstance(values, torch.Tensor):
+        values = values.tolist()
+    if isinstance(values, (str, bytes)):
+        return [values]
+    try:
+        return list(values)
+    except TypeError:
+        return [values]
+
+
+def _is_missing_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        text = value.strip().lower()
+        return text in {"", "nan", "none", "null"}
+    if isinstance(value, float):
+        return value != value
+    return False
