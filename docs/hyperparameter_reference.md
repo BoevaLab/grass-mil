@@ -4,6 +4,7 @@ This reference covers repo-defined configuration keys and behavior for:
 
 - `configs/train.yaml`
 - `configs/eval.yaml`
+- `configs/loocv.yaml`
 - `configs/data/spatial_omics.yaml`
 - `configs/task/*.yaml`
 - `configs/model/**/*.yaml`
@@ -45,6 +46,17 @@ python src/train.py key.path=value
 | `tags` | `[dev]` | list[str] | any list | always | `python src/eval.py tags="[final_eval]"` |
 | `ckpt_path` | `???` | str | required absolute/relative checkpoint path | always | `python src/eval.py ckpt_path=/abs/model.ckpt` |
 
+## 1.3 `configs/loocv.yaml`
+
+| Key | Default | Type | Valid Values | Active When | Example Override |
+|---|---|---|---|---|---|
+| `task_name` | `loocv` | str | any string | LOOCV entrypoint | `python src/loocv.py task_name=loocv_run` |
+| `loocv.mode` | `single` | str | `single`, `all` | LOOCV entrypoint | `python src/loocv.py loocv.mode=all` |
+| `loocv.fold_index` | `null` | int/null | `>=0` or null | single mode fold selection | `python src/loocv.py loocv.mode=single loocv.fold_index=3` |
+| `loocv.per_fold_processed_dir` | `true` | bool | `true/false` | fold isolation | `python src/loocv.py loocv.per_fold_processed_dir=false` |
+| `loocv.force_precompute_per_fold` | `true` | bool | `true/false` | leakage-safe fold preprocessing | `python src/loocv.py loocv.force_precompute_per_fold=true` |
+| `loocv.summary_filename` | `loocv_summary.json` | str | filename | fold summary artifact naming | `python src/loocv.py loocv.summary_filename=my_summary.json` |
+
 ## 2) Data Config (`configs/data/spatial_omics.yaml`)
 
 ## 2.1 Datamodule Core
@@ -77,7 +89,18 @@ python src/train.py key.path=value
 | Key | Default | Type | Valid Values | Active When | Example Override |
 |---|---|---|---|---|---|
 | `data.split.train_val_test_split` | `[0.8,0.1,0.1]` | list[float] len=3 | must sum to `1.0` | precompute split assignment | `python src/train.py data.split.train_val_test_split="[0.7,0.15,0.15]"` |
-| `data.split.split_by` | `sample` | str | `sample`/`patch` | split semantics | `python src/train.py data.split.split_by=patch` |
+| `data.split.split_by` | `sample` | str | `sample`/`region`/`patch` | split semantics | `python src/train.py data.split.split_by=region` |
+| `data.split.loocv.enabled` | `false` | bool | `true/false` | LOOCV override path | `python src/train.py data.split.loocv.enabled=true` |
+| `data.split.loocv.fold_unit` | `region` | str | `region`/`sample` | LOOCV override path | `python src/train.py data.split.loocv.fold_unit=sample` |
+| `data.split.loocv.holdout_id` | `null` | str/null | canonical fold id (`sample` or `sample::region`) | LOOCV override path | `python src/train.py data.split.loocv.holdout_id=s1::r3` |
+| `data.split.loocv.validation_strategy` | `heldout_fold_items` | str | `heldout_fold_items`/`patches_from_train_items` | LOOCV override path | `python src/train.py data.split.loocv.validation_strategy=patches_from_train_items` |
+| `data.split.loocv.val_ratio` | `0.1` | float | `[0.0,1.0)` | LOOCV validation split sizing | `python src/train.py data.split.loocv.val_ratio=0.2` |
+| `data.split.loocv.seed` | `42` | int | integer | LOOCV validation split determinism | `python src/train.py data.split.loocv.seed=7` |
+
+Notes:
+
+- When LOOCV is disabled, behavior is identical to current non-LOOCV splitting.
+- For `reducer_scope=dataset` + `feature_reducer.fit_mode=train_only`, LOOCV requires fold-specific precompute (`force_precompute=true` or fold-specific `processed_dir`).
 
 ## 2.4 Manifest Field Mapping
 

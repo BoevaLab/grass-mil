@@ -14,6 +14,7 @@ from .components.patching import TileConfig
 from .components.precompute import (
     CategoricalFeatureConfig,
     GraphLabelConfig,
+    LoocvConfig,
     ManifestConfig,
     PrecomputeConfig,
     SpatialOmicsPreprocessor,
@@ -30,6 +31,7 @@ from .components.transforms import instantiate_transforms
 class SplitConfig:
     train_val_test_split: Tuple[float, float, float]
     split_by: str
+    loocv: LoocvConfig
 
 
 class SpatialOmicsDataModule(L.LightningDataModule):
@@ -73,18 +75,23 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         self.dataset_val: Optional[SpatialOmicsGraphDataset] = None
         self.dataset_test: Optional[SpatialOmicsGraphDataset] = None
         self.split_seed = int(split_seed)
-        self._cached_split_indices: Optional[Tuple[list[int], list[int], list[int]]] = None
+        self._cached_split_indices: Optional[
+            Tuple[list[int], list[int], list[int]]
+        ] = None
         self._cached_split_total: Optional[int] = None
 
         self.split_config = SplitConfig(
             train_val_test_split=tuple(split["train_val_test_split"]),
             split_by=split["split_by"],
+            loocv=LoocvConfig.from_dict(split.get("loocv")),
         )
         self.csv_config = CsvConfig.from_dict(csv, use_molecular_features)
         self.h5ad_config = H5adConfig.from_dict(h5ad, use_molecular_features)
         self.sce_config = SceConfig.from_dict(sce, use_molecular_features)
         self.graph_builder_config = GraphBuilderConfig.from_dict(graph_builder)
-        self.feature_reducer_config = FeatureReducerConfig.from_dict(feature_reducer)
+        self.feature_reducer_config = FeatureReducerConfig.from_dict(
+            feature_reducer
+        )
         self.tile_config = TileConfig.from_dict(tiling)
         self.sampler_config = SamplerConfig.from_dict(sampler)
         self.sampler_strategy: Optional[BaseSamplerStrategy] = None
@@ -98,7 +105,9 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             coord_scale_um=coord_scale_um,
             sample_unit=sample_unit,
             reducer_scope=reducer_scope,
-            reducer_fit_mode=str(feature_reducer.get("fit_mode", "train_only")),
+            reducer_fit_mode=str(
+                feature_reducer.get("fit_mode", "train_only")
+            ),
             keep_raw_molecular=keep_raw_molecular,
             force=force_precompute,
             min_cells=min_cells,
@@ -106,12 +115,28 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             split_by=self.split_config.split_by,
             split_ratios=self.split_config.train_val_test_split,
             split_seed=self.split_seed,
+            loocv=split.get("loocv"),
         )
         self.categorical_feature_config = CategoricalFeatureConfig.from_dict(
             categorical_features
         )
 
     def prepare_data(self) -> None:
+        if (
+            self.split_config.loocv.enabled
+            and self.hparams.reducer_scope == "dataset"
+            and str(
+                self.hparams.feature_reducer.get("fit_mode", "train_only")
+            ).strip().lower()
+            == "train_only"
+            and not bool(self.hparams.force_precompute)
+        ):
+            raise ValueError(
+                "LOOCV with reducer_scope='dataset' and "
+                "feature_reducer.fit_mode='train_only' requires "
+                "fold-specific precompute. Set data.force_precompute=true or use "
+                "a fold-specific processed_dir."
+            )
         preprocessor = self._build_preprocessor()
         preprocessor.precompute()
 
@@ -136,22 +161,36 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         if _entries_have_persisted_splits(base_dataset.entries):
             self.dataset_train = _subset_dataset_from_entries(
                 base_dataset,
-                [entry for entry in base_dataset.entries if entry.split == "train"],
+                [
+                    entry
+                    for entry in base_dataset.entries
+                    if entry.split == "train"
+                ],
                 self.transforms,
             )
             self.dataset_val = _subset_dataset_from_entries(
                 base_dataset,
-                [entry for entry in base_dataset.entries if entry.split == "val"],
+                [
+                    entry
+                    for entry in base_dataset.entries
+                    if entry.split == "val"
+                ],
                 self.transforms,
             )
             self.dataset_test = _subset_dataset_from_entries(
                 base_dataset,
-                [entry for entry in base_dataset.entries if entry.split == "test"],
+                [
+                    entry
+                    for entry in base_dataset.entries
+                    if entry.split == "test"
+                ],
                 self.transforms,
             )
         else:
             if self.split_config.split_by == "patch":
                 entries = base_dataset.entries
+            elif self.split_config.split_by == "region":
+                entries = _group_entries_by_region(base_dataset.entries)
             else:
                 entries = _group_entries_by_sample(base_dataset.entries)
 
@@ -251,7 +290,9 @@ def _split_indices(
 
     # Keep train split usable whenever train ratio is non-zero and data exists.
     if ratio_arr[0] > 0.0 and counts[0] == 0:
-        donor_idx = int(np.argmax(counts[1:]) + 1) if counts[1:].sum() > 0 else -1
+        donor_idx = (
+            int(np.argmax(counts[1:]) + 1) if counts[1:].sum() > 0 else -1
+        )
         if donor_idx >= 0 and counts[donor_idx] > 0:
             counts[donor_idx] -= 1
             counts[0] += 1
@@ -282,6 +323,15 @@ def _group_entries_by_sample(entries):
     grouped = {}
     for entry in entries:
         grouped.setdefault(entry.sample_id, []).append(entry)
+    return list(grouped.values())
+
+
+def _group_entries_by_region(entries):
+    grouped = {}
+    for entry in entries:
+        grouped.setdefault((entry.sample_id, entry.region_id), []).append(
+            entry
+        )
     return list(grouped.values())
 
 

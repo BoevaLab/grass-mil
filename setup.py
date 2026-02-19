@@ -12,6 +12,7 @@ setup(
         "console_scripts": [
             "train_command = src.train:main",
             "eval_command = src.eval:main",
+            "loocv_command = src.loocv:main",
         ]
     },
 )

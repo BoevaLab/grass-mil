@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -69,6 +70,7 @@ class PrecomputeConfig:
     split_by: str
     split_ratios: Tuple[float, float, float]
     split_seed: int
+    loocv: "LoocvConfig"
 
     @classmethod
     def from_args(
@@ -86,6 +88,7 @@ class PrecomputeConfig:
         split_by: str,
         split_ratios: Tuple[float, float, float],
         split_seed: int,
+        loocv: Optional[Dict[str, object]] = None,
     ) -> "PrecomputeConfig":
         return cls(
             raw_manifest_path=raw_manifest_path,
@@ -101,7 +104,24 @@ class PrecomputeConfig:
             split_by=split_by,
             split_ratios=split_ratios,
             split_seed=split_seed,
+            loocv=LoocvConfig.from_dict(loocv),
         )
+
+
+@dataclass
+class LoocvConfig:
+    enabled: bool = False
+    fold_unit: str = "region"  # region | sample
+    holdout_id: Optional[str] = None
+    validation_strategy: str = (
+        "heldout_fold_items"  # heldout_fold_items | patches_from_train_items
+    )
+    val_ratio: float = 0.1
+    seed: int = 42
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, object]]) -> "LoocvConfig":
+        return cls(**(data or {}))
 
 
 @dataclass
@@ -169,7 +189,9 @@ class SpatialOmicsPreprocessor:
         if index_path.exists() and not self.precompute_config.force:
             return index_path
 
-        manifest_rows = self._load_manifest(Path(self.precompute_config.raw_manifest_path))
+        manifest_rows = self._load_manifest(
+            Path(self.precompute_config.raw_manifest_path)
+        )
         raw_tables = self._load_tables(manifest_rows)
 
         prepared = self._prepare_samples(manifest_rows, raw_tables)
@@ -232,6 +254,16 @@ class SpatialOmicsPreprocessor:
                 "split_by": self.precompute_config.split_by,
                 "ratios": list(self.precompute_config.split_ratios),
                 "seed": int(self.precompute_config.split_seed),
+                "loocv": {
+                    "enabled": bool(self.precompute_config.loocv.enabled),
+                    "fold_unit": str(self.precompute_config.loocv.fold_unit),
+                    "holdout_id": self.precompute_config.loocv.holdout_id,
+                    "validation_strategy": str(
+                        self.precompute_config.loocv.validation_strategy
+                    ),
+                    "val_ratio": float(self.precompute_config.loocv.val_ratio),
+                    "seed": int(self.precompute_config.loocv.seed),
+                },
             },
         }
         index_path.write_text(json.dumps(index_payload, indent=2))
@@ -272,11 +304,15 @@ class SpatialOmicsPreprocessor:
             )
         return prepared
 
-    def _build_unit_specs(self, prepared: Sequence[PreparedSample]) -> List[GraphUnitSpec]:
+    def _build_unit_specs(
+        self, prepared: Sequence[PreparedSample]
+    ) -> List[GraphUnitSpec]:
         units: List[GraphUnitSpec] = []
         for sample in prepared:
             for patch_idx, indices in enumerate(sample.patch_indices):
-                patch_id = _build_patch_id(sample.sample_id, sample.region_id, patch_idx)
+                patch_id = _build_patch_id(
+                    sample.sample_id, sample.region_id, patch_idx
+                )
                 units.append(
                     GraphUnitSpec(
                         table_idx=sample.table_idx,
@@ -294,12 +330,15 @@ class SpatialOmicsPreprocessor:
             split_by=self.precompute_config.split_by,
             split_ratios=self.precompute_config.split_ratios,
             seed=self.precompute_config.split_seed,
+            loocv_config=self.precompute_config.loocv,
         )
         for i, split in enumerate(split_labels):
             units[i].split = split
         return units
 
-    def _load_tables(self, manifest_rows: List[Dict[str, str]]) -> List[SpatialOmicsTable]:
+    def _load_tables(
+        self, manifest_rows: List[Dict[str, str]]
+    ) -> List[SpatialOmicsTable]:
         return [self._load_table(row) for row in manifest_rows]
 
     def _prepare_reducer(
@@ -762,10 +801,15 @@ def _assign_split_labels(
     split_by: str,
     split_ratios: Tuple[float, float, float],
     seed: int,
+    loocv_config: Optional[LoocvConfig] = None,
 ) -> List[str]:
     labels = ["train"] * len(units)
     if not units:
         return labels
+
+    loocv = loocv_config or LoocvConfig()
+    if loocv.enabled:
+        return _assign_loocv_split_labels(units, loocv)
 
     if split_by == "sample":
         by_sample: Dict[str, List[int]] = {}
@@ -786,8 +830,27 @@ def _assign_split_labels(
                 labels[unit_idx] = "test"
         return labels
 
+    if split_by == "region":
+        by_region: Dict[Tuple[str, Optional[str]], List[int]] = {}
+        for idx, unit in enumerate(units):
+            by_region.setdefault((unit.sample_id, unit.region_id), []).append(idx)
+        region_keys = list(by_region)
+        train_idx, val_idx, test_idx = _split_indices(
+            total=len(region_keys), ratios=split_ratios, seed=seed
+        )
+        for i in train_idx:
+            for unit_idx in by_region[region_keys[i]]:
+                labels[unit_idx] = "train"
+        for i in val_idx:
+            for unit_idx in by_region[region_keys[i]]:
+                labels[unit_idx] = "val"
+        for i in test_idx:
+            for unit_idx in by_region[region_keys[i]]:
+                labels[unit_idx] = "test"
+        return labels
+
     if split_by != "patch":
-        raise ValueError("split_by must be one of ['sample', 'patch']")
+        raise ValueError("split_by must be one of ['sample', 'region', 'patch']")
 
     train_idx, val_idx, test_idx = _split_indices(
         total=len(units), ratios=split_ratios, seed=seed
@@ -799,6 +862,132 @@ def _assign_split_labels(
     for i in test_idx:
         labels[i] = "test"
     return labels
+
+
+def _assign_loocv_split_labels(
+    units: Sequence[GraphUnitSpec], loocv: LoocvConfig
+) -> List[str]:
+    if loocv.fold_unit not in {"region", "sample"}:
+        raise ValueError("split.loocv.fold_unit must be one of ['region', 'sample'].")
+    if loocv.validation_strategy not in {
+        "heldout_fold_items",
+        "patches_from_train_items",
+    }:
+        raise ValueError(
+            "split.loocv.validation_strategy must be one of "
+            "['heldout_fold_items', 'patches_from_train_items']."
+        )
+    if loocv.val_ratio < 0.0 or loocv.val_ratio >= 1.0:
+        raise ValueError("split.loocv.val_ratio must be in [0.0, 1.0).")
+    if not loocv.holdout_id:
+        raise ValueError(
+            "split.loocv.holdout_id must be set when split.loocv.enabled=true."
+        )
+
+    by_fold_item: Dict[object, List[int]] = {}
+    fold_alias_to_key: Dict[str, object] = {}
+    ambiguous_region_aliases = set()
+
+    for idx, unit in enumerate(units):
+        key = (
+            (unit.sample_id, unit.region_id)
+            if loocv.fold_unit == "region"
+            else unit.sample_id
+        )
+        by_fold_item.setdefault(key, []).append(idx)
+
+        canonical = _loocv_fold_id_from_key(key=key, fold_unit=loocv.fold_unit)
+        fold_alias_to_key[canonical] = key
+        if loocv.fold_unit == "region" and unit.region_id is not None:
+            alias = str(unit.region_id)
+            existing = fold_alias_to_key.get(alias)
+            if existing is None:
+                fold_alias_to_key[alias] = key
+            elif existing != key:
+                ambiguous_region_aliases.add(alias)
+
+    for alias in ambiguous_region_aliases:
+        if alias in fold_alias_to_key:
+            del fold_alias_to_key[alias]
+
+    if len(by_fold_item) < 2:
+        raise ValueError(
+            "LOOCV requires at least two fold items after grouping by "
+            f"'{loocv.fold_unit}'. Found {len(by_fold_item)}."
+        )
+    if loocv.holdout_id not in fold_alias_to_key:
+        available = sorted(
+            _loocv_fold_id_from_key(key=key, fold_unit=loocv.fold_unit)
+            for key in by_fold_item
+        )
+        raise ValueError(
+            "split.loocv.holdout_id not found in grouped fold items. "
+            f"Provided '{loocv.holdout_id}'. Available canonical ids: {available}"
+        )
+
+    holdout_key = fold_alias_to_key[loocv.holdout_id]
+    labels = ["train"] * len(units)
+    for unit_idx in by_fold_item[holdout_key]:
+        labels[unit_idx] = "test"
+
+    remaining_keys = [key for key in by_fold_item if key != holdout_key]
+    if not remaining_keys:
+        raise ValueError("LOOCV left no non-test fold items.")
+
+    if loocv.validation_strategy == "heldout_fold_items":
+        val_group_indices = _pick_validation_fold_items(
+            total=len(remaining_keys),
+            val_ratio=float(loocv.val_ratio),
+            seed=int(loocv.seed),
+        )
+        for group_idx in val_group_indices:
+            for unit_idx in by_fold_item[remaining_keys[group_idx]]:
+                labels[unit_idx] = "val"
+        return labels
+
+    warnings.warn(
+        "Using patch-level validation from training fold items. "
+        "This is useful in low-data settings, but validation is less independent "
+        "than held-out fold-item validation.",
+        stacklevel=2,
+    )
+    candidate_indices = [
+        unit_idx for key in remaining_keys for unit_idx in by_fold_item[key]
+    ]
+    train_idx, val_idx, _ = _split_indices(
+        total=len(candidate_indices),
+        ratios=(1.0 - float(loocv.val_ratio), float(loocv.val_ratio), 0.0),
+        seed=int(loocv.seed),
+    )
+    for local_idx in train_idx:
+        labels[candidate_indices[local_idx]] = "train"
+    for local_idx in val_idx:
+        labels[candidate_indices[local_idx]] = "val"
+    return labels
+
+
+def _pick_validation_fold_items(total: int, val_ratio: float, seed: int) -> List[int]:
+    if total <= 1:
+        raise ValueError(
+            "LOOCV validation strategy 'heldout_fold_items' requires at least two "
+            "non-test fold items. Use 'patches_from_train_items' for tiny-data regimes."
+        )
+    _, val_idx, _ = _split_indices(
+        total=total,
+        ratios=(1.0 - float(val_ratio), float(val_ratio), 0.0),
+        seed=seed,
+    )
+    if val_idx:
+        return val_idx
+    return [int(np.random.default_rng(seed).integers(0, total))]
+
+
+def _loocv_fold_id_from_key(key: object, fold_unit: str) -> str:
+    if fold_unit == "sample":
+        return str(key)
+    sample_id, region_id = key
+    region_value = "__NONE__" if region_id is None else str(region_id)
+    return f"{sample_id}::{region_value}"
 
 
 def _select_graph_label_id(
