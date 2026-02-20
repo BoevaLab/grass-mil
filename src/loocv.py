@@ -26,8 +26,6 @@ log = RankedLogger(__name__, rank_zero_only=True)
 
 
 def _validate_loocv_isolation_settings(cfg: DictConfig) -> None:
-    if not bool(cfg.data.split.loocv.enabled):
-        return
     uses_per_fold_dirs = bool(cfg.loocv.per_fold_processed_dir)
     uses_per_fold_recompute = bool(cfg.loocv.force_precompute_per_fold)
     if uses_per_fold_dirs or uses_per_fold_recompute:

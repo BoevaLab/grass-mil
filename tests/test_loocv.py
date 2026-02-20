@@ -68,6 +68,23 @@ def test_loocv_rejects_unsafe_isolation_flags(tmp_path: Path, mode: str) -> None
     GlobalHydra.instance().clear()
 
 
+def test_loocv_rejects_unsafe_isolation_flags_when_base_loocv_disabled(
+    tmp_path: Path,
+) -> None:
+    cfg = _make_loocv_cfg(tmp_path)
+    _write_manifest(Path(cfg.data.raw_manifest_path))
+    with open_dict(cfg):
+        cfg.data.split.loocv.enabled = False
+        cfg.loocv.mode = "single"
+        cfg.loocv.per_fold_processed_dir = False
+        cfg.loocv.force_precompute_per_fold = False
+        cfg.loocv.fold_index = 0
+
+    with pytest.raises(ValueError, match="Unsafe LOOCV configuration"):
+        run_loocv(cfg)
+    GlobalHydra.instance().clear()
+
+
 def test_loocv_runs_with_safe_isolation_flags(tmp_path: Path, monkeypatch) -> None:
     cfg = _make_loocv_cfg(tmp_path)
     _write_manifest(Path(cfg.data.raw_manifest_path))
