@@ -75,9 +75,9 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         self.dataset_val: Optional[SpatialOmicsGraphDataset] = None
         self.dataset_test: Optional[SpatialOmicsGraphDataset] = None
         self.split_seed = int(split_seed)
-        self._cached_split_indices: Optional[
-            Tuple[list[int], list[int], list[int]]
-        ] = None
+        self._cached_split_indices: Optional[Tuple[list[int], list[int], list[int]]] = (
+            None
+        )
         self._cached_split_total: Optional[int] = None
 
         self.split_config = SplitConfig(
@@ -89,9 +89,7 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         self.h5ad_config = H5adConfig.from_dict(h5ad, use_molecular_features)
         self.sce_config = SceConfig.from_dict(sce, use_molecular_features)
         self.graph_builder_config = GraphBuilderConfig.from_dict(graph_builder)
-        self.feature_reducer_config = FeatureReducerConfig.from_dict(
-            feature_reducer
-        )
+        self.feature_reducer_config = FeatureReducerConfig.from_dict(feature_reducer)
         self.tile_config = TileConfig.from_dict(tiling)
         self.sampler_config = SamplerConfig.from_dict(sampler)
         self.sampler_strategy: Optional[BaseSamplerStrategy] = None
@@ -105,9 +103,7 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             coord_scale_um=coord_scale_um,
             sample_unit=sample_unit,
             reducer_scope=reducer_scope,
-            reducer_fit_mode=str(
-                feature_reducer.get("fit_mode", "train_only")
-            ),
+            reducer_fit_mode=str(feature_reducer.get("fit_mode", "train_only")),
             keep_raw_molecular=keep_raw_molecular,
             force=force_precompute,
             min_cells=min_cells,
@@ -125,14 +121,12 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         if (
             self.split_config.loocv.enabled
             and self.hparams.reducer_scope == "dataset"
-            and str(
-                self.hparams.feature_reducer.get("fit_mode", "train_only")
-            ).strip().lower()
+            and str(self.hparams.feature_reducer.get("fit_mode", "train_only"))
+            .strip()
+            .lower()
             == "train_only"
         ):
-            processed_index_path = (
-                Path(self.processed_dir) / "processed_index.json"
-            )
+            processed_index_path = Path(self.processed_dir) / "processed_index.json"
             if (
                 not bool(self.hparams.force_precompute)
                 and processed_index_path.exists()
@@ -169,29 +163,17 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         if _entries_have_persisted_splits(base_dataset.entries):
             self.dataset_train = _subset_dataset_from_entries(
                 base_dataset,
-                [
-                    entry
-                    for entry in base_dataset.entries
-                    if entry.split == "train"
-                ],
+                [entry for entry in base_dataset.entries if entry.split == "train"],
                 self.transforms,
             )
             self.dataset_val = _subset_dataset_from_entries(
                 base_dataset,
-                [
-                    entry
-                    for entry in base_dataset.entries
-                    if entry.split == "val"
-                ],
+                [entry for entry in base_dataset.entries if entry.split == "val"],
                 self.transforms,
             )
             self.dataset_test = _subset_dataset_from_entries(
                 base_dataset,
-                [
-                    entry
-                    for entry in base_dataset.entries
-                    if entry.split == "test"
-                ],
+                [entry for entry in base_dataset.entries if entry.split == "test"],
                 self.transforms,
             )
         else:
@@ -298,9 +280,7 @@ def _split_indices(
 
     # Keep train split usable whenever train ratio is non-zero and data exists.
     if ratio_arr[0] > 0.0 and counts[0] == 0:
-        donor_idx = (
-            int(np.argmax(counts[1:]) + 1) if counts[1:].sum() > 0 else -1
-        )
+        donor_idx = int(np.argmax(counts[1:]) + 1) if counts[1:].sum() > 0 else -1
         if donor_idx >= 0 and counts[donor_idx] > 0:
             counts[donor_idx] -= 1
             counts[0] += 1
@@ -314,6 +294,21 @@ def _split_indices(
                 take = min(overflow, counts[idx])
                 counts[idx] -= take
                 overflow -= take
+
+    # Keep val split non-empty whenever val ratio is non-zero.
+    if ratio_arr[1] > 0.0 and counts[1] == 0 and total > 0:
+        donor_idx = -1
+        if counts[2] > 1:
+            donor_idx = 2
+        elif counts[0] > 1 or ratio_arr[0] <= 0.0:
+            donor_idx = 0
+        else:
+            # Tiny totals can make non-empty train and val impossible.
+            raise ValueError(
+                "Tiny total makes non-empty train and val impossible. Use a bigger dataset or remove the validation split."
+            )
+        counts[donor_idx] -= 1
+        counts[1] += 1
 
     indices = np.arange(total)
     rng = np.random.default_rng(seed)
@@ -337,9 +332,7 @@ def _group_entries_by_sample(entries):
 def _group_entries_by_region(entries):
     grouped = {}
     for entry in entries:
-        grouped.setdefault((entry.sample_id, entry.region_id), []).append(
-            entry
-        )
+        grouped.setdefault((entry.sample_id, entry.region_id), []).append(entry)
     return list(grouped.values())
 
 

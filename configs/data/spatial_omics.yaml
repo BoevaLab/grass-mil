@@ -27,7 +27,7 @@ split:
     fold_unit: region # region | sample
     holdout_id: null
     validation_strategy: heldout_fold_items # heldout_fold_items | patches_from_train_items
-    val_ratio: 0.1
+    val_ratio: 0.1 # exactly 0.0 disables val; non-zero guarantees at least one val item
     seed: 42
 
 manifest:

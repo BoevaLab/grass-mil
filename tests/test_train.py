@@ -5,9 +5,13 @@ from pathlib import Path
 import pytest
 import torch
 from hydra.core.hydra_config import HydraConfig
-from omegaconf import DictConfig, open_dict
-from src.train import train
+from omegaconf import DictConfig, OmegaConf, open_dict
 
+from src.train import (
+    _filter_val_monitor_callbacks,
+    _requires_zero_validation,
+    train,
+)
 from tests.helpers.run_if import RunIf
 
 
@@ -35,7 +39,7 @@ def test_train_fast_dev_run(cfg_train: DictConfig) -> None:
 
 
 def test_train_test_mode_without_checkpoint_callback(cfg_train: DictConfig) -> None:
-    """Training with `test=True` should not fail when checkpoint callback is absent."""
+    """`test=True` training should not fail without checkpoint callback."""
     HydraConfig().set_config(cfg_train)
     with open_dict(cfg_train):
         cfg_train.trainer.fast_dev_run = True
@@ -44,6 +48,66 @@ def test_train_test_mode_without_checkpoint_callback(cfg_train: DictConfig) -> N
         cfg_train.test = True
     metric_dict, _ = train(cfg_train)
     assert "test/loss" in metric_dict
+
+
+def test_requires_zero_validation_detects_loocv_only_when_val_ratio_zero() -> None:
+    cfg = OmegaConf.create(
+        {
+            "data": {
+                "split": {
+                    "loocv": {
+                        "enabled": True,
+                        "val_ratio": 0.0,
+                    }
+                }
+            }
+        }
+    )
+    assert _requires_zero_validation(cfg)
+
+    cfg.data.split.loocv.val_ratio = 0.01
+    assert not _requires_zero_validation(cfg)
+
+
+def test_requires_zero_validation_detects_non_loocv_zero_val_split() -> None:
+    cfg = OmegaConf.create(
+        {
+            "data": {
+                "split": {
+                    "train_val_test_split": [0.8, 0.0, 0.2],
+                }
+            }
+        }
+    )
+    assert _requires_zero_validation(cfg)
+
+    cfg.data.split.train_val_test_split = [0.8, 0.1, 0.1]
+    assert not _requires_zero_validation(cfg)
+
+
+def test_filter_val_monitor_callbacks_removes_only_val_monitors() -> None:
+    callbacks_cfg = OmegaConf.create(
+        {
+            "model_checkpoint": {
+                "_target_": "lightning.pytorch.callbacks.ModelCheckpoint",
+                "monitor": "val/loss",
+            },
+            "early_stopping": {
+                "_target_": "lightning.pytorch.callbacks.EarlyStopping",
+                "monitor": "val/loss",
+            },
+            "model_summary": {
+                "_target_": "lightning.pytorch.callbacks.ModelSummary",
+                "max_depth": -1,
+            },
+        }
+    )
+    filtered, removed = _filter_val_monitor_callbacks(callbacks_cfg)
+
+    assert set(removed) == {"model_checkpoint", "early_stopping"}
+    assert "model_summary" in filtered
+    assert "model_checkpoint" not in filtered
+    assert "early_stopping" not in filtered
 
 
 @RunIf(min_gpus=1)

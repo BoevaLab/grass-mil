@@ -394,17 +394,29 @@ def test_split_is_stable_across_setup_calls(tmp_path: Path) -> None:
     assert first_test == second_test
 
 
-def test_split_indices_keeps_train_non_empty_for_tiny_totals() -> None:
+def test_split_indices_keeps_val_non_empty_for_nonzero_val_ratio() -> None:
+    pytest.importorskip("lightning")
+    pytest.importorskip("torch_geometric")
     from src.data.spatial_omics_datamodule import _split_indices
 
     train_idx, val_idx, test_idx = _split_indices(1, (0.8, 0.1, 0.1), seed=123)
-    assert len(train_idx) == 1
-    assert len(val_idx) == 0
+    assert len(train_idx) == 0
+    assert len(val_idx) == 1
     assert len(test_idx) == 0
 
     train_idx, val_idx, test_idx = _split_indices(3, (0.8, 0.1, 0.1), seed=123)
-    assert len(train_idx) >= 1
+    assert len(val_idx) >= 1
     assert len(train_idx) + len(val_idx) + len(test_idx) == 3
+
+
+def test_split_indices_keeps_val_empty_for_zero_val_ratio() -> None:
+    pytest.importorskip("lightning")
+    pytest.importorskip("torch_geometric")
+    from src.data.spatial_omics_datamodule import _split_indices
+
+    train_idx, val_idx, test_idx = _split_indices(3, (0.8, 0.0, 0.2), seed=123)
+    assert len(train_idx) + len(val_idx) + len(test_idx) == 3
+    assert len(val_idx) == 0
 
 
 def test_datamodule_uses_persisted_splits(tmp_path: Path) -> None:
@@ -588,6 +600,120 @@ def test_loocv_patch_validation_uses_only_train_fold_items() -> None:
         if unit.sample_id == "s2" and unit.region_id == "r2":
             assert label == "test"
     assert "val" in labels
+
+
+def test_loocv_heldout_validation_allows_zero_val_ratio() -> None:
+    pytest.importorskip("lightning")
+    pytest.importorskip("torch_geometric")
+    from src.data.components.precompute import LoocvConfig, _assign_split_labels
+
+    units = [
+        _make_unit(0, "s0", "r0", 0),
+        _make_unit(1, "s1", "r1", 0),
+        _make_unit(2, "s2", "r2", 0),
+    ]
+    labels = _assign_split_labels(
+        units=units,
+        split_by="region",
+        split_ratios=(0.8, 0.1, 0.1),
+        seed=3,
+        loocv_config=LoocvConfig(
+            enabled=True,
+            fold_unit="region",
+            holdout_id="s1::r1",
+            validation_strategy="heldout_fold_items",
+            val_ratio=0.0,
+            seed=11,
+        ),
+    )
+    assert "val" not in labels
+    for unit, label in zip(units, labels):
+        if unit.sample_id == "s1" and unit.region_id == "r1":
+            assert label == "test"
+
+
+def test_loocv_heldout_validation_forces_one_for_nonzero_ratio() -> None:
+    pytest.importorskip("lightning")
+    pytest.importorskip("torch_geometric")
+    from src.data.components.precompute import LoocvConfig, _assign_split_labels
+
+    units = [
+        _make_unit(0, "s0", "r0", 0),
+        _make_unit(1, "s1", "r1", 0),
+        _make_unit(2, "s2", "r2", 0),
+    ]
+    labels = _assign_split_labels(
+        units=units,
+        split_by="region",
+        split_ratios=(0.8, 0.1, 0.1),
+        seed=3,
+        loocv_config=LoocvConfig(
+            enabled=True,
+            fold_unit="region",
+            holdout_id="s1::r1",
+            validation_strategy="heldout_fold_items",
+            val_ratio=0.01,
+            seed=11,
+        ),
+    )
+    assert labels.count("val") == 1
+
+
+def test_loocv_patch_validation_allows_zero_val_ratio() -> None:
+    pytest.importorskip("lightning")
+    pytest.importorskip("torch_geometric")
+    from src.data.components.precompute import LoocvConfig, _assign_split_labels
+
+    units = [
+        _make_unit(0, "s0", "r0", 0),
+        _make_unit(0, "s0", "r0", 1),
+        _make_unit(1, "s1", "r1", 0),
+        _make_unit(1, "s1", "r1", 1),
+        _make_unit(2, "s2", "r2", 0),
+        _make_unit(2, "s2", "r2", 1),
+    ]
+    labels = _assign_split_labels(
+        units=units,
+        split_by="region",
+        split_ratios=(0.8, 0.1, 0.1),
+        seed=5,
+        loocv_config=LoocvConfig(
+            enabled=True,
+            fold_unit="region",
+            holdout_id="s2::r2",
+            validation_strategy="patches_from_train_items",
+            val_ratio=0.0,
+            seed=7,
+        ),
+    )
+    assert "val" not in labels
+
+
+def test_loocv_patch_validation_forces_one_for_nonzero_ratio() -> None:
+    pytest.importorskip("lightning")
+    pytest.importorskip("torch_geometric")
+    from src.data.components.precompute import LoocvConfig, _assign_split_labels
+
+    units = [
+        _make_unit(0, "s0", "r0", 0),
+        _make_unit(1, "s1", "r1", 0),
+        _make_unit(2, "s2", "r2", 0),
+    ]
+    labels = _assign_split_labels(
+        units=units,
+        split_by="region",
+        split_ratios=(0.8, 0.1, 0.1),
+        seed=5,
+        loocv_config=LoocvConfig(
+            enabled=True,
+            fold_unit="region",
+            holdout_id="s2::r2",
+            validation_strategy="patches_from_train_items",
+            val_ratio=0.01,
+            seed=7,
+        ),
+    )
+    assert labels.count("val") == 1
 
 
 def test_loocv_supports_sample_fold_unit() -> None:

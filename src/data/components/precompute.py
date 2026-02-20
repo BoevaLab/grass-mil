@@ -783,6 +783,20 @@ def _split_indices(
                 counts[idx] -= take
                 overflow -= take
 
+    # Keep val split non-empty whenever val ratio is non-zero.
+    if ratio_arr[1] > 0.0 and counts[1] == 0 and total > 0:
+        donor_idx = -1
+        if counts[2] > 0:
+            donor_idx = 2
+        elif counts[0] > 1 or ratio_arr[0] <= 0.0:
+            donor_idx = 0
+        elif counts[0] > 0:
+            # Tiny totals can make non-empty train and val impossible.
+            donor_idx = 0
+        if donor_idx >= 0 and counts[donor_idx] > 0:
+            counts[donor_idx] -= 1
+            counts[1] += 1
+
     indices = np.arange(total)
     rng = np.random.default_rng(seed)
     rng.shuffle(indices)
@@ -979,6 +993,8 @@ def _pick_validation_fold_items(total: int, val_ratio: float, seed: int) -> List
     )
     if val_idx:
         return val_idx
+    if float(val_ratio) == 0.0:
+        return []
     return [int(np.random.default_rng(seed).integers(0, total))]
 
 
