@@ -129,14 +129,22 @@ class SpatialOmicsDataModule(L.LightningDataModule):
                 self.hparams.feature_reducer.get("fit_mode", "train_only")
             ).strip().lower()
             == "train_only"
-            and not bool(self.hparams.force_precompute)
         ):
-            raise ValueError(
-                "LOOCV with reducer_scope='dataset' and "
-                "feature_reducer.fit_mode='train_only' requires "
-                "fold-specific precompute. Set data.force_precompute=true or use "
-                "a fold-specific processed_dir."
+            processed_index_path = (
+                Path(self.processed_dir) / "processed_index.json"
             )
+            if (
+                not bool(self.hparams.force_precompute)
+                and processed_index_path.exists()
+            ):
+                raise ValueError(
+                    "LOOCV with reducer_scope='dataset' and "
+                    "feature_reducer.fit_mode='train_only' cannot reuse "
+                    "an existing "
+                    "processed_index when data.force_precompute=false. Set "
+                    "data.force_precompute=true or use a fresh fold-specific "
+                    "processed_dir."
+                )
         preprocessor = self._build_preprocessor()
         preprocessor.precompute()
 

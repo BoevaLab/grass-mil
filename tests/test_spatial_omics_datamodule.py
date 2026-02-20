@@ -619,16 +619,18 @@ def test_loocv_supports_sample_fold_unit() -> None:
     assert s1_labels == {"test"}
 
 
-def test_loocv_train_only_reducer_requires_force_precompute(tmp_path: Path) -> None:
+def _build_loocv_train_only_dm(tmp_path: Path, processed_dir: Path):
     manifest_path = tmp_path / "manifest.csv"
-    manifest_path.write_text("sample_id,input_path,input_type\ns0,/tmp/fake.csv,csv\n")
+    manifest_path.write_text(
+        "sample_id,input_path,input_type\ns0,/tmp/fake.csv,csv\n"
+    )
 
     from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
 
-    dm = SpatialOmicsDataModule(
+    return SpatialOmicsDataModule(
         data_dir=str(tmp_path),
         raw_manifest_path=str(manifest_path),
-        processed_dir=str(tmp_path / "processed"),
+        processed_dir=str(processed_dir),
         coord_scale_um=1.0,
         sample_unit="tile",
         batch_size=1,
@@ -675,12 +677,48 @@ def test_loocv_train_only_reducer_requires_force_precompute(tmp_path: Path) -> N
             "transpose_assay": True,
         },
         graph_builder={"name": "delaunay", "kwargs": {}},
-        feature_reducer={"name": "identity", "fit_mode": "train_only", "kwargs": {}},
+        feature_reducer={
+            "name": "identity",
+            "fit_mode": "train_only",
+            "kwargs": {},
+        },
         tiling={"tile_size_um": 50.0, "stride_um": 50.0, "min_cells": 1},
         manifest=None,
         graph_labels=None,
         transforms=[],
     )
 
-    with pytest.raises(ValueError, match="requires fold-specific precompute"):
+
+def test_loocv_train_only_reducer_rejects_existing_processed_index(
+    tmp_path: Path,
+) -> None:
+    processed_dir = tmp_path / "processed"
+    processed_dir.mkdir(parents=True)
+    (processed_dir / "processed_index.json").write_text("{}")
+    dm = _build_loocv_train_only_dm(
+        tmp_path=tmp_path, processed_dir=processed_dir
+    )
+
+    with pytest.raises(
+        ValueError, match="cannot reuse an existing processed_index"
+    ):
         dm.prepare_data()
+
+
+def test_loocv_train_only_reducer_allows_fresh_processed_dir_without_force(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    processed_dir = tmp_path / "processed_fresh"
+    dm = _build_loocv_train_only_dm(
+        tmp_path=tmp_path, processed_dir=processed_dir
+    )
+
+    calls = {"precompute": 0}
+
+    class _StubPreprocessor:
+        def precompute(self) -> None:
+            calls["precompute"] += 1
+
+    monkeypatch.setattr(dm, "_build_preprocessor", lambda: _StubPreprocessor())
+    dm.prepare_data()
+    assert calls["precompute"] == 1
