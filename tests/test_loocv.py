@@ -5,7 +5,7 @@ from hydra import compose, initialize
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig, open_dict
 
-from src.loocv import run_loocv
+from src.loocv import _fold_slug, run_loocv
 
 
 def _make_loocv_cfg(tmp_path: Path) -> DictConfig:
@@ -29,6 +29,27 @@ def _write_manifest(path: Path) -> None:
         "s0,/tmp/f0.csv,csv,r0\n"
         "s1,/tmp/f1.csv,csv,r1\n"
     )
+
+
+def _write_manifest_for_sample_ids(path: Path, sample_ids: list[str]) -> None:
+    rows = ["sample_id,input_path,input_type,region_id"]
+    rows.extend(
+        f"{sample_id},/tmp/{idx}.csv,csv,r{idx}" for idx, sample_id in enumerate(sample_ids)
+    )
+    path.write_text("\n".join(rows) + "\n")
+
+
+def test_fold_slug_is_collision_safe_for_sanitized_aliases() -> None:
+    fold_a = "sampleA::region1"
+    fold_b = "sampleA//region1"
+
+    slug_a = _fold_slug(fold_a)
+    slug_b = _fold_slug(fold_b)
+
+    assert slug_a.startswith("sampleA_region1_")
+    assert slug_b.startswith("sampleA_region1_")
+    assert slug_a != slug_b
+    assert slug_a == _fold_slug(fold_a)
 
 
 @pytest.mark.parametrize("mode", ["single", "all"])
@@ -65,4 +86,33 @@ def test_loocv_runs_with_safe_isolation_flags(tmp_path: Path, monkeypatch) -> No
     assert summary_path.exists()
     assert len(summary["folds"]) == 2
     assert "aggregate_metrics" in summary
+    GlobalHydra.instance().clear()
+
+
+def test_loocv_uses_unique_dirs_for_colliding_sanitized_fold_ids(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cfg = _make_loocv_cfg(tmp_path)
+    _write_manifest_for_sample_ids(
+        Path(cfg.data.raw_manifest_path), ["sampleA::region1", "sampleA//region1"]
+    )
+    with open_dict(cfg):
+        cfg.loocv.mode = "all"
+        cfg.loocv.per_fold_processed_dir = True
+        cfg.loocv.force_precompute_per_fold = False
+
+    seen_output_dirs: list[str] = []
+    seen_processed_dirs: list[str] = []
+
+    def _fake_train(_cfg):
+        seen_output_dirs.append(str(_cfg.paths.output_dir))
+        seen_processed_dirs.append(str(_cfg.data.processed_dir))
+        return {"val/loss": 0.5}, {}
+
+    monkeypatch.setattr("src.loocv.train", _fake_train)
+    summary = run_loocv(cfg)
+
+    assert len(summary["folds"]) == 2
+    assert len(set(seen_output_dirs)) == 2
+    assert len(set(seen_processed_dirs)) == 2
     GlobalHydra.instance().clear()

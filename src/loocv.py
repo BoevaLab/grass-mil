@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -143,7 +144,11 @@ def _resolve_selected_folds(
 
 
 def _fold_slug(fold_id: str) -> str:
-    return re.sub(r"[^a-zA-Z0-9._-]+", "_", fold_id)
+    base = re.sub(r"[^a-zA-Z0-9._-]+", "_", fold_id).strip("_")
+    if not base:
+        base = "fold"
+    digest = hashlib.sha1(fold_id.encode("utf-8")).hexdigest()[:8]
+    return f"{base}_{digest}"
 
 
 def _to_float_metrics(metrics: Dict[str, Any]) -> Dict[str, float]:
