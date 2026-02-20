@@ -101,6 +101,7 @@ Notes:
 
 - When LOOCV is disabled, behavior is identical to current non-LOOCV splitting.
 - For `reducer_scope=dataset` + `feature_reducer.fit_mode=train_only`, LOOCV requires fold-specific precompute (`force_precompute=true` or fold-specific `processed_dir`).
+- For safe fold isolation, at least one of `loocv.force_precompute_per_fold` or `loocv.per_fold_processed_dir` must be `true`.
 
 ## 2.4 Manifest Field Mapping
 

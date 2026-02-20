@@ -200,6 +200,7 @@ Validation strategy options:
 Safety note:
 
 - For `data.reducer_scope=dataset` and `data.feature_reducer.fit_mode=train_only`, LOOCV requires fold-specific precompute (`data.force_precompute=true` or per-fold `processed_dir`).
+- To prevent stale split reuse across folds, at least one of `loocv.force_precompute_per_fold` or `loocv.per_fold_processed_dir` must be `true`.
 
 ### Step 5: Run Default Training And Evaluation
 

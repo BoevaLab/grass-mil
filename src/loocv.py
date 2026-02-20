@@ -21,6 +21,21 @@ from src.utils import RankedLogger, extras
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
+def _validate_loocv_isolation_settings(cfg: DictConfig) -> None:
+    if not bool(cfg.data.split.loocv.enabled):
+        return
+    uses_per_fold_dirs = bool(cfg.loocv.per_fold_processed_dir)
+    uses_per_fold_recompute = bool(cfg.loocv.force_precompute_per_fold)
+    if uses_per_fold_dirs or uses_per_fold_recompute:
+        return
+    raise ValueError(
+        "Unsafe LOOCV configuration: both loocv.per_fold_processed_dir=false "
+        "and loocv.force_precompute_per_fold=false. This can silently reuse "
+        "a previous fold's processed_index/splits. Enable at least one of "
+        "these flags to guarantee fold isolation."
+    )
+
+
 def _canonical_fold_id(fold_unit: str, sample_id: str, region_id: Optional[str]) -> str:
     if fold_unit == "sample":
         return str(sample_id)
@@ -169,6 +184,7 @@ def _aggregate_fold_metrics(
 def run_loocv(cfg: DictConfig) -> Dict[str, Any]:
     if cfg.get("seed"):
         L.seed_everything(cfg.seed, workers=True)
+    _validate_loocv_isolation_settings(cfg)
 
     discovered = _discover_folds(cfg)
     fold_ids = _resolve_selected_folds(cfg, discovered)
