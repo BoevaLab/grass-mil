@@ -786,16 +786,17 @@ def _split_indices(
     # Keep val split non-empty whenever val ratio is non-zero.
     if ratio_arr[1] > 0.0 and counts[1] == 0 and total > 0:
         donor_idx = -1
-        if counts[2] > 0:
+        if counts[2] > 1:
             donor_idx = 2
         elif counts[0] > 1 or ratio_arr[0] <= 0.0:
             donor_idx = 0
-        elif counts[0] > 0:
+        else:
             # Tiny totals can make non-empty train and val impossible.
-            donor_idx = 0
-        if donor_idx >= 0 and counts[donor_idx] > 0:
-            counts[donor_idx] -= 1
-            counts[1] += 1
+            raise ValueError(
+                "Tiny total makes non-empty train and val impossible. Use a bigger dataset or remove the validation split."
+            )
+        counts[donor_idx] -= 1
+        counts[1] += 1
 
     indices = np.arange(total)
     rng = np.random.default_rng(seed)
