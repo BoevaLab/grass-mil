@@ -5,7 +5,7 @@ from hydra import compose, initialize
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig, open_dict
 
-from src.loocv import _fold_slug, run_loocv
+from src.loocv import _fold_slug, _resolve_selected_folds, run_loocv
 
 
 def _make_loocv_cfg(tmp_path: Path) -> DictConfig:
@@ -176,3 +176,25 @@ def test_loocv_preflight_passes_and_runs_all_selected_folds(
     assert call_count["n"] == 3
     assert len(summary["folds"]) == 3
     GlobalHydra.instance().clear()
+
+
+def test_single_mode_warns_when_both_holdout_id_and_fold_index_are_set(
+    tmp_path: Path,
+) -> None:
+    cfg = _make_loocv_cfg(tmp_path)
+    with open_dict(cfg):
+        cfg.loocv.mode = "single"
+        cfg.data.split.loocv.holdout_id = "s0"
+        cfg.loocv.fold_index = 1
+
+    discovered = [
+        {"fold_id": "s0", "sample_id": "s0", "region_id": None},
+        {"fold_id": "s1", "sample_id": "s1", "region_id": None},
+    ]
+    with pytest.warns(
+        UserWarning,
+        match="loocv.fold_index takes priority",
+    ):
+        selected = _resolve_selected_folds(cfg, discovered)
+
+    assert selected == ["s1"]

@@ -8,7 +8,7 @@ task_name: "loocv"
 
 loocv:
   mode: single # single | all
-  fold_index: null
+  fold_index: null # single mode selector; takes priority over data.split.loocv.holdout_id
   per_fold_processed_dir: true
   force_precompute_per_fold: true
   summary_filename: loocv_summary.json

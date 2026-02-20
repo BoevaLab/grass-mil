@@ -181,6 +181,9 @@ python src/loocv.py \
   data.split.loocv.fold_unit=sample
 ```
 
+If both `data.split.loocv.holdout_id` and `loocv.fold_index` are set in single
+mode, `loocv.fold_index` takes priority and a warning is emitted.
+
 Full loop across all discovered folds:
 
 ```bash

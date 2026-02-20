@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import re
+import warnings
 from pathlib import Path
 from statistics import mean, pstdev
 from typing import Any, Dict, List, Optional
@@ -118,6 +119,13 @@ def _resolve_selected_folds(
             "Single LOOCV mode requires either data.split.loocv.holdout_id or loocv.fold_index."
         )
     if fold_index is not None:
+        if requested is not None:
+            warnings.warn(
+                "Both data.split.loocv.holdout_id and loocv.fold_index are set in "
+                "single mode. loocv.fold_index takes priority.",
+                UserWarning,
+                stacklevel=2,
+            )
         idx = int(fold_index)
         if idx < 0 or idx >= len(canonical_ids):
             raise ValueError(
