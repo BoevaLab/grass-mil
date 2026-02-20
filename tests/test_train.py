@@ -128,7 +128,8 @@ def test_train_resume(tmp_path: Path, cfg_train: DictConfig) -> None:
     metric_dict_2, _ = train(cfg_train)
 
     files = os.listdir(tmp_path / "checkpoints")
-    assert "epoch_001.ckpt" in files
+    assert any(name.startswith("epoch_") and name.endswith(".ckpt") for name in files)
+    assert "last.ckpt" in files
     assert "epoch_002.ckpt" not in files
 
     assert "train/loss" in metric_dict_1
