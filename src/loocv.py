@@ -179,6 +179,13 @@ def _to_float_metrics(metrics: Dict[str, Any]) -> Dict[str, float]:
         try:
             converted[key] = float(value)
         except Exception:
+            warnings.warn(
+                f"Skipping non-numeric LOOCV metric '{key}' of type "
+                f"'{type(value).__name__}' because it cannot be "
+                "converted to float.",
+                UserWarning,
+                stacklevel=2,
+            )
             continue
     return converted
 

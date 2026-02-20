@@ -5,7 +5,7 @@ from hydra import compose, initialize
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig, open_dict
 
-from src.loocv import _fold_slug, _resolve_selected_folds, run_loocv
+from src.loocv import _fold_slug, _resolve_selected_folds, _to_float_metrics, run_loocv
 
 
 def _make_loocv_cfg(tmp_path: Path) -> DictConfig:
@@ -215,3 +215,16 @@ def test_single_mode_warns_when_both_holdout_id_and_fold_index_are_set(
         selected = _resolve_selected_folds(cfg, discovered)
 
     assert selected == ["s1"]
+
+
+def test_to_float_metrics_warns_and_skips_non_convertible_values() -> None:
+    metrics = {
+        "train/loss": 0.5,
+        "val/ok": "1.25",
+        "val/bad": {"not": "numeric"},
+    }
+
+    with pytest.warns(UserWarning, match="Skipping non-numeric LOOCV metric 'val/bad'"):
+        converted = _to_float_metrics(metrics)
+
+    assert converted == {"train/loss": 0.5, "val/ok": 1.25}
