@@ -100,6 +100,9 @@ python src/train.py key.path=value
 Notes:
 
 - When LOOCV is disabled, behavior is identical to current non-LOOCV splitting.
+- Split labels are persisted at precompute time in `processed_index.json`.
+  Changing `data.split.*` requires regenerating processed artifacts
+  (`data.force_precompute=true` or a new `data.processed_dir`).
 - For `reducer_scope=dataset` + `feature_reducer.fit_mode=train_only`, LOOCV requires fold-specific precompute (`force_precompute=true` or fold-specific `processed_dir`).
 - For safe fold isolation, at least one of `loocv.force_precompute_per_fold` or `loocv.per_fold_processed_dir` must be `true`.
 - In `loocv.mode=single`, fold selection can use either
@@ -731,7 +734,7 @@ These constraints are not just documentation conventions; they are enforced in r
 | `conv_type=gine` requires `model.encoder.edge_attr_dim` and runtime `edge_attr` | `src/models/components/backbones.py` | raises `ValueError` |
 | `conv_type=gat` requires `hidden_dim % gat_heads == 0` | `src/models/components/backbones.py` | raises `ValueError` |
 | `model.encoder.use_edge_attr=true` is meaningful only for `gcn`/`gine` | `src/models/components/backbones.py` | warning/ignored for unsupported convs |
-| `data.split.train_val_test_split` must sum to `1.0` | datamodule + precompute split helpers | raises `ValueError` |
+| `data.split.train_val_test_split` must sum to `1.0` | `src/data/components/precompute.py` split helpers | raises `ValueError` |
 | `data.feature_reducer.fit_mode` must be `global` or `train_only` | `src/data/components/precompute.py` | raises `ValueError` |
 | `data.sampler.runtime.weight_mode` must be `inverse`, `sqrt_inverse`, or `proportional` | `src/data/components/samplers.py` | raises `ValueError` |
 | `model.encoder_init_map` must be `identity` or `auto_bgrl_or_identity` | `src/models/training/checkpoint_init.py` | raises `ValueError` |

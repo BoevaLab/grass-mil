@@ -142,6 +142,16 @@ Primary controls:
 - `data.reducer_scope`: `sample` or `dataset`
 - `data.feature_reducer.fit_mode`: `train_only` or `global` (only relevant for dataset scope)
 
+Important split persistence behavior:
+
+- Train/val/test labels are assigned during precompute and persisted in
+  `processed_index.json`.
+- The datamodule consumes persisted split labels and does not recompute them at
+  runtime.
+- If you change any `data.split.*` value, you must regenerate processed
+  artifacts (`data.force_precompute=true` or a new `data.processed_dir`),
+  otherwise old persisted splits are reused.
+
 Typical fresh-data command:
 
 ```bash

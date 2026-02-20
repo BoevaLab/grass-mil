@@ -302,7 +302,7 @@ def test_h5ad_obsm_spatial_coords(tmp_path: Path) -> None:
     assert list(table.molecular_feature_names) == ["0", "2"]
 
 
-def test_split_is_stable_across_setup_calls(tmp_path: Path) -> None:
+def test_datamodule_requires_persisted_splits(tmp_path: Path) -> None:
     pytest.importorskip("lightning")
     pytest.importorskip("torch_geometric")
 
@@ -379,44 +379,11 @@ def test_split_is_stable_across_setup_calls(tmp_path: Path) -> None:
         split_seed=7,
     )
 
-    dm.setup()
-    first_train = [entry.patch_id for entry in dm.dataset_train.entries]
-    first_val = [entry.patch_id for entry in dm.dataset_val.entries]
-    first_test = [entry.patch_id for entry in dm.dataset_test.entries]
-
-    dm.setup()
-    second_train = [entry.patch_id for entry in dm.dataset_train.entries]
-    second_val = [entry.patch_id for entry in dm.dataset_val.entries]
-    second_test = [entry.patch_id for entry in dm.dataset_test.entries]
-
-    assert first_train == second_train
-    assert first_val == second_val
-    assert first_test == second_test
-
-
-def test_split_indices_keeps_val_non_empty_for_nonzero_val_ratio() -> None:
-    pytest.importorskip("lightning")
-    pytest.importorskip("torch_geometric")
-    from src.data.spatial_omics_datamodule import _split_indices
-
-    train_idx, val_idx, test_idx = _split_indices(1, (0.8, 0.1, 0.1), seed=123)
-    assert len(train_idx) == 0
-    assert len(val_idx) == 1
-    assert len(test_idx) == 0
-
-    train_idx, val_idx, test_idx = _split_indices(3, (0.8, 0.1, 0.1), seed=123)
-    assert len(val_idx) >= 1
-    assert len(train_idx) + len(val_idx) + len(test_idx) == 3
-
-
-def test_split_indices_keeps_val_empty_for_zero_val_ratio() -> None:
-    pytest.importorskip("lightning")
-    pytest.importorskip("torch_geometric")
-    from src.data.spatial_omics_datamodule import _split_indices
-
-    train_idx, val_idx, test_idx = _split_indices(3, (0.8, 0.0, 0.2), seed=123)
-    assert len(train_idx) + len(val_idx) + len(test_idx) == 3
-    assert len(val_idx) == 0
+    with pytest.raises(
+        ValueError,
+        match="processed_index.json must contain valid per-entry split labels",
+    ):
+        dm.setup()
 
 
 def test_datamodule_uses_persisted_splits(tmp_path: Path) -> None:
