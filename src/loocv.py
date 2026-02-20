@@ -12,12 +12,14 @@ import hydra
 import lightning as L
 import pandas as pd
 import rootutils
+from hydra.utils import instantiate
 from omegaconf import DictConfig, open_dict
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
-from src.train import train
-from src.utils import RankedLogger, extras
+from src.data.components.precompute import discover_viable_loocv_fold_ids  # noqa: E402
+from src.train import train  # noqa: E402
+from src.utils import RankedLogger, extras  # noqa: E402
 
 log = RankedLogger(__name__, rank_zero_only=True)
 
@@ -143,6 +145,14 @@ def _resolve_selected_folds(
     )
 
 
+def _discover_viable_fold_ids(cfg: DictConfig) -> List[str]:
+    datamodule = instantiate(cfg.data)
+    preprocessor = datamodule._build_preprocessor()
+    return discover_viable_loocv_fold_ids(
+        preprocessor=preprocessor, fold_unit=str(cfg.data.split.loocv.fold_unit)
+    )
+
+
 def _fold_slug(fold_id: str) -> str:
     base = re.sub(r"[^a-zA-Z0-9._-]+", "_", fold_id).strip("_")
     if not base:
@@ -193,6 +203,16 @@ def run_loocv(cfg: DictConfig) -> Dict[str, Any]:
 
     discovered = _discover_folds(cfg)
     fold_ids = _resolve_selected_folds(cfg, discovered)
+    viable_fold_ids = _discover_viable_fold_ids(cfg)
+    viable_fold_set = set(viable_fold_ids)
+    missing_folds = [fold_id for fold_id in fold_ids if fold_id not in viable_fold_set]
+    if missing_folds:
+        raise ValueError(
+            "LOOCV preflight failed: selected folds are not viable after preprocessing "
+            "filters (e.g., min_cells). "
+            f"Missing selected folds: {missing_folds}. "
+            f"Available viable folds: {viable_fold_ids}"
+        )
     log.info(f"LOOCV fold count: {len(fold_ids)}")
 
     base_output_dir = Path(str(cfg.paths.output_dir))

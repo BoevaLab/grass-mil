@@ -34,7 +34,8 @@ def _write_manifest(path: Path) -> None:
 def _write_manifest_for_sample_ids(path: Path, sample_ids: list[str]) -> None:
     rows = ["sample_id,input_path,input_type,region_id"]
     rows.extend(
-        f"{sample_id},/tmp/{idx}.csv,csv,r{idx}" for idx, sample_id in enumerate(sample_ids)
+        f"{sample_id},/tmp/{idx}.csv,csv,r{idx}"
+        for idx, sample_id in enumerate(sample_ids)
     )
     path.write_text("\n".join(rows) + "\n")
 
@@ -79,6 +80,9 @@ def test_loocv_runs_with_safe_isolation_flags(tmp_path: Path, monkeypatch) -> No
     def _fake_train(_cfg):
         return {"val/loss": 1.23}, {}
 
+    monkeypatch.setattr(
+        "src.loocv._discover_viable_fold_ids", lambda _cfg: ["s0", "s1"]
+    )
     monkeypatch.setattr("src.loocv.train", _fake_train)
     summary = run_loocv(cfg)
     summary_path = Path(cfg.paths.output_dir) / "summary.json"
@@ -109,10 +113,66 @@ def test_loocv_uses_unique_dirs_for_colliding_sanitized_fold_ids(
         seen_processed_dirs.append(str(_cfg.data.processed_dir))
         return {"val/loss": 0.5}, {}
 
+    monkeypatch.setattr(
+        "src.loocv._discover_viable_fold_ids",
+        lambda _cfg: ["sampleA::region1", "sampleA//region1"],
+    )
     monkeypatch.setattr("src.loocv.train", _fake_train)
     summary = run_loocv(cfg)
 
     assert len(summary["folds"]) == 2
     assert len(set(seen_output_dirs)) == 2
     assert len(set(seen_processed_dirs)) == 2
+    GlobalHydra.instance().clear()
+
+
+def test_loocv_fails_fast_when_selected_fold_not_viable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cfg = _make_loocv_cfg(tmp_path)
+    _write_manifest(Path(cfg.data.raw_manifest_path))
+    with open_dict(cfg):
+        cfg.loocv.mode = "all"
+        cfg.loocv.per_fold_processed_dir = True
+        cfg.loocv.force_precompute_per_fold = False
+
+    monkeypatch.setattr("src.loocv._discover_viable_fold_ids", lambda _cfg: ["s0"])
+    monkeypatch.setattr(
+        "src.loocv.train",
+        lambda _cfg: pytest.fail("train() should not be called when preflight fails"),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="LOOCV preflight failed: selected folds are not viable after preprocessing filters",
+    ):
+        run_loocv(cfg)
+    GlobalHydra.instance().clear()
+
+
+def test_loocv_preflight_passes_and_runs_all_selected_folds(
+    tmp_path: Path, monkeypatch
+) -> None:
+    cfg = _make_loocv_cfg(tmp_path)
+    _write_manifest_for_sample_ids(Path(cfg.data.raw_manifest_path), ["s0", "s1", "s2"])
+    with open_dict(cfg):
+        cfg.loocv.mode = "all"
+        cfg.loocv.per_fold_processed_dir = True
+        cfg.loocv.force_precompute_per_fold = False
+
+    call_count = {"n": 0}
+
+    def _fake_train(_cfg):
+        call_count["n"] += 1
+        return {"val/loss": 0.75}, {}
+
+    monkeypatch.setattr(
+        "src.loocv._discover_viable_fold_ids", lambda _cfg: ["s0", "s1", "s2"]
+    )
+    monkeypatch.setattr("src.loocv.train", _fake_train)
+
+    summary = run_loocv(cfg)
+
+    assert call_count["n"] == 3
+    assert len(summary["folds"]) == 3
     GlobalHydra.instance().clear()

@@ -4,7 +4,7 @@ import json
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
 import torch
@@ -988,6 +988,34 @@ def _loocv_fold_id_from_key(key: object, fold_unit: str) -> str:
     sample_id, region_id = key
     region_value = "__NONE__" if region_id is None else str(region_id)
     return f"{sample_id}::{region_value}"
+
+
+def discover_viable_loocv_fold_ids(
+    preprocessor: SpatialOmicsPreprocessor, fold_unit: str
+) -> List[str]:
+    if fold_unit not in {"region", "sample"}:
+        raise ValueError("split.loocv.fold_unit must be one of ['region', 'sample'].")
+
+    manifest_rows = preprocessor._load_manifest(
+        Path(preprocessor.precompute_config.raw_manifest_path)
+    )
+    tables = preprocessor._load_tables(manifest_rows)
+    prepared = preprocessor._prepare_samples(manifest_rows, tables)
+
+    fold_keys: Set[object] = set()
+    for sample in prepared:
+        if not sample.patch_indices:
+            continue
+        key = (
+            (sample.sample_id, sample.region_id)
+            if fold_unit == "region"
+            else sample.sample_id
+        )
+        fold_keys.add(key)
+
+    return sorted(
+        _loocv_fold_id_from_key(key=key, fold_unit=fold_unit) for key in fold_keys
+    )
 
 
 def _select_graph_label_id(
