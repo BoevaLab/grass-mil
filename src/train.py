@@ -5,7 +5,7 @@ import lightning as L
 import rootutils
 from lightning import Callback, LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
@@ -17,9 +17,46 @@ from src.utils import (
     instantiate_loggers,
     log_hyperparameters,
     task_wrapper,
-)
+)  # noqa: E402
 
 log = RankedLogger(__name__, rank_zero_only=True)
+
+
+def _requires_zero_validation(cfg: DictConfig) -> bool:
+    split_cfg = cfg.get("data", {}).get("split")
+    if not split_cfg:
+        return False
+
+    loocv_cfg = split_cfg.get("loocv")
+    if loocv_cfg and bool(loocv_cfg.get("enabled", False)):
+        return float(loocv_cfg.get("val_ratio", 0.0)) == 0.0
+
+    ratios = split_cfg.get("train_val_test_split")
+    if ratios is None:
+        return False
+    try:
+        return float(ratios[1]) == 0.0
+    except Exception:
+        return False
+
+
+def _filter_val_monitor_callbacks(
+    callbacks_cfg: Optional[DictConfig],
+) -> Tuple[Optional[DictConfig], List[str]]:
+    if not callbacks_cfg or not isinstance(callbacks_cfg, DictConfig):
+        return callbacks_cfg, []
+
+    filtered = OmegaConf.create({})
+    removed: List[str] = []
+    for name, cb_conf in callbacks_cfg.items():
+        monitor = (
+            cb_conf.get("monitor") if isinstance(cb_conf, DictConfig) else None
+        )
+        if isinstance(monitor, str) and monitor.startswith("val/"):
+            removed.append(str(name))
+            continue
+        filtered[name] = cb_conf
+    return filtered, removed
 
 
 @task_wrapper
@@ -39,7 +76,15 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     model: LightningModule = hydra.utils.instantiate(cfg.model)
 
     log.info("Instantiating callbacks...")
-    callbacks: List[Callback] = instantiate_callbacks(cfg.get("callbacks"))
+    callbacks_cfg = cfg.get("callbacks")
+    if _requires_zero_validation(cfg):
+        callbacks_cfg, removed = _filter_val_monitor_callbacks(callbacks_cfg)
+        if removed:
+            log.info(
+                "Validation is disabled by configuration; skipping val-monitored callbacks: "
+                f"{removed}"
+            )
+    callbacks: List[Callback] = instantiate_callbacks(callbacks_cfg)
 
     log.info("Instantiating loggers...")
     logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
@@ -64,7 +109,11 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
 
     if cfg.get("train"):
         log.info("Starting training!")
-        trainer.fit(model=model, datamodule=datamodule, ckpt_path=cfg.get("ckpt_path"))
+        trainer.fit(
+            model=model,
+            datamodule=datamodule,
+            ckpt_path=cfg.get("ckpt_path"),
+        )
 
     train_metrics = trainer.callback_metrics
 
@@ -75,7 +124,9 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         if checkpoint_callback is not None:
             ckpt_path = checkpoint_callback.best_model_path
             if ckpt_path == "":
-                log.warning("Best ckpt not found! Using current weights for testing...")
+                log.warning(
+                    "Best ckpt not found! Using current weights for testing..."
+                )
                 ckpt_path = None
         else:
             log.warning(

@@ -47,6 +47,7 @@ Scope rules used here:
 
 - `configs/train.yaml`: Primary training composition and defaults chain.
 - `configs/eval.yaml`: Primary evaluation composition and defaults chain.
+- `configs/loocv.yaml`: LOOCV composition for single-fold and full-loop orchestration.
 
 ### Callback Config Group
 
@@ -169,6 +170,7 @@ SSL preset:
 
 - `src/train.py`: Hydra training entrypoint (train + optional test).
 - `src/eval.py`: Hydra evaluation entrypoint (test from checkpoint).
+- `src/loocv.py`: Hydra LOOCV entrypoint with fold discovery, per-fold runs, and aggregate summaries.
 
 ### Data Pipeline (`src/data/`)
 

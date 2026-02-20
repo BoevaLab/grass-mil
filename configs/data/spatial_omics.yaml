@@ -21,7 +21,14 @@ categorical_features:
 
 split:
   train_val_test_split: [0.8, 0.1, 0.1]
-  split_by: sample # sample | patch
+  split_by: sample # sample | region | patch
+  loocv:
+    enabled: false
+    fold_unit: region # region | sample
+    holdout_id: null
+    validation_strategy: heldout_fold_items # heldout_fold_items | patches_from_train_items
+    val_ratio: 0.1 # exactly 0.0 disables val; non-zero guarantees at least one val item
+    seed: 42
 
 manifest:
   sample_id: sample_id

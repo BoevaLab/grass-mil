@@ -137,9 +137,20 @@ Primary controls:
 - `data.tiling.*`: tile geometry and tile min-cell threshold
 - `data.min_cells`: global patch retention threshold
 - `data.split.train_val_test_split`: must sum to `1.0`
-- `data.split.split_by`: `sample` or `patch`
+- `data.split.split_by`: `sample`, `region`, or `patch`
+- `data.split.loocv.*`: optional fold-wise holdout overrides
 - `data.reducer_scope`: `sample` or `dataset`
 - `data.feature_reducer.fit_mode`: `train_only` or `global` (only relevant for dataset scope)
+
+Important split persistence behavior:
+
+- Train/val/test labels are assigned during precompute and persisted in
+  `processed_index.json`.
+- The datamodule consumes persisted split labels and does not recompute them at
+  runtime.
+- If you change any `data.split.*` value, you must regenerate processed
+  artifacts (`data.force_precompute=true` or a new `data.processed_dir`),
+  otherwise old persisted splits are reused.
 
 Typical fresh-data command:
 
@@ -152,6 +163,57 @@ python src/train.py \
   data.processed_dir=/absolute/path/to/processed/spatial_omics \
   data.force_precompute=true
 ```
+
+### Step 4b: Run LOOCV (Single Fold Or Full Loop)
+
+`src/loocv.py` reuses the train stack and runs fold-specific jobs by overriding
+`data.split.loocv.*`.
+
+Single-fold by explicit fold id:
+
+```bash
+python src/loocv.py \
+  loocv.mode=single \
+  data.split.loocv.enabled=true \
+  data.split.loocv.fold_unit=region \
+  data.split.loocv.holdout_id="sampleA::region3" \
+  data.split.loocv.validation_strategy=heldout_fold_items \
+  data.split.loocv.val_ratio=0.2
+```
+
+Single-fold by fold index (useful for array jobs):
+
+```bash
+python src/loocv.py \
+  loocv.mode=single \
+  loocv.fold_index=0 \
+  data.split.loocv.enabled=true \
+  data.split.loocv.fold_unit=sample
+```
+
+If both `data.split.loocv.holdout_id` and `loocv.fold_index` are set in single
+mode, `loocv.fold_index` takes priority and a warning is emitted.
+
+Full loop across all discovered folds:
+
+```bash
+python src/loocv.py \
+  loocv.mode=all \
+  data.split.loocv.enabled=true \
+  data.split.loocv.fold_unit=region \
+  data.split.loocv.validation_strategy=patches_from_train_items \
+  data.split.loocv.val_ratio=0.15
+```
+
+Validation strategy options:
+
+- `heldout_fold_items`: validation is held out from remaining fold items.
+- `patches_from_train_items`: validation patches are sampled from training fold items (weaker independence, useful in low-data settings).
+
+Safety note:
+
+- For `data.reducer_scope=dataset` and `data.feature_reducer.fit_mode=train_only`, LOOCV requires fold-specific precompute (`data.force_precompute=true` or per-fold `processed_dir`).
+- To prevent stale split reuse across folds, at least one of `loocv.force_precompute_per_fold` or `loocv.per_fold_processed_dir` must be `true`.
 
 ### Step 5: Run Default Training And Evaluation
 
