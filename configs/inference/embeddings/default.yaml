@@ -1,0 +1,7 @@
+enabled: true
+extract_graph: true
+extract_node: false
+save: true
+format: csv
+filename: graph_embeddings.csv
+node_filename: node_embeddings.csv

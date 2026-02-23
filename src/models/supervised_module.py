@@ -80,9 +80,7 @@ class SupervisedModule(L.LightningModule):
 
         # MIL-specific config -- only meaningful when use_attention is True.
         if self.use_attention:
-            self.region_accum_cfg = dict(
-                self.task_cfg.get("region_accumulation", {})
-            )
+            self.region_accum_cfg = dict(self.task_cfg.get("region_accumulation", {}))
             self.region_accum_enabled = bool(
                 self.region_accum_cfg.get("enabled", False)
             )
@@ -125,9 +123,7 @@ class SupervisedModule(L.LightningModule):
             return
 
         loss_cfg = dict(self.hparams.loss)
-        loss_cfg.setdefault(
-            "loss_type", self.task_cfg.get("loss", "categorical_bce")
-        )
+        loss_cfg.setdefault("loss_type", self.task_cfg.get("loss", "categorical_bce"))
 
         # Build attention config only when MIL is active.
         if self.use_attention:
@@ -179,6 +175,49 @@ class SupervisedModule(L.LightningModule):
         patch_logits = self.graph_head(graph_emb)
         return patch_logits, graph_emb
 
+    def collect_graph_embeddings(
+        self, batch, *, return_node_embeddings: bool = False
+    ) -> Dict[str, Any]:
+        node_emb, graph_emb = self.encoder(
+            batch.x,
+            batch.edge_index,
+            edge_attr=getattr(batch, "edge_attr", None),
+            batch=getattr(batch, "batch", None),
+            return_graph_embedding=True,
+        )
+        bag_ids = extract_bag_ids(
+            batch,
+            bag_key=self.task_cfg.get("bag_key", "region_id"),
+            bag_fallback_key=self.task_cfg.get("bag_fallback_key", "sample_id"),
+        )
+        bag_groups = group_instance_indices_by_bag(bag_ids)
+        ordered_bag_ids = sorted(bag_groups.keys())
+        bag_graph_embeddings = []
+        for bag_id in ordered_bag_ids:
+            idx = torch.tensor(
+                bag_groups[bag_id], dtype=torch.long, device=graph_emb.device
+            )
+            bag_graph_embeddings.append(
+                graph_emb.index_select(0, idx).mean(dim=0, keepdim=True)
+            )
+
+        payload: Dict[str, Any] = {
+            "bag_ids": ordered_bag_ids,
+            "graph_embeddings": torch.cat(bag_graph_embeddings, dim=0),
+        }
+        if return_node_embeddings:
+            batch_index = getattr(batch, "batch", None)
+            if batch_index is None:
+                batch_index = torch.zeros(
+                    node_emb.shape[0], dtype=torch.long, device=node_emb.device
+                )
+            node_bag_ids = [
+                str(bag_ids[int(graph_idx)]) for graph_idx in batch_index.detach().cpu()
+            ]
+            payload["node_embeddings"] = node_emb
+            payload["node_bag_ids"] = node_bag_ids
+        return payload
+
     def _forward_bags(self, batch, *, allow_missing_targets: bool = False):
         patch_logits, graph_emb = self._forward_instances(batch)
 
@@ -199,9 +238,7 @@ class SupervisedModule(L.LightningModule):
                     max_instances_per_bag=int(
                         self.task_cfg.get("max_instances_per_bag", 0)
                     ),
-                    instance_sampling=self.task_cfg.get(
-                        "instance_sampling", "all"
-                    ),
+                    instance_sampling=self.task_cfg.get("instance_sampling", "all"),
                 )
             )
         else:
@@ -310,10 +347,7 @@ class SupervisedModule(L.LightningModule):
             )
             if entropy_mode == "attention":
                 entropy_values = torch.cat(
-                    [
-                        bag_attention[bag_id].reshape(-1, 1)
-                        for bag_id in bag_ids
-                    ],
+                    [bag_attention[bag_id].reshape(-1, 1) for bag_id in bag_ids],
                     dim=0,
                 )
             elif entropy_mode == "attention_shaped_target":
@@ -338,9 +372,7 @@ class SupervisedModule(L.LightningModule):
 
         region_w = float(self.loss_weights_cfg.get("region", 1.0))
         node_w = float(
-            self.node_aux_cfg.get(
-                "weight", self.loss_weights_cfg.get("node_aux", 1.0)
-            )
+            self.node_aux_cfg.get("weight", self.loss_weights_cfg.get("node_aux", 1.0))
         )
         entropy_w = float(
             self.entropy_reg_cfg.get(
@@ -365,7 +397,9 @@ class SupervisedModule(L.LightningModule):
         bag_indices: list[list[int]],
         bag_attention: Optional[dict[str, torch.Tensor]],
         stage: str,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor], torch.Tensor]:
+    ) -> tuple[
+        torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor], torch.Tensor
+    ]:
         region_loss = self._compute_region_loss(
             bag_logits=bag_logits,
             bag_targets=bag_targets,
@@ -510,9 +544,7 @@ class SupervisedModule(L.LightningModule):
         node_losses: list[torch.Tensor] = []
         entropies: list[torch.Tensor] = []
         for idx, bag_id in enumerate(ordered_bag_ids):
-            region_w = (
-                bag_weights[idx : idx + 1] if bag_weights is not None else None
-            )
+            region_w = bag_weights[idx : idx + 1] if bag_weights is not None else None
             region_loss, node_aux_loss, entropy_reg, total_loss = self._compute_losses(
                 patch_logits=patch_logits,
                 bag_logits=bag_logits[idx : idx + 1],
@@ -590,15 +622,12 @@ class SupervisedModule(L.LightningModule):
     # Region accumulation helpers (MIL only)
     # ------------------------------------------------------------------
 
-    def _flush_region_buffer_if_needed(
-        self, *, force: bool
-    ) -> list[torch.Tensor]:
+    def _flush_region_buffer_if_needed(self, *, force: bool) -> list[torch.Tensor]:
         if not self._region_total_loss_buffer:
             return []
         if (
             not force
-            and len(self._region_total_loss_buffer)
-            < self.region_accum_hyperbatch_size
+            and len(self._region_total_loss_buffer) < self.region_accum_hyperbatch_size
         ):
             return []
 
@@ -611,7 +640,10 @@ class SupervisedModule(L.LightningModule):
             if force:
                 chunk = self._region_total_loss_buffer
             else:
-                if len(self._region_total_loss_buffer) < self.region_accum_hyperbatch_size:
+                if (
+                    len(self._region_total_loss_buffer)
+                    < self.region_accum_hyperbatch_size
+                ):
                     break
                 chunk = self._region_total_loss_buffer[
                     : self.region_accum_hyperbatch_size
@@ -676,11 +708,7 @@ class SupervisedModule(L.LightningModule):
 
         params = [p for p in self.parameters() if p.requires_grad]
 
-        if (
-            self.use_attention
-            and backbone_lr is not None
-            and attention_lr is not None
-        ):
+        if self.use_attention and backbone_lr is not None and attention_lr is not None:
             seen: set[int] = set()
 
             def _collect_params(module) -> list[torch.nn.Parameter]:
@@ -697,9 +725,9 @@ class SupervisedModule(L.LightningModule):
                     out.append(param)
                 return out
 
-            backbone_params = _collect_params(
-                self.encoder
-            ) + _collect_params(self.graph_head)
+            backbone_params = _collect_params(self.encoder) + _collect_params(
+                self.graph_head
+            )
             attention_params = _collect_params(self.attention)
             param_groups: list[dict] = []
             if backbone_params:

@@ -133,6 +133,7 @@ python src/train.py debug=limit
 
 1. CLI evaluation mode: `src/eval.py` with required `ckpt_path`.
 2. Advanced prediction mode: `Trainer.predict(...)` using `SupervisedModule.predict_step`.
+3. Inference utility CLI mode: `src/inference/predict.py` for prediction export, metrics, and embeddings.
 
 Predict outputs include:
 
@@ -140,6 +141,12 @@ Predict outputs include:
 - `bag_logits`
 - optional `bag_targets`
 - optional `bag_attention`
+
+Metrics available through the inference utility suite:
+
+- categorical/binary: accuracy, precision, recall, F1, ROC-AUC
+- regression: R2, MAE, RMSE
+- survival: concordance index (c-index)
 
 ## 11) Notebook Validation Modes
 

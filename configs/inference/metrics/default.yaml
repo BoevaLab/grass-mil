@@ -1,0 +1,19 @@
+enabled: true
+per_group: true
+
+categorical:
+  accuracy: true
+  roc_auc: true
+  f1: true
+  precision: true
+  recall: true
+  threshold: 0.5
+  average: macro
+
+regression:
+  r2: true
+  mae: true
+  rmse: true
+
+survival:
+  c_index: true

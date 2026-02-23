@@ -1,0 +1,31 @@
+# @package _global_
+
+defaults:
+  - _self_
+  - /data: spatial_omics
+  - /task: finetune_mean
+  - /model: supervised_module
+  - /trainer: default
+  - /paths: default
+  - /extras: default
+  - /hydra: default
+  - metrics: default
+  - aggregation: default
+  - embeddings: default
+
+task_name: "predict"
+tags: ["dev"]
+
+ckpt_path: ???
+
+predict:
+  save_predictions: true
+  save_metrics: true
+  include_targets: true
+  include_attention: true
+  output_subdir: predictions
+
+output:
+  predictions_filename: predictions.csv
+  metrics_filename: metrics.json
+  summary_filename: inference_summary.json

@@ -458,9 +458,30 @@ python src/eval.py \
 
 This runs `trainer.test(...)` and logs test metrics.
 
-### B) Advanced Predict Path (Python API)
+### B) Inference Utility Suite (Prediction + Metrics + Embeddings)
 
-There is no dedicated `predict.py`, but `SupervisedModule.predict_step(...)` supports prediction output.
+Use `src/inference/predict.py` for artifact-centric inference runs:
+
+```bash
+python src/inference/predict.py \
+  ckpt_path=/absolute/path/to/checkpoint.ckpt \
+  task=finetune_mil \
+  model=supervised_module \
+  data=spatial_omics \
+  aggregation.mode=mean \
+  embeddings.extract_node=false
+```
+
+By default this writes:
+
+- prediction table: `${paths.output_dir}/${predict.output_subdir}/${output.predictions_filename}`
+- metrics report: `${paths.output_dir}/${predict.output_subdir}/${output.metrics_filename}`
+- graph embeddings: `${paths.output_dir}/${predict.output_subdir}/${embeddings.filename}`
+- summary payload: `${paths.output_dir}/${predict.output_subdir}/${output.summary_filename}`
+
+### C) Advanced Predict Path (Python API)
+
+`SupervisedModule.predict_step(...)` still supports direct Python-level prediction output.
 
 ```python
 import hydra
