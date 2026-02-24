@@ -69,6 +69,7 @@ python src/eval.py \
 
 - Full tracked-file map: [`docs/repository_map.md`](docs/repository_map.md)
 - End-to-end workflows (new data, SSL pretrain->finetune, model adjustments, inference): [`docs/workflows_train_infer.md`](docs/workflows_train_infer.md)
+- Inference utility suite (prediction artifacts, metrics, embeddings): [`docs/inference_utility_suite.md`](docs/inference_utility_suite.md)
 - Exhaustive hyperparameter reference for repo configs: [`docs/hyperparameter_reference.md`](docs/hyperparameter_reference.md)
 - Capability modes and operational options: [`docs/capabilities_and_modes.md`](docs/capabilities_and_modes.md)
 - Existing model contracts: [`docs/model_component_contracts.md`](docs/model_component_contracts.md)
@@ -82,7 +83,7 @@ python src/eval.py \
 | Supervised MIL attention | `task=finetune_mil` | `model=supervised_module` | `src/train.py` | Attention-weighted bag logits (+ optional MIL auxiliary terms) |
 | SSL pretraining (BGRL) | `task=pretrain_bgrl` | `model=bgrl_module` | `src/train.py` | BGRL-pretrained encoder checkpoint |
 | Checkpoint evaluation | any compatible task/model | matching training stack | `src/eval.py` | Test metrics from selected checkpoint |
-| Advanced prediction (Python API) | compatible with `SupervisedModule.predict_step` | `model=supervised_module` | `Trainer.predict(...)` | `bag_ids`, `bag_logits`, optional `bag_targets`, optional `bag_attention` |
+| Advanced prediction (Python API) | compatible with `SupervisedModule.predict_step` | `model=supervised_module` | `Trainer.predict(...)` | `bag_ids`, `bag_logits`, `row_region_ids`, `row_sample_ids`, optional `bag_targets`, optional `bag_attention`, optional `instance_*`, optional `embedding_*` |
 
 ## Required Inputs (Manifest Summary)
 
@@ -157,8 +158,7 @@ Data precompute outputs:
 
 Current repository behavior intentionally excludes:
 
-1. A standalone `predict.py` CLI entrypoint for inference-only export.
-2. Curated first-class hyperparameter sweep recipes in `configs/hparams_search/`.
-3. Turnkey dataset-specific benchmark packs beyond the generic Hydra/config contracts.
+1. Curated first-class hyperparameter sweep recipes in `configs/hparams_search/`.
+2. Turnkey dataset-specific benchmark packs beyond the generic Hydra/config contracts.
 
 All currently supported capabilities are documented in [`docs/workflows_train_infer.md`](docs/workflows_train_infer.md), [`docs/hyperparameter_reference.md`](docs/hyperparameter_reference.md), and [`docs/capabilities_and_modes.md`](docs/capabilities_and_modes.md).

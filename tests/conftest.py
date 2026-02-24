@@ -81,6 +81,39 @@ def cfg_eval_global() -> DictConfig:
     return cfg
 
 
+@pytest.fixture(scope="package")
+def cfg_predict_global() -> DictConfig:
+    """A pytest fixture for inference prediction configuration."""
+    with initialize(version_base="1.3", config_path="../configs"):
+        cfg = compose(
+            config_name="inference/predict.yaml",
+            return_hydra_config=True,
+            overrides=["ckpt_path=."],
+        )
+
+        with open_dict(cfg):
+            cfg.paths.root_dir = str(rootutils.find_root(indicator=".project-root"))
+            cfg.trainer.max_epochs = 1
+            cfg.trainer.limit_test_batches = 1.0
+            cfg.trainer.accelerator = "cpu"
+            cfg.trainer.devices = 1
+            cfg.data = OmegaConf.create(
+                {
+                    "_target_": "tests.helpers.synthetic_datamodule.SyntheticBagDataModule",
+                    "batch_size": 4,
+                    "num_workers": 0,
+                    "pin_memory": False,
+                    "input_dim": 8,
+                }
+            )
+            cfg.model.encoder.input_dim = 8
+            cfg.extras.print_config = False
+            cfg.extras.enforce_tags = False
+            cfg.logger = None
+
+    return cfg
+
+
 @pytest.fixture(scope="function")
 def cfg_train(cfg_train_global: DictConfig, tmp_path: Path) -> DictConfig:
     """A pytest fixture built on top of the `cfg_train_global()` fixture, which accepts a temporary
@@ -94,6 +127,19 @@ def cfg_train(cfg_train_global: DictConfig, tmp_path: Path) -> DictConfig:
     :return: A DictConfig with updated output and log directories corresponding to `tmp_path`.
     """
     cfg = cfg_train_global.copy()
+
+    with open_dict(cfg):
+        cfg.paths.output_dir = str(tmp_path)
+        cfg.paths.log_dir = str(tmp_path)
+
+    yield cfg
+
+    GlobalHydra.instance().clear()
+
+
+@pytest.fixture(scope="function")
+def cfg_predict(cfg_predict_global: DictConfig, tmp_path: Path) -> DictConfig:
+    cfg = cfg_predict_global.copy()
 
     with open_dict(cfg):
         cfg.paths.output_dir = str(tmp_path)

@@ -23,8 +23,8 @@ ssl:
   predictor:
     hidden_size: 512
 
-optim: ${optim}
-scheduler: ${scheduler}
+optim: ${oc.select:optim,null}
+scheduler: ${oc.select:scheduler,null}
 task: ${task}
 
 init_from_ckpt: null

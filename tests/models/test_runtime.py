@@ -1,5 +1,5 @@
-import torch
 import pytest
+import torch
 
 
 def test_remap_encoder_keys_auto_bgrl_or_identity():
@@ -20,6 +20,7 @@ def test_compute_supervised_loss_routes():
     from src.models.components.losses import (
         CoxSGDLoss,
         WeightedBCEWithLogitsLoss,
+        WeightedCrossEntropyLoss,
         WeightedMSELoss,
     )
     from src.models.training.loss_utils import compute_supervised_loss
@@ -42,6 +43,15 @@ def test_compute_supervised_loss_routes():
     )
     assert mse.ndim == 0
 
+    ce = compute_supervised_loss(
+        loss_fn=WeightedCrossEntropyLoss(),
+        task_cfg={"target_type": "categorical"},
+        bag_logits=torch.randn(5, 3),
+        bag_targets=torch.tensor([[0], [1], [2], [1], [0]], dtype=torch.long),
+        bag_weights=torch.ones(5),
+    )
+    assert ce.ndim == 0
+
     cox = compute_supervised_loss(
         loss_fn=CoxSGDLoss(),
         task_cfg={"target_type": "survival"},
@@ -56,6 +66,154 @@ def test_compute_supervised_loss_routes():
         bag_weights=None,
     )
     assert cox.ndim == 0
+
+
+def test_validate_task_config_accepts_categorical():
+    from src.models.training.builders import validate_task_config
+
+    validate_task_config({"target_type": "categorical", "instance_sampling": "all"})
+
+
+def test_supervised_module_validation_logs_step_loss_not_acc():
+    pytest.importorskip("lightning")
+    from src.models.supervised_module import SupervisedModule
+
+    module = SupervisedModule(
+        encoder={},
+        graph_head={},
+        loss={},
+        optim={},
+        task={"aggregation": "mean", "target_type": "categorical"},
+    )
+
+    logged = {}
+
+    def _capture_log(name, value, **kwargs):
+        logged[name] = (value, kwargs)
+
+    module.log = _capture_log  # type: ignore[method-assign]
+    module._log_stage_metrics(
+        stage="val",
+        loss_value=torch.tensor(0.2),
+        bag_logits=torch.tensor([[5.0, 1.0, -1.0], [-2.0, 0.2, 3.0], [0.1, 0.2, 0.3]]),
+        bag_targets=torch.tensor([0, 2, 1]),
+    )
+    assert "val/acc" not in logged
+    assert "val/loss" in logged
+    _, kwargs = logged["val/loss"]
+    assert kwargs["on_step"] is True
+    assert kwargs["on_epoch"] is True
+
+
+def test_supervised_module_logs_epoch_validation_accuracy_from_aggregated_regions():
+    pytest.importorskip("lightning")
+    from src.models.supervised_module import SupervisedModule
+
+    module = SupervisedModule(
+        encoder={},
+        graph_head={},
+        loss={},
+        optim={},
+        task={"aggregation": "mean", "target_type": "binary"},
+    )
+    logged = {}
+
+    def _capture_log(name, value, **kwargs):
+        logged[name] = (value, kwargs)
+
+    module.log = _capture_log  # type: ignore[method-assign]
+    module.on_validation_epoch_start()
+    module._val_bag_ids = ["p0", "p1", "p2"]
+    module._val_bag_logits_chunks = [torch.tensor([[0.0], [0.0], [0.0]])]
+    module._val_bag_targets_chunks = [torch.tensor([[1.0], [1.0], [0.0]])]
+    module._val_row_region_ids = ["rA", "rA", "rB"]
+    module._val_row_sample_ids = ["s0", "s0", "s1"]
+    module._val_instance_logits_chunks = [torch.tensor([[2.0], [-2.0], [-2.0]])]
+    module._val_instance_patch_ids = ["p0", "p1", "p2"]
+    module._val_instance_region_ids = ["rA", "rA", "rB"]
+    module._val_instance_sample_ids = ["s0", "s0", "s1"]
+
+    module.on_validation_epoch_end()
+    assert "val/acc" in logged
+    acc_value, kwargs = logged["val/acc"]
+    assert torch.isclose(acc_value, torch.tensor(1.0))
+    assert kwargs["on_step"] is False
+    assert kwargs["on_epoch"] is True
+
+
+def test_supervised_module_logs_epoch_validation_regression_metrics():
+    pytest.importorskip("lightning")
+    from src.models.supervised_module import SupervisedModule
+
+    module = SupervisedModule(
+        encoder={},
+        graph_head={},
+        loss={},
+        optim={},
+        task={"aggregation": "mean", "target_type": "regression"},
+    )
+    logged = {}
+
+    def _capture_log(name, value, **kwargs):
+        logged[name] = (value, kwargs)
+
+    module.log = _capture_log  # type: ignore[method-assign]
+    module.on_validation_epoch_start()
+    module._val_bag_ids = ["p0", "p1"]
+    module._val_bag_logits_chunks = [torch.tensor([[1.0], [3.0]])]
+    module._val_bag_targets_chunks = [torch.tensor([[1.5], [2.5]])]
+    module._val_row_region_ids = ["rA", "rB"]
+    module._val_row_sample_ids = ["s0", "s1"]
+    module._val_instance_logits_chunks = [torch.tensor([[1.0], [3.0]])]
+    module._val_instance_patch_ids = ["p0", "p1"]
+    module._val_instance_region_ids = ["rA", "rB"]
+    module._val_instance_sample_ids = ["s0", "s1"]
+
+    module.on_validation_epoch_end()
+    assert "val/mae" in logged
+    assert "val/rmse" in logged
+    assert "val/r2" in logged
+    assert logged["val/mae"][1]["on_epoch"] is True
+    assert logged["val/rmse"][1]["on_epoch"] is True
+    assert logged["val/r2"][1]["on_epoch"] is True
+
+
+def test_supervised_module_logs_epoch_validation_survival_c_index():
+    pytest.importorskip("lightning")
+    from src.models.supervised_module import SupervisedModule
+
+    module = SupervisedModule(
+        encoder={},
+        graph_head={},
+        loss={},
+        optim={},
+        task={"aggregation": "mean", "target_type": "survival"},
+    )
+    logged = {}
+
+    def _capture_log(name, value, **kwargs):
+        logged[name] = (value, kwargs)
+
+    module.log = _capture_log  # type: ignore[method-assign]
+    module.on_validation_epoch_start()
+    module._val_bag_ids = ["p0", "p1", "p2"]
+    module._val_bag_logits_chunks = [torch.tensor([[3.0], [2.0], [1.0]])]
+    module._val_bag_targets_chunks = [
+        torch.tensor([[1.0, 1.0], [2.0, 1.0], [3.0, 1.0]])
+    ]
+    module._val_row_region_ids = ["rA", "rB", "rC"]
+    module._val_row_sample_ids = ["s0", "s1", "s2"]
+    module._val_instance_logits_chunks = [torch.tensor([[3.0], [2.0], [1.0]])]
+    module._val_instance_patch_ids = ["p0", "p1", "p2"]
+    module._val_instance_region_ids = ["rA", "rB", "rC"]
+    module._val_instance_sample_ids = ["s0", "s1", "s2"]
+
+    module.on_validation_epoch_end()
+    assert "val/c_index" in logged
+    c_index_value, kwargs = logged["val/c_index"]
+    assert torch.isclose(c_index_value, torch.tensor(1.0))
+    assert kwargs["on_step"] is False
+    assert kwargs["on_epoch"] is True
 
 
 def test_attention_bag_aggregation_shapes():
@@ -174,6 +332,185 @@ def test_supervised_predict_step_allows_missing_targets():
     assert "bag_targets" not in out
 
 
+def test_supervised_predict_step_can_disable_instance_payload():
+    pytest.importorskip("lightning")
+    pytest.importorskip("torch_geometric")
+    from src.models.supervised_module import SupervisedModule
+
+    module = SupervisedModule(
+        encoder={},
+        graph_head={},
+        loss={},
+        optim={},
+        task={"aggregation": "mean", "target_type": "binary"},
+    )
+
+    def _forward_bags(_batch, *, allow_missing_targets=False):
+        return {
+            "patch_logits": torch.randn(4, 1),
+            "bag_logits": torch.randn(2, 1),
+            "ordered_bag_ids": ["b0", "b1"],
+            "bag_attention": None,
+            "bag_indices": [[0, 1], [2, 3]],
+            "bag_targets": None,
+            "bag_weights": None,
+        }
+
+    captured = {"include_instance_payload": None}
+
+    def _build_predict_group_metadata(
+        _batch,
+        *,
+        patch_logits,
+        graph_emb,
+        ordered_bag_ids,
+        bag_indices,
+        include_instance_payload=True,
+    ):
+        captured["include_instance_payload"] = include_instance_payload
+        payload = {
+            "row_region_ids": ["r0", "r1"],
+            "row_sample_ids": ["s0", "s1"],
+        }
+        if include_instance_payload:
+            payload.update(
+                {
+                    "instance_logits": torch.randn(4, 1),
+                    "instance_patch_ids": ["p0", "p1", "p2", "p3"],
+                    "instance_region_ids": ["r0", "r0", "r1", "r1"],
+                    "instance_sample_ids": ["s0", "s0", "s1", "s1"],
+                }
+            )
+        return payload
+
+    module._forward_bags = _forward_bags  # type: ignore[method-assign]
+    module._build_predict_group_metadata = _build_predict_group_metadata  # type: ignore[method-assign]
+    module._predict_emit_instance_payload = False
+
+    out = module.predict_step(batch=None, batch_idx=0)
+    assert captured["include_instance_payload"] is False
+    assert "instance_logits" not in out
+    assert "instance_patch_ids" not in out
+    assert "instance_region_ids" not in out
+    assert "instance_sample_ids" not in out
+
+
+def test_supervised_predict_step_can_emit_embedding_payload():
+    pytest.importorskip("lightning")
+    pytest.importorskip("torch_geometric")
+    from src.models.supervised_module import SupervisedModule
+
+    module = SupervisedModule(
+        encoder={},
+        graph_head={},
+        loss={},
+        optim={},
+        task={"aggregation": "mean", "target_type": "binary"},
+    )
+
+    def _forward_bags(_batch, *, allow_missing_targets=False):
+        return {
+            "patch_logits": torch.randn(4, 2),
+            "graph_emb": torch.tensor(
+                [[1.0, 1.0], [3.0, 3.0], [10.0, 10.0], [14.0, 14.0]]
+            ),
+            "node_emb": torch.tensor([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6], [0.7, 0.8]]),
+            "bag_logits": torch.randn(2, 1),
+            "ordered_bag_ids": ["b0", "b1"],
+            "bag_attention": None,
+            "bag_indices": [[0, 1], [2, 3]],
+            "bag_targets": None,
+            "bag_weights": None,
+        }
+
+    def _build_predict_group_metadata(
+        _batch,
+        *,
+        patch_logits,
+        graph_emb,
+        ordered_bag_ids,
+        bag_indices,
+        include_instance_payload=True,
+    ):
+        return {
+            "row_region_ids": ["r0", "r1"],
+            "row_sample_ids": ["s0", "s1"],
+        }
+
+    module._forward_bags = _forward_bags  # type: ignore[method-assign]
+    module._build_predict_group_metadata = _build_predict_group_metadata  # type: ignore[method-assign]
+    module._predict_emit_instance_payload = False
+    module._predict_emit_embeddings_payload = True
+    module._predict_emit_node_embeddings = True
+
+    class _Batch:
+        region_id = ["r0", "r0", "r1", "r1"]
+        sample_id = ["s0", "s0", "s1", "s1"]
+        batch = torch.tensor([0, 1, 2, 3], dtype=torch.long)
+
+    out = module.predict_step(batch=_Batch(), batch_idx=0)
+    assert out["embedding_bag_ids"] == ["b0", "b1"]
+    assert torch.allclose(out["graph_embeddings"][0], torch.tensor([2.0, 2.0]))
+    assert torch.allclose(out["graph_embeddings"][1], torch.tensor([12.0, 12.0]))
+    assert out["embedding_bag_counts"] == [2, 2]
+    assert "node_embeddings" in out
+    assert out["node_bag_ids"] == ["s0::r0", "s0::r0", "s1::r1", "s1::r1"]
+
+
+def test_supervised_predict_step_omits_embedding_payload_by_default():
+    pytest.importorskip("lightning")
+    pytest.importorskip("torch_geometric")
+    from src.models.supervised_module import SupervisedModule
+
+    module = SupervisedModule(
+        encoder={},
+        graph_head={},
+        loss={},
+        optim={},
+        task={"aggregation": "mean", "target_type": "binary"},
+    )
+
+    def _forward_bags(_batch, *, allow_missing_targets=False):
+        return {
+            "patch_logits": torch.randn(2, 1),
+            "graph_emb": torch.randn(2, 2),
+            "node_emb": torch.randn(2, 2),
+            "bag_logits": torch.randn(1, 1),
+            "ordered_bag_ids": ["b0"],
+            "bag_attention": None,
+            "bag_indices": [[0, 1]],
+            "bag_targets": None,
+            "bag_weights": None,
+        }
+
+    def _build_predict_group_metadata(
+        _batch,
+        *,
+        patch_logits,
+        graph_emb,
+        ordered_bag_ids,
+        bag_indices,
+        include_instance_payload=True,
+    ):
+        return {
+            "row_region_ids": ["r0"],
+            "row_sample_ids": ["s0"],
+        }
+
+    module._forward_bags = _forward_bags  # type: ignore[method-assign]
+    module._build_predict_group_metadata = _build_predict_group_metadata  # type: ignore[method-assign]
+    module._predict_emit_instance_payload = False
+
+    class _Batch:
+        region_id = ["r0", "r0"]
+        sample_id = ["s0", "s0"]
+
+    out = module.predict_step(batch=_Batch(), batch_idx=0)
+    assert "embedding_bag_ids" not in out
+    assert "graph_embeddings" not in out
+    assert "embedding_bag_counts" not in out
+
+
 def test_extract_bag_ids_falls_back_per_item_when_primary_missing():
     from types import SimpleNamespace
 
@@ -181,7 +518,74 @@ def test_extract_bag_ids_falls_back_per_item_when_primary_missing():
 
     batch = SimpleNamespace(region_id=[None, "", "r2"], sample_id=["s0", "s1", "s2"])
     bag_ids = extract_bag_ids(batch, bag_key="region_id", bag_fallback_key="sample_id")
-    assert bag_ids == ["s0", "s1", "r2"]
+    assert bag_ids == ["s0", "s1", "s2::r2"]
+
+
+def test_extract_bag_ids_namespaces_primary_by_fallback_for_uniqueness():
+    from types import SimpleNamespace
+
+    from src.models.training.bagging import extract_bag_ids
+
+    batch = SimpleNamespace(region_id=["r0", "r0"], sample_id=["s0", "s1"])
+    bag_ids = extract_bag_ids(batch, bag_key="region_id", bag_fallback_key="sample_id")
+    assert bag_ids == ["s0::r0", "s1::r0"]
+
+
+def test_extract_bag_ids_patch_key_uses_sample_region_patch_hierarchy():
+    from types import SimpleNamespace
+
+    from src.models.training.bagging import extract_bag_ids
+
+    batch = SimpleNamespace(
+        patch_id=["p0", "p1"],
+        region_id=["r0", "r1"],
+        sample_id=["s0", "s0"],
+    )
+    bag_ids = extract_bag_ids(batch, bag_key="patch_id", bag_fallback_key="sample_id")
+    assert bag_ids == ["s0::r0::p0", "s0::r1::p1"]
+
+
+def test_extract_bag_ids_patch_key_fallback_uses_sample_region_when_patch_missing():
+    from types import SimpleNamespace
+
+    from src.models.training.bagging import extract_bag_ids
+
+    batch = SimpleNamespace(
+        patch_id=[None, ""],
+        region_id=["r0", "r1"],
+        sample_id=["s0", "s1"],
+    )
+    bag_ids = extract_bag_ids(batch, bag_key="patch_id", bag_fallback_key="sample_id")
+    assert bag_ids == ["s0::r0", "s1::r1"]
+
+
+def test_predict_group_metadata_uses_batch_patch_ids_for_instance_patch_ids():
+    pytest.importorskip("lightning")
+    pytest.importorskip("torch_geometric")
+    from types import SimpleNamespace
+
+    from src.models.supervised_module import SupervisedModule
+
+    module = SupervisedModule(
+        encoder={},
+        graph_head={},
+        loss={},
+        optim={},
+        task={"aggregation": "mean", "target_type": "binary"},
+    )
+    batch = SimpleNamespace(
+        region_id=["r0", "r1", "r0", "r1"],
+        sample_id=["s0", "s0", "s0", "s0"],
+        patch_id=["p0", "p1", "p2", None],
+    )
+    metadata = module._build_predict_group_metadata(
+        batch,
+        patch_logits=torch.randn(4, 1),
+        graph_emb=torch.randn(4, 8),
+        ordered_bag_ids=["bag_a", "bag_b"],
+        bag_indices=[[0, 2], [1, 3]],
+    )
+    assert metadata["instance_patch_ids"] == ["p0", "p2", "p1", "bag_b"]
 
 
 def test_gather_bag_targets_requires_consistent_labels_within_bag():

@@ -133,13 +133,35 @@ python src/train.py debug=limit
 
 1. CLI evaluation mode: `src/eval.py` with required `ckpt_path`.
 2. Advanced prediction mode: `Trainer.predict(...)` using `SupervisedModule.predict_step`.
+3. Inference utility CLI mode: `src/inference/predict.py` for prediction export, metrics, and embeddings.
 
 Predict outputs include:
 
 - `bag_ids`
 - `bag_logits`
+- `row_region_ids`
+- `row_sample_ids`
 - optional `bag_targets`
 - optional `bag_attention`
+- optional `instance_*` fields
+- optional embedding fields (`embedding_bag_ids`, `graph_embeddings`, `embedding_bag_counts`)
+- optional node embedding fields (`node_embeddings`, `node_bag_ids`)
+
+Metrics available through the inference utility suite:
+
+- categorical/binary: accuracy, precision, recall, F1, ROC-AUC
+- regression: R2, MAE, RMSE
+- survival: concordance index (c-index)
+
+Validation (during `src/train.py`) includes:
+
+- step-level `val/loss` logging
+- epoch-end region-level aggregation of buffered validation outputs
+- task-specific epoch metrics:
+  - `val/acc` for binary/categorical
+  - `val/mae`, `val/rmse`, `val/r2` for regression
+  - `val/c_index` for survival
+- optional dedicated validation sampler via `data.val_sampler.*`
 
 ## 11) Notebook Validation Modes
 

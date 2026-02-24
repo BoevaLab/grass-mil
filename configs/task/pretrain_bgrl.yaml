@@ -6,7 +6,7 @@ defaults:
 task:
   name: pretrain_bgrl
   aggregation: mean
-  bag_key: region_id
+  bag_key: patch_id
   bag_fallback_key: sample_id
   max_instances_per_bag: 0
   instance_sampling: all

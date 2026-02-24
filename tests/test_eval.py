@@ -41,3 +41,10 @@ def test_train_eval(
     assert "test/loss" in train_metric_dict
     assert torch.isfinite(test_metric_dict["test/loss"])
     assert torch.isfinite(train_metric_dict["test/loss"])
+
+
+def test_evaluate_raises_when_ckpt_path_missing(cfg_eval: DictConfig) -> None:
+    with open_dict(cfg_eval):
+        cfg_eval.ckpt_path = ""
+    with pytest.raises(ValueError, match="Missing required `ckpt_path` for evaluation."):
+        evaluate(cfg_eval)

@@ -22,7 +22,9 @@ log = RankedLogger(__name__, rank_zero_only=True)
 @task_wrapper
 def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Evaluate a checkpoint on the configured test set."""
-    assert cfg.ckpt_path
+    ckpt_path = cfg.get("ckpt_path")
+    if ckpt_path is None or not str(ckpt_path).strip():
+        raise ValueError("Missing required `ckpt_path` for evaluation.")
 
     log.info(f"Instantiating datamodule <{cfg.data._target_}>")
     datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)

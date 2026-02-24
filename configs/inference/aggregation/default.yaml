@@ -1,0 +1,5 @@
+enabled: true
+mode: mean # one of: mean, max, none, attention_weighted
+bag_scope: region # one of: patch, region, sample
+subsample_fraction: 1.0 # in (0, 1]; when <1.0, predict path applies pre-forward root subsampling for efficiency
+subsample_seed: null # optional seed for deterministic subsampling

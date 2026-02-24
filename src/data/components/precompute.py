@@ -465,17 +465,27 @@ class SpatialOmicsPreprocessor:
         if region_col not in df.columns:
             return
 
+        region_vals = df[region_col].fillna("").astype(str).str.strip()
+        non_empty_regions = region_vals[region_vals.ne("")]
+        duplicated_regions = non_empty_regions[non_empty_regions.duplicated(keep=False)]
+        if not duplicated_regions.empty:
+            duplicated_ids = sorted(set(duplicated_regions.tolist()))
+            raise ValueError(
+                "Manifest region_id values must be globally unique. "
+                f"Repeated region_id values: {duplicated_ids}."
+            )
+
         duplicates = df[sample_col].duplicated(keep=False)
         if not duplicates.any():
             return
 
         for sample_id, group in df[duplicates].groupby(sample_col):
-            region_vals = group[region_col].fillna("").astype(str).str.strip()
-            if region_vals.eq("").any():
+            sample_region_vals = group[region_col].fillna("").astype(str).str.strip()
+            if sample_region_vals.eq("").any():
                 raise ValueError(
                     f"Manifest has duplicate sample_id '{sample_id}' with empty region_id."
                 )
-            if region_vals.duplicated().any():
+            if sample_region_vals.duplicated().any():
                 raise ValueError(
                     f"Manifest has duplicate sample_id '{sample_id}' with repeated region_id values."
                 )
