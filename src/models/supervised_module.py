@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import lightning as L
 import torch
@@ -175,6 +175,109 @@ class SupervisedModule(L.LightningModule):
         patch_logits = self.graph_head(graph_emb)
         return patch_logits, graph_emb
 
+    def _to_optional_str_list(
+        self, values: Any, *, expected_length: int, field_name: str
+    ) -> List[Optional[str]]:
+        if values is None:
+            return [None] * expected_length
+        if isinstance(values, torch.Tensor):
+            values = values.detach().cpu().tolist()
+        if isinstance(values, (str, bytes)):
+            raw_values = [values]
+        else:
+            try:
+                raw_values = list(values)
+            except TypeError:
+                raw_values = [values]
+        if len(raw_values) == expected_length:
+            pass
+        elif len(raw_values) == 1 and expected_length > 1:
+            raw_values = raw_values * expected_length
+        else:
+            raise ValueError(
+                f"Batch field '{field_name}' has {len(raw_values)} values, expected "
+                f"{expected_length} for instance-level metadata alignment."
+            )
+        normalized: List[Optional[str]] = []
+        for value in raw_values:
+            if value is None:
+                normalized.append(None)
+                continue
+            text = str(value).strip()
+            if text.lower() in {"", "nan", "none", "null"}:
+                normalized.append(None)
+            else:
+                normalized.append(str(value))
+        return normalized
+
+    def _build_predict_group_metadata(
+        self,
+        batch,
+        *,
+        patch_logits: torch.Tensor,
+        graph_emb: torch.Tensor,
+        ordered_bag_ids: list[str],
+        bag_indices: list[list[int]],
+    ) -> Dict[str, Any]:
+        n_instances = int(patch_logits.shape[0])
+        region_ids = self._to_optional_str_list(
+            getattr(batch, "region_id", None),
+            expected_length=n_instances,
+            field_name="region_id",
+        )
+        sample_ids = self._to_optional_str_list(
+            getattr(batch, "sample_id", None),
+            expected_length=n_instances,
+            field_name="sample_id",
+        )
+        row_region_ids: list[Optional[str]] = []
+        row_sample_ids: list[Optional[str]] = []
+        for indices in bag_indices:
+            row_region_ids.append(region_ids[indices[0]] if indices else None)
+            row_sample_ids.append(sample_ids[indices[0]] if indices else None)
+
+        metadata: Dict[str, Any] = {
+            "row_region_ids": row_region_ids,
+            "row_sample_ids": row_sample_ids,
+        }
+        if not self.use_attention:
+            return metadata
+
+        assert self.attention is not None
+        instance_logits_chunks: list[torch.Tensor] = []
+        instance_attention_logits_chunks: list[torch.Tensor] = []
+        instance_patch_ids: list[str] = []
+        instance_region_ids: list[Optional[str]] = []
+        instance_sample_ids: list[Optional[str]] = []
+
+        for bag_id, indices in zip(ordered_bag_ids, bag_indices):
+            if not indices:
+                continue
+            idx = torch.tensor(indices, dtype=torch.long, device=patch_logits.device)
+            sub_logits = patch_logits.index_select(0, idx)
+            sub_emb = graph_emb.index_select(0, idx)
+            attn_logits, _ = self.attention(sub_emb)
+            instance_logits_chunks.append(sub_logits)
+            instance_attention_logits_chunks.append(attn_logits.reshape(-1, 1))
+            instance_patch_ids.extend([str(bag_id)] * len(indices))
+            instance_region_ids.extend([region_ids[i] for i in indices])
+            instance_sample_ids.extend([sample_ids[i] for i in indices])
+
+        metadata["instance_logits"] = (
+            torch.cat(instance_logits_chunks, dim=0)
+            if instance_logits_chunks
+            else torch.empty((0, patch_logits.shape[-1]), device=patch_logits.device)
+        )
+        metadata["instance_attention_logits"] = (
+            torch.cat(instance_attention_logits_chunks, dim=0)
+            if instance_attention_logits_chunks
+            else torch.empty((0, 1), device=patch_logits.device)
+        )
+        metadata["instance_patch_ids"] = instance_patch_ids
+        metadata["instance_region_ids"] = instance_region_ids
+        metadata["instance_sample_ids"] = instance_sample_ids
+        return metadata
+
     def collect_graph_embeddings(
         self, batch, *, return_node_embeddings: bool = False
     ) -> Dict[str, Any]:
@@ -267,6 +370,7 @@ class SupervisedModule(L.LightningModule):
 
         return {
             "patch_logits": patch_logits,
+            "graph_emb": graph_emb,
             "bag_logits": bag_logits,
             "ordered_bag_ids": ordered_bag_ids,
             "bag_attention": bag_attention,
@@ -606,17 +710,31 @@ class SupervisedModule(L.LightningModule):
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         out = self._forward_bags(batch, allow_missing_targets=True)
-        keys = ["ordered_bag_ids", "bag_logits"]
-        if out["bag_targets"] is not None:
-            keys.append("bag_targets")
-        if self.use_attention:
-            keys.append("bag_attention")
-        return {
-            ("bag_ids" if k == "ordered_bag_ids" else k): (
-                out[k].detach() if hasattr(out[k], "detach") else out[k]
-            )
-            for k in keys
+        metadata = self._build_predict_group_metadata(
+            batch,
+            patch_logits=out["patch_logits"],
+            graph_emb=out.get("graph_emb", out["patch_logits"]),
+            ordered_bag_ids=out["ordered_bag_ids"],
+            bag_indices=out["bag_indices"],
+        )
+        result: Dict[str, Any] = {
+            "bag_ids": list(out["ordered_bag_ids"]),
+            "bag_logits": out["bag_logits"].detach(),
+            "row_region_ids": metadata["row_region_ids"],
+            "row_sample_ids": metadata["row_sample_ids"],
         }
+        if out["bag_targets"] is not None:
+            result["bag_targets"] = out["bag_targets"].detach()
+        if self.use_attention:
+            result["bag_attention"] = out["bag_attention"]
+            result["instance_logits"] = metadata["instance_logits"].detach()
+            result["instance_attention_logits"] = metadata[
+                "instance_attention_logits"
+            ].detach()
+            result["instance_patch_ids"] = metadata["instance_patch_ids"]
+            result["instance_region_ids"] = metadata["instance_region_ids"]
+            result["instance_sample_ids"] = metadata["instance_sample_ids"]
+        return result
 
     # ------------------------------------------------------------------
     # Region accumulation helpers (MIL only)

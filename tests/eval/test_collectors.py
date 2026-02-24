@@ -19,11 +19,20 @@ def test_collect_predictions_normalizes_payload() -> None:
             "bag_ids": ["region_1", "region_2"],
             "bag_logits": torch.tensor([[1.0], [0.0]]),
             "bag_targets": torch.tensor([[1.0], [0.0]]),
+            "row_region_ids": ["region_1", "region_2"],
+            "row_sample_ids": ["sample_a", "sample_b"],
         },
         {
             "bag_ids": ["region_1"],
             "bag_logits": torch.tensor([[2.0]]),
             "bag_attention": {"region_1": torch.tensor([0.2, 0.8])},
+            "row_region_ids": ["region_1"],
+            "row_sample_ids": ["sample_a"],
+            "instance_logits": torch.tensor([[1.5], [2.5]]),
+            "instance_attention_logits": torch.tensor([[0.1], [0.2]]),
+            "instance_patch_ids": ["region_1", "region_1"],
+            "instance_region_ids": ["region_1", "region_1"],
+            "instance_sample_ids": ["sample_a", "sample_a"],
         },
     ]
     trainer = _FakeTrainer(outputs)
@@ -41,6 +50,11 @@ def test_collect_predictions_normalizes_payload() -> None:
     assert payload.bag_attention[0] is None
     assert payload.bag_attention[1] is None
     assert torch.allclose(payload.bag_attention[2], torch.tensor([0.2, 0.8]))
+    assert payload.row_region_ids == ["region_1", "region_2", "region_1"]
+    assert payload.row_sample_ids == ["sample_a", "sample_b", "sample_a"]
+    assert payload.instance_logits is not None
+    assert payload.instance_logits.shape == (2, 1)
+    assert payload.instance_patch_ids == ["region_1", "region_1"]
 
 
 def test_collect_predictions_preserves_attention_for_duplicate_bags() -> None:
@@ -49,11 +63,25 @@ def test_collect_predictions_preserves_attention_for_duplicate_bags() -> None:
             "bag_ids": ["region_1"],
             "bag_logits": torch.tensor([[1.0]]),
             "bag_attention": {"region_1": torch.tensor([0.1, 0.9])},
+            "row_region_ids": ["region_1"],
+            "row_sample_ids": ["sample_a"],
+            "instance_logits": torch.tensor([[1.0]]),
+            "instance_attention_logits": torch.tensor([[0.1]]),
+            "instance_patch_ids": ["region_1"],
+            "instance_region_ids": ["region_1"],
+            "instance_sample_ids": ["sample_a"],
         },
         {
             "bag_ids": ["region_1"],
             "bag_logits": torch.tensor([[2.0]]),
             "bag_attention": {"region_1": torch.tensor([0.8, 0.2])},
+            "row_region_ids": ["region_1"],
+            "row_sample_ids": ["sample_a"],
+            "instance_logits": torch.tensor([[2.0]]),
+            "instance_attention_logits": torch.tensor([[0.2]]),
+            "instance_patch_ids": ["region_1"],
+            "instance_region_ids": ["region_1"],
+            "instance_sample_ids": ["sample_a"],
         },
     ]
     trainer = _FakeTrainer(outputs)
@@ -67,3 +95,5 @@ def test_collect_predictions_preserves_attention_for_duplicate_bags() -> None:
     assert len(payload.bag_attention) == 2
     assert torch.allclose(payload.bag_attention[0], torch.tensor([0.1, 0.9]))
     assert torch.allclose(payload.bag_attention[1], torch.tensor([0.8, 0.2]))
+    assert payload.instance_logits is not None
+    assert payload.instance_logits.shape == (2, 1)

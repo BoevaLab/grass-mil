@@ -1,2 +1,5 @@
 enabled: true
-mode: mean # one of: mean, max, none, attention_weighted
+mode: attention_weighted # one of: mean, max, none, attention_weighted
+bag_scope: region # one of: patch, region, sample
+subsample_fraction: 1.0 # in [0, 1], 0.0 raises
+subsample_seed: null

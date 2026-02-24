@@ -44,6 +44,13 @@ def _as_batch_payload(payload: Any) -> BatchPredictionPayload:
         bag_logits=payload.bag_logits,
         bag_targets=payload.bag_targets,
         bag_attention=getattr(payload, "bag_attention", None),
+        row_region_ids=getattr(payload, "row_region_ids", None),
+        row_sample_ids=getattr(payload, "row_sample_ids", None),
+        instance_logits=getattr(payload, "instance_logits", None),
+        instance_attention_logits=getattr(payload, "instance_attention_logits", None),
+        instance_patch_ids=getattr(payload, "instance_patch_ids", None),
+        instance_region_ids=getattr(payload, "instance_region_ids", None),
+        instance_sample_ids=getattr(payload, "instance_sample_ids", None),
     )
 
 
@@ -91,6 +98,9 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         aggregated = aggregate_group_logits(
             pred_payload,
             mode=str(cfg.aggregation.mode),
+            bag_scope=str(cfg.aggregation.get("bag_scope", "patch")),
+            subsample_fraction=float(cfg.aggregation.get("subsample_fraction", 1.0)),
+            subsample_seed=cfg.aggregation.get("subsample_seed"),
         )
         pred_payload = _as_batch_payload(aggregated)
 

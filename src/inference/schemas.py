@@ -14,6 +14,13 @@ class BatchPredictionPayload:
     bag_logits: torch.Tensor
     bag_targets: Optional[torch.Tensor]
     bag_attention: Optional[List[Optional[torch.Tensor]]]
+    row_region_ids: Optional[List[Optional[str]]] = None
+    row_sample_ids: Optional[List[Optional[str]]] = None
+    instance_logits: Optional[torch.Tensor] = None
+    instance_attention_logits: Optional[torch.Tensor] = None
+    instance_patch_ids: Optional[List[str]] = None
+    instance_region_ids: Optional[List[Optional[str]]] = None
+    instance_sample_ids: Optional[List[Optional[str]]] = None
 
 
 @dataclass(frozen=True)
@@ -25,6 +32,8 @@ class AggregatedPredictionPayload:
     bag_targets: Optional[torch.Tensor]
     bag_attention: Optional[List[Optional[torch.Tensor]]]
     metadata: Dict[str, Any]
+    row_region_ids: Optional[List[Optional[str]]] = None
+    row_sample_ids: Optional[List[Optional[str]]] = None
 
 
 @dataclass(frozen=True)
