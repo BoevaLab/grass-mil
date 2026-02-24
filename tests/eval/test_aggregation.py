@@ -19,6 +19,7 @@ def test_aggregate_group_logits_mean() -> None:
     out = aggregate_group_logits(payload, mode="mean")
     assert out.bag_ids == ["r1", "r2"]
     assert torch.allclose(out.bag_logits[0], torch.tensor([2.0]))
+    assert out.bag_attention is None
 
 
 def test_aggregate_group_logits_max() -> None:
@@ -33,6 +34,20 @@ def test_aggregate_group_logits_max() -> None:
     out = aggregate_group_logits(payload, mode="max")
     assert out.bag_ids == ["r1", "r2"]
     assert torch.allclose(out.bag_logits[0], torch.tensor([3.0]))
+
+
+def test_aggregate_group_logits_mean_drops_non_aggregable_attention_rows() -> None:
+    payload = BatchPredictionPayload(
+        bag_ids=["r1", "r1"],
+        bag_logits=torch.tensor([[1.0], [2.0]]),
+        bag_targets=None,
+        bag_attention=[torch.tensor([0.1, 0.9]), torch.tensor([0.8, 0.2])],
+        row_region_ids=["region_a", "region_a"],
+        row_sample_ids=["sample_x", "sample_x"],
+    )
+    out = aggregate_group_logits(payload, mode="mean")
+    assert out.bag_ids == ["r1"]
+    assert out.bag_attention is None
 
 
 def test_aggregate_group_logits_attention_weighted_uses_instance_softmax() -> None:

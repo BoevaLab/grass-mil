@@ -123,6 +123,7 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     preforward_subsampling_applied = _configure_preforward_subsampling(
         datamodule, cfg
     )
+    aggregation_metadata: Dict[str, Any] | None = None
 
     pred_payload = collect_predictions(
         trainer=trainer,
@@ -145,6 +146,10 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             bag_scope=str(cfg.aggregation.get("bag_scope", "patch")),
             subsample_fraction=aggregation_subsample_fraction,
             subsample_seed=aggregation_subsample_seed,
+        )
+        aggregation_metadata = dict(getattr(aggregated, "metadata", {}))
+        aggregation_metadata["preforward_subsampling_applied"] = bool(
+            preforward_subsampling_applied
         )
         pred_payload = _as_batch_payload(aggregated)
 
@@ -199,6 +204,8 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         row_count=len(pred_frame),
     )
     summary_payload["metrics"] = metrics_payload
+    if aggregation_metadata is not None:
+        summary_payload["aggregation"] = aggregation_metadata
     write_json(summary_payload, summary_path)
     return summary_payload, object_dict
 

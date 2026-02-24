@@ -337,16 +337,6 @@ def aggregate_group_logits(
                 if payload.row_sample_ids is not None
                 else None
             )
-            if payload.bag_attention is not None:
-                selected_attention = next(
-                    (
-                        payload.bag_attention[row_idx]
-                        for row_idx in indices
-                        if payload.bag_attention[row_idx] is not None
-                    ),
-                    None,
-                )
-                aggregated_attention_rows.append(selected_attention)
             if payload.bag_targets is not None:
                 bag_targets = payload.bag_targets.index_select(0, idx)
                 aggregated_targets.append(bag_targets[:1])
@@ -366,6 +356,7 @@ def aggregate_group_logits(
         metadata={
             "mode": mode,
             "used_attention": used_attention,
+            "bag_attention_retained": used_attention,
             "bag_scope": bag_scope,
             "subsample_fraction": float(subsample_fraction),
             "subsample_seed": subsample_seed,

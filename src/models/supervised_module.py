@@ -301,6 +301,7 @@ class SupervisedModule(L.LightningModule):
         bag_groups = group_instance_indices_by_bag(bag_ids)
         ordered_bag_ids = sorted(bag_groups.keys())
         bag_graph_embeddings = []
+        bag_counts: list[int] = []
         for bag_id in ordered_bag_ids:
             idx = torch.tensor(
                 bag_groups[bag_id], dtype=torch.long, device=graph_emb.device
@@ -308,10 +309,12 @@ class SupervisedModule(L.LightningModule):
             bag_graph_embeddings.append(
                 graph_emb.index_select(0, idx).mean(dim=0, keepdim=True)
             )
+            bag_counts.append(int(idx.numel()))
 
         payload: Dict[str, Any] = {
             "bag_ids": ordered_bag_ids,
             "graph_embeddings": torch.cat(bag_graph_embeddings, dim=0),
+            "bag_counts": bag_counts,
         }
         if return_node_embeddings:
             batch_index = getattr(batch, "batch", None)
