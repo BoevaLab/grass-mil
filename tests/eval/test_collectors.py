@@ -37,3 +37,33 @@ def test_collect_predictions_normalizes_payload() -> None:
     assert payload.bag_targets is not None
     assert payload.bag_attention is not None
     assert payload.bag_ids[0] == "region_1"
+    assert len(payload.bag_attention) == 3
+    assert payload.bag_attention[0] is None
+    assert payload.bag_attention[1] is None
+    assert torch.allclose(payload.bag_attention[2], torch.tensor([0.2, 0.8]))
+
+
+def test_collect_predictions_preserves_attention_for_duplicate_bags() -> None:
+    outputs = [
+        {
+            "bag_ids": ["region_1"],
+            "bag_logits": torch.tensor([[1.0]]),
+            "bag_attention": {"region_1": torch.tensor([0.1, 0.9])},
+        },
+        {
+            "bag_ids": ["region_1"],
+            "bag_logits": torch.tensor([[2.0]]),
+            "bag_attention": {"region_1": torch.tensor([0.8, 0.2])},
+        },
+    ]
+    trainer = _FakeTrainer(outputs)
+    payload = collect_predictions(
+        trainer=trainer,  # type: ignore[arg-type]
+        model=None,  # type: ignore[arg-type]
+        datamodule=None,  # type: ignore[arg-type]
+        ckpt_path=None,
+    )
+    assert payload.bag_attention is not None
+    assert len(payload.bag_attention) == 2
+    assert torch.allclose(payload.bag_attention[0], torch.tensor([0.1, 0.9]))
+    assert torch.allclose(payload.bag_attention[1], torch.tensor([0.8, 0.2]))

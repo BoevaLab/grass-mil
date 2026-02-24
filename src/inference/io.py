@@ -36,11 +36,16 @@ def predictions_to_dataframe(
         data.update(_tensor_columns("target", payload.bag_targets))
 
     if include_attention and payload.bag_attention is not None:
+        if len(payload.bag_attention) != len(payload.bag_ids):
+            raise ValueError(
+                "Mismatch between bag_ids and attention rows while building dataframe: "
+                f"{len(payload.bag_ids)} ids vs {len(payload.bag_attention)} attention rows."
+            )
         data["attention"] = [
             json.dumps(
-                payload.bag_attention.get(bag_id, torch.empty(0)).detach().cpu().tolist()
+                attention.detach().cpu().tolist() if attention is not None else []
             )
-            for bag_id in payload.bag_ids
+            for attention in payload.bag_attention
         ]
 
     frame = pd.DataFrame(data)

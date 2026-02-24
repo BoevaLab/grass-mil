@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Optional
 
 import torch
-from lightning import LightningDataModule, LightningModule
+from lightning import LightningDataModule, LightningModule, Trainer
 
 from src.inference.schemas import BatchPredictionPayload, EmbeddingPayload
 
@@ -24,16 +24,15 @@ def _stack_optional_tensors(values: List[torch.Tensor]) -> Optional[torch.Tensor
     return torch.cat([_ensure_2d(v.detach().cpu()) for v in values], dim=0)
 
 
-def _merge_attention_dicts(
-    chunks: List[Optional[Dict[str, torch.Tensor]]],
-) -> Optional[Dict[str, torch.Tensor]]:
-    merged: Dict[str, torch.Tensor] = {}
-    for chunk in chunks:
-        if not chunk:
-            continue
-        for key, value in chunk.items():
-            merged[str(key)] = value.detach().cpu()
-    return merged or None
+def _align_chunk_attention_to_rows(
+    chunk_bag_ids: List[str], chunk_attention: Optional[Dict[str, torch.Tensor]]
+) -> List[Optional[torch.Tensor]]:
+    if not chunk_attention:
+        return [None] * len(chunk_bag_ids)
+    return [
+        chunk_attention[bag_id].detach().cpu() if bag_id in chunk_attention else None
+        for bag_id in chunk_bag_ids
+    ]
 
 
 def collect_predictions(
@@ -49,7 +48,7 @@ def collect_predictions(
     bag_ids: List[str] = []
     logits_chunks: List[torch.Tensor] = []
     target_chunks: List[torch.Tensor] = []
-    attention_chunks: List[Optional[Dict[str, torch.Tensor]]] = []
+    attention_rows: List[Optional[torch.Tensor]] = []
 
     for chunk in outputs:
         if not isinstance(chunk, dict):
@@ -57,23 +56,40 @@ def collect_predictions(
         if "bag_ids" not in chunk or "bag_logits" not in chunk:
             raise KeyError("`predict_step` must include bag_ids and bag_logits.")
 
-        bag_ids.extend(_as_str_list(chunk["bag_ids"]))
-        logits_chunks.append(chunk["bag_logits"])
+        chunk_bag_ids = _as_str_list(chunk["bag_ids"])
+        chunk_logits = _ensure_2d(chunk["bag_logits"])
+        if len(chunk_bag_ids) != chunk_logits.shape[0]:
+            raise ValueError(
+                "Mismatch within predict chunk between bag_ids and bag_logits rows: "
+                f"{len(chunk_bag_ids)} ids vs {chunk_logits.shape[0]} logits."
+            )
+
+        bag_ids.extend(chunk_bag_ids)
+        logits_chunks.append(chunk_logits)
 
         if "bag_targets" in chunk and chunk["bag_targets"] is not None:
             target_chunks.append(chunk["bag_targets"])
-        attention_chunks.append(chunk.get("bag_attention"))
+        attention_rows.extend(
+            _align_chunk_attention_to_rows(chunk_bag_ids, chunk.get("bag_attention"))
+        )
 
     bag_logits = _stack_optional_tensors(logits_chunks)
     if bag_logits is None:
         raise ValueError("No logits were collected from predict outputs.")
     bag_targets = _stack_optional_tensors(target_chunks)
-    bag_attention = _merge_attention_dicts(attention_chunks)
+    bag_attention = (
+        attention_rows if any(attn is not None for attn in attention_rows) else None
+    )
 
     if len(bag_ids) != bag_logits.shape[0]:
         raise ValueError(
             "Mismatch between collected bag_ids and logits rows: "
             f"{len(bag_ids)} ids vs {bag_logits.shape[0]} logits."
+        )
+    if bag_attention is not None and len(bag_attention) != len(bag_ids):
+        raise ValueError(
+            "Mismatch between collected bag_ids and attention rows: "
+            f"{len(bag_ids)} ids vs {len(bag_attention)} attention rows."
         )
 
     return BatchPredictionPayload(

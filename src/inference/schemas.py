@@ -13,7 +13,7 @@ class BatchPredictionPayload:
     bag_ids: List[str]
     bag_logits: torch.Tensor
     bag_targets: Optional[torch.Tensor]
-    bag_attention: Optional[Dict[str, torch.Tensor]]
+    bag_attention: Optional[List[Optional[torch.Tensor]]]
 
 
 @dataclass(frozen=True)
@@ -23,7 +23,7 @@ class AggregatedPredictionPayload:
     bag_ids: List[str]
     bag_logits: torch.Tensor
     bag_targets: Optional[torch.Tensor]
-    bag_attention: Optional[Dict[str, torch.Tensor]]
+    bag_attention: Optional[List[Optional[torch.Tensor]]]
     metadata: Dict[str, Any]
 
 
