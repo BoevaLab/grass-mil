@@ -683,9 +683,8 @@ class SupervisedModule(L.LightningModule):
                 bag_attention={bag_id: bag_attention[bag_id]},
                 stage="train",
             )
-            self._region_total_loss_buffer.append(total_loss)
             region_losses.append(region_loss.detach())
-            total_losses.append(total_loss.detach())
+            total_losses.append(total_loss)
             if node_aux_loss is not None:
                 node_losses.append(node_aux_loss.detach())
             if entropy_reg is not None:
@@ -693,6 +692,11 @@ class SupervisedModule(L.LightningModule):
 
         if not total_losses:
             return torch.zeros((), device=self.device)
+
+        # Buffer one scalar per forward pass to avoid chunked backward passes over
+        # the same computation graph.
+        step_total_loss = torch.stack(total_losses).mean()
+        self._region_total_loss_buffer.append(step_total_loss)
 
         flush_losses = self._flush_region_buffer_if_needed(force=False)
         for flush_loss in flush_losses:
@@ -710,7 +714,7 @@ class SupervisedModule(L.LightningModule):
             on_epoch=False,
             prog_bar=False,
         )
-        mean_total_loss = torch.stack(total_losses).mean()
+        mean_total_loss = step_total_loss.detach()
         mean_region_loss = torch.stack(region_losses).mean()
         mean_node_aux = torch.stack(node_losses).mean() if node_losses else None
         mean_entropy = torch.stack(entropies).mean() if entropies else None

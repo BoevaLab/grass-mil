@@ -339,7 +339,45 @@ def test_extract_bag_ids_falls_back_per_item_when_primary_missing():
 
     batch = SimpleNamespace(region_id=[None, "", "r2"], sample_id=["s0", "s1", "s2"])
     bag_ids = extract_bag_ids(batch, bag_key="region_id", bag_fallback_key="sample_id")
-    assert bag_ids == ["s0", "s1", "r2"]
+    assert bag_ids == ["s0", "s1", "s2::r2"]
+
+
+def test_extract_bag_ids_namespaces_primary_by_fallback_for_uniqueness():
+    from types import SimpleNamespace
+
+    from src.models.training.bagging import extract_bag_ids
+
+    batch = SimpleNamespace(region_id=["r0", "r0"], sample_id=["s0", "s1"])
+    bag_ids = extract_bag_ids(batch, bag_key="region_id", bag_fallback_key="sample_id")
+    assert bag_ids == ["s0::r0", "s1::r0"]
+
+
+def test_extract_bag_ids_patch_key_uses_sample_region_patch_hierarchy():
+    from types import SimpleNamespace
+
+    from src.models.training.bagging import extract_bag_ids
+
+    batch = SimpleNamespace(
+        patch_id=["p0", "p1"],
+        region_id=["r0", "r1"],
+        sample_id=["s0", "s0"],
+    )
+    bag_ids = extract_bag_ids(batch, bag_key="patch_id", bag_fallback_key="sample_id")
+    assert bag_ids == ["s0::r0::p0", "s0::r1::p1"]
+
+
+def test_extract_bag_ids_patch_key_fallback_uses_sample_region_when_patch_missing():
+    from types import SimpleNamespace
+
+    from src.models.training.bagging import extract_bag_ids
+
+    batch = SimpleNamespace(
+        patch_id=[None, ""],
+        region_id=["r0", "r1"],
+        sample_id=["s0", "s1"],
+    )
+    bag_ids = extract_bag_ids(batch, bag_key="patch_id", bag_fallback_key="sample_id")
+    assert bag_ids == ["s0::r0", "s1::r1"]
 
 
 def test_gather_bag_targets_requires_consistent_labels_within_bag():

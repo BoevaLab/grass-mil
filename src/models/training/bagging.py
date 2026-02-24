@@ -33,15 +33,51 @@ def extract_bag_ids(
             f"Batch key lengths mismatch for bagging: '{bag_key}' has {len(bag_values)} "
             f"values while fallback '{bag_fallback_key}' has {len(fallback_values)}."
         )
-    resolved = []
-    for primary, fallback in zip(bag_values, fallback_values):
+    region_values = _to_list(getattr(batch, "region_id", None))
+    if region_values is not None and len(region_values) != len(bag_values):
+        if len(region_values) == 1:
+            region_values = region_values * len(bag_values)
+        else:
+            raise ValueError(
+                "Batch key lengths mismatch for bagging: 'region_id' has "
+                f"{len(region_values)} values while '{bag_key}' has {len(bag_values)}."
+            )
+
+    resolved: List[str] = []
+    for idx, (primary, fallback) in enumerate(zip(bag_values, fallback_values)):
+        region_value = region_values[idx] if region_values is not None else None
         use_fallback = _is_missing_value(primary)
         if use_fallback and _is_missing_value(fallback):
             raise ValueError(
                 f"Both '{bag_key}' and '{bag_fallback_key}' are missing for at least one instance."
             )
-        resolved.append(fallback if use_fallback else primary)
-    return [str(v) for v in resolved]
+        if bag_key == "patch_id":
+            if use_fallback:
+                if not _is_missing_value(region_value):
+                    resolved.append(f"{str(fallback)}::{str(region_value)}")
+                else:
+                    resolved.append(str(fallback))
+                continue
+            if not _is_missing_value(fallback):
+                if not _is_missing_value(region_value):
+                    resolved.append(
+                        f"{str(fallback)}::{str(region_value)}::{str(primary)}"
+                    )
+                else:
+                    resolved.append(f"{str(fallback)}::{str(primary)}")
+                continue
+            resolved.append(str(primary))
+            continue
+        if use_fallback:
+            resolved.append(str(fallback))
+            continue
+        # Namespacing primary bag ids by fallback ids avoids accidental cross-sample
+        # merges when primary ids (for example region_id) are only locally unique.
+        if bag_key != bag_fallback_key and not _is_missing_value(fallback):
+            resolved.append(f"{str(fallback)}::{str(primary)}")
+            continue
+        resolved.append(str(primary))
+    return resolved
 
 
 def group_instance_indices_by_bag(bag_ids: Sequence[str]) -> Dict[str, List[int]]:
