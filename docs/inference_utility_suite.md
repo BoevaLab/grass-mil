@@ -7,7 +7,7 @@ This document describes the artifact-oriented inference workflow implemented in
 
 The suite extends checkpoint evaluation with:
 
-- deterministic prediction export
+- optionally deterministic prediction export
 - task-aware metrics for categorical/regression/survival tasks
 - graph embedding export for downstream interpretability workflows
 - optional node embedding export with bag-id mapping
