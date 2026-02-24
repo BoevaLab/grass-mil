@@ -236,6 +236,11 @@ class SupervisedModule(L.LightningModule):
             expected_length=n_instances,
             field_name="sample_id",
         )
+        patch_ids = self._to_optional_str_list(
+            getattr(batch, "patch_id", None),
+            expected_length=n_instances,
+            field_name="patch_id",
+        )
         row_region_ids: list[Optional[str]] = []
         row_sample_ids: list[Optional[str]] = []
         for indices in bag_indices:
@@ -259,7 +264,12 @@ class SupervisedModule(L.LightningModule):
             idx = torch.tensor(indices, dtype=torch.long, device=patch_logits.device)
             sub_logits = patch_logits.index_select(0, idx)
             instance_logits_chunks.append(sub_logits)
-            instance_patch_ids.extend([str(bag_id)] * len(indices))
+            instance_patch_ids.extend(
+                [
+                    patch_ids[i] if patch_ids[i] is not None else str(bag_id)
+                    for i in indices
+                ]
+            )
             instance_region_ids.extend([region_ids[i] for i in indices])
             instance_sample_ids.extend([sample_ids[i] for i in indices])
             if compute_attention_logits:

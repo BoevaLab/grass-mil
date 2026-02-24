@@ -380,6 +380,35 @@ def test_extract_bag_ids_patch_key_fallback_uses_sample_region_when_patch_missin
     assert bag_ids == ["s0::r0", "s1::r1"]
 
 
+def test_predict_group_metadata_uses_batch_patch_ids_for_instance_patch_ids():
+    pytest.importorskip("lightning")
+    pytest.importorskip("torch_geometric")
+    from types import SimpleNamespace
+
+    from src.models.supervised_module import SupervisedModule
+
+    module = SupervisedModule(
+        encoder={},
+        graph_head={},
+        loss={},
+        optim={},
+        task={"aggregation": "mean", "target_type": "binary"},
+    )
+    batch = SimpleNamespace(
+        region_id=["r0", "r1", "r0", "r1"],
+        sample_id=["s0", "s0", "s0", "s0"],
+        patch_id=["p0", "p1", "p2", None],
+    )
+    metadata = module._build_predict_group_metadata(
+        batch,
+        patch_logits=torch.randn(4, 1),
+        graph_emb=torch.randn(4, 8),
+        ordered_bag_ids=["bag_a", "bag_b"],
+        bag_indices=[[0, 2], [1, 3]],
+    )
+    assert metadata["instance_patch_ids"] == ["p0", "p2", "p1", "bag_b"]
+
+
 def test_gather_bag_targets_requires_consistent_labels_within_bag():
     from types import SimpleNamespace
 
