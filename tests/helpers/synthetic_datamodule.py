@@ -7,7 +7,9 @@ try:
     from torch_geometric.data import Data
     from torch_geometric.loader import DataLoader
 except Exception as exc:  # pragma: no cover
-    raise ImportError("torch_geometric is required for synthetic test datamodule") from exc
+    raise ImportError(
+        "torch_geometric is required for synthetic test datamodule"
+    ) from exc
 
 
 def _make_graph(
@@ -85,6 +87,15 @@ class SyntheticBagDataModule(L.LightningDataModule):
         )
 
     def test_dataloader(self):
+        return DataLoader(
+            self.dataset_test,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+            shuffle=False,
+        )
+
+    def predict_dataloader(self):
         return DataLoader(
             self.dataset_test,
             batch_size=self.batch_size,

@@ -655,6 +655,7 @@ class _ShaDowKHopSamplerWithTransform(torch.utils.data.DataLoader):
                 edge_index=batch.edge_index,
                 edge_attr=batch.edge_attr if "edge_attr" in batch else None,
                 relabel_nodes=True,
+                num_nodes=int(batch.x.size(0)),
             )
             sub_data = Data(
                 x=batch.x[node_ids],
