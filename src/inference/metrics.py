@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 
 import torch
 from omegaconf import DictConfig
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import balanced_accuracy_score, roc_auc_score
 
 from src.inference.schemas import BatchPredictionPayload
 
@@ -62,8 +62,18 @@ def _classification_binary(
         f1 = _safe_div(2.0 * precision * recall, precision + recall)
         accuracy = _safe_div(tp + tn, tp + tn + fp + fn)
         roc_auc = _binary_roc_auc(scores=scores, labels=y_true.long())
+        try:
+            balanced_accuracy = float(
+                balanced_accuracy_score(
+                    y_true.detach().cpu().numpy().astype(int),
+                    y_pred.detach().cpu().numpy().astype(int),
+                )
+            )
+        except ValueError:
+            balanced_accuracy = float("nan")
         per_task[f"task_{task_idx}"] = {
             "accuracy": accuracy,
+            "balanced_accuracy": balanced_accuracy,
             "precision": precision,
             "recall": recall,
             "f1": f1,
@@ -82,6 +92,7 @@ def _classification_binary(
 
     result: Dict[str, Any] = {
         "accuracy": _metric_mean("accuracy"),
+        "balanced_accuracy": _metric_mean("balanced_accuracy"),
         "precision": _metric_mean("precision"),
         "recall": _metric_mean("recall"),
         "f1": _metric_mean("f1"),
@@ -100,6 +111,14 @@ def _classification_multiclass(
     num_classes = int(logits.shape[1])
 
     acc = float((pred_labels == true_labels).float().mean().item())
+    try:
+        bal_acc = float(
+            balanced_accuracy_score(
+                true_labels.detach().cpu().numpy(), pred_labels.detach().cpu().numpy()
+            )
+        )
+    except ValueError:
+        bal_acc = float("nan")
 
     per_class_precision: List[float] = []
     per_class_recall: List[float] = []
@@ -123,6 +142,7 @@ def _classification_multiclass(
 
     return {
         "accuracy": acc,
+        "balanced_accuracy": bal_acc,
         "precision": _nanmean(per_class_precision),
         "recall": _nanmean(per_class_recall),
         "f1": _nanmean(per_class_f1),

@@ -18,6 +18,7 @@ def test_compute_binary_metrics() -> None:
     cfg = OmegaConf.create({"categorical": {"threshold": 0.5}, "per_group": True})
     metrics = compute_task_metrics(payload=payload, target_type="binary", metrics_cfg=cfg)
     assert "accuracy" in metrics["global"]
+    assert "balanced_accuracy" in metrics["global"]
     assert "roc_auc" in metrics["global"]
     assert metrics["global"]["accuracy"] >= 0.5
     assert "a" in metrics["per_group"]
@@ -70,6 +71,7 @@ def test_compute_categorical_metrics() -> None:
         payload=payload, target_type="categorical", metrics_cfg=cfg
     )
     assert "accuracy" in metrics["global"]
+    assert "balanced_accuracy" in metrics["global"]
     assert "precision" in metrics["global"]
     assert "recall" in metrics["global"]
     assert "f1" in metrics["global"]
@@ -118,6 +120,9 @@ def test_compute_binary_multitask_metrics_are_per_task_not_flattened() -> None:
     metrics = compute_task_metrics(payload=payload, target_type="binary", metrics_cfg=cfg)
 
     assert metrics["global"]["accuracy"] == 0.5
+    assert metrics["global"]["balanced_accuracy"] == 0.5
     assert "per_task" in metrics["global"]
     assert metrics["global"]["per_task"]["task_0"]["accuracy"] == 1.0
+    assert metrics["global"]["per_task"]["task_0"]["balanced_accuracy"] == 1.0
     assert metrics["global"]["per_task"]["task_1"]["accuracy"] == 0.0
+    assert metrics["global"]["per_task"]["task_1"]["balanced_accuracy"] == 0.0
