@@ -326,7 +326,7 @@ def test_shadow_runtime_falls_back_to_none_when_property_missing(monkeypatch):
         }
     )
 
-    observed = {"node_idx": "unset"}
+    observed = {"node_idx": "unset", "unit_num_nodes": int(unit.num_nodes)}
 
     def _fake_unit_loader(data, **kwargs):
         observed["node_idx"] = kwargs.get("node_idx")
@@ -341,7 +341,13 @@ def test_shadow_runtime_falls_back_to_none_when_property_missing(monkeypatch):
         shuffle=False,
     )
     _ = list(loader)
-    assert observed["node_idx"] is None
+    node_idx = observed["node_idx"]
+    assert isinstance(node_idx, torch.Tensor)
+    assert node_idx.dtype == torch.long
+    assert node_idx.numel() == observed["unit_num_nodes"]
+    assert torch.equal(
+        node_idx, torch.arange(observed["unit_num_nodes"], dtype=torch.long)
+    )
 
 
 def test_shadow_runtime_can_disable_proportional_sampling(monkeypatch):

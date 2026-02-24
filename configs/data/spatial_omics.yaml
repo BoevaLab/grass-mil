@@ -89,6 +89,10 @@ sampler:
     weight_mode: inverse
     min_weight: 1.0e-6
 
+# Optional validation-only sampler override.
+# When null, validation reuses `sampler`.
+val_sampler: null
+
 tiling:
   tile_size_um: 200.0
   stride_um: 200.0

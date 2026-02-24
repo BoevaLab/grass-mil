@@ -1,5 +1,5 @@
-import torch
 import pytest
+import torch
 
 
 def test_remap_encoder_keys_auto_bgrl_or_identity():
@@ -74,7 +74,7 @@ def test_validate_task_config_accepts_categorical():
     validate_task_config({"target_type": "categorical", "instance_sampling": "all"})
 
 
-def test_supervised_module_logs_categorical_accuracy():
+def test_supervised_module_validation_logs_step_loss_not_acc():
     pytest.importorskip("lightning")
     from src.models.supervised_module import SupervisedModule
 
@@ -95,12 +95,125 @@ def test_supervised_module_logs_categorical_accuracy():
     module._log_stage_metrics(
         stage="val",
         loss_value=torch.tensor(0.2),
-        bag_logits=torch.tensor(
-            [[5.0, 1.0, -1.0], [-2.0, 0.2, 3.0], [0.1, 0.2, 0.3]]
-        ),
+        bag_logits=torch.tensor([[5.0, 1.0, -1.0], [-2.0, 0.2, 3.0], [0.1, 0.2, 0.3]]),
         bag_targets=torch.tensor([0, 2, 1]),
     )
+    assert "val/acc" not in logged
+    assert "val/loss" in logged
+    _, kwargs = logged["val/loss"]
+    assert kwargs["on_step"] is True
+    assert kwargs["on_epoch"] is True
+
+
+def test_supervised_module_logs_epoch_validation_accuracy_from_aggregated_regions():
+    pytest.importorskip("lightning")
+    from src.models.supervised_module import SupervisedModule
+
+    module = SupervisedModule(
+        encoder={},
+        graph_head={},
+        loss={},
+        optim={},
+        task={"aggregation": "mean", "target_type": "binary"},
+    )
+    logged = {}
+
+    def _capture_log(name, value, **kwargs):
+        logged[name] = (value, kwargs)
+
+    module.log = _capture_log  # type: ignore[method-assign]
+    module.on_validation_epoch_start()
+    module._val_bag_ids = ["p0", "p1", "p2"]
+    module._val_bag_logits_chunks = [torch.tensor([[0.0], [0.0], [0.0]])]
+    module._val_bag_targets_chunks = [torch.tensor([[1.0], [1.0], [0.0]])]
+    module._val_row_region_ids = ["rA", "rA", "rB"]
+    module._val_row_sample_ids = ["s0", "s0", "s1"]
+    module._val_instance_logits_chunks = [torch.tensor([[2.0], [-2.0], [-2.0]])]
+    module._val_instance_patch_ids = ["p0", "p1", "p2"]
+    module._val_instance_region_ids = ["rA", "rA", "rB"]
+    module._val_instance_sample_ids = ["s0", "s0", "s1"]
+
+    module.on_validation_epoch_end()
     assert "val/acc" in logged
+    acc_value, kwargs = logged["val/acc"]
+    assert torch.isclose(acc_value, torch.tensor(1.0))
+    assert kwargs["on_step"] is False
+    assert kwargs["on_epoch"] is True
+
+
+def test_supervised_module_logs_epoch_validation_regression_metrics():
+    pytest.importorskip("lightning")
+    from src.models.supervised_module import SupervisedModule
+
+    module = SupervisedModule(
+        encoder={},
+        graph_head={},
+        loss={},
+        optim={},
+        task={"aggregation": "mean", "target_type": "regression"},
+    )
+    logged = {}
+
+    def _capture_log(name, value, **kwargs):
+        logged[name] = (value, kwargs)
+
+    module.log = _capture_log  # type: ignore[method-assign]
+    module.on_validation_epoch_start()
+    module._val_bag_ids = ["p0", "p1"]
+    module._val_bag_logits_chunks = [torch.tensor([[1.0], [3.0]])]
+    module._val_bag_targets_chunks = [torch.tensor([[1.5], [2.5]])]
+    module._val_row_region_ids = ["rA", "rB"]
+    module._val_row_sample_ids = ["s0", "s1"]
+    module._val_instance_logits_chunks = [torch.tensor([[1.0], [3.0]])]
+    module._val_instance_patch_ids = ["p0", "p1"]
+    module._val_instance_region_ids = ["rA", "rB"]
+    module._val_instance_sample_ids = ["s0", "s1"]
+
+    module.on_validation_epoch_end()
+    assert "val/mae" in logged
+    assert "val/rmse" in logged
+    assert "val/r2" in logged
+    assert logged["val/mae"][1]["on_epoch"] is True
+    assert logged["val/rmse"][1]["on_epoch"] is True
+    assert logged["val/r2"][1]["on_epoch"] is True
+
+
+def test_supervised_module_logs_epoch_validation_survival_c_index():
+    pytest.importorskip("lightning")
+    from src.models.supervised_module import SupervisedModule
+
+    module = SupervisedModule(
+        encoder={},
+        graph_head={},
+        loss={},
+        optim={},
+        task={"aggregation": "mean", "target_type": "survival"},
+    )
+    logged = {}
+
+    def _capture_log(name, value, **kwargs):
+        logged[name] = (value, kwargs)
+
+    module.log = _capture_log  # type: ignore[method-assign]
+    module.on_validation_epoch_start()
+    module._val_bag_ids = ["p0", "p1", "p2"]
+    module._val_bag_logits_chunks = [torch.tensor([[3.0], [2.0], [1.0]])]
+    module._val_bag_targets_chunks = [
+        torch.tensor([[1.0, 1.0], [2.0, 1.0], [3.0, 1.0]])
+    ]
+    module._val_row_region_ids = ["rA", "rB", "rC"]
+    module._val_row_sample_ids = ["s0", "s1", "s2"]
+    module._val_instance_logits_chunks = [torch.tensor([[3.0], [2.0], [1.0]])]
+    module._val_instance_patch_ids = ["p0", "p1", "p2"]
+    module._val_instance_region_ids = ["rA", "rB", "rC"]
+    module._val_instance_sample_ids = ["s0", "s1", "s2"]
+
+    module.on_validation_epoch_end()
+    assert "val/c_index" in logged
+    c_index_value, kwargs = logged["val/c_index"]
+    assert torch.isclose(c_index_value, torch.tensor(1.0))
+    assert kwargs["on_step"] is False
+    assert kwargs["on_epoch"] is True
 
 
 def test_attention_bag_aggregation_shapes():

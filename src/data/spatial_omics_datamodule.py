@@ -59,6 +59,7 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         feature_reducer: Dict[str, Any],
         tiling: Dict[str, Any],
         sampler: Optional[Dict[str, Any]] = None,
+        val_sampler: Optional[Dict[str, Any]] = None,
         manifest: Optional[Dict[str, Any]] = None,
         graph_labels: Optional[Dict[str, Any]] = None,
         transforms: Optional[list[Dict[str, Any]]] = None,
@@ -88,7 +89,11 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         self.feature_reducer_config = FeatureReducerConfig.from_dict(feature_reducer)
         self.tile_config = TileConfig.from_dict(tiling)
         self.sampler_config = SamplerConfig.from_dict(sampler)
+        self.val_sampler_config = (
+            SamplerConfig.from_dict(val_sampler) if val_sampler is not None else None
+        )
         self.sampler_strategy: Optional[BaseSamplerStrategy] = None
+        self.val_sampler_strategy: Optional[BaseSamplerStrategy] = None
         self.manifest_config = ManifestConfig.from_dict(manifest)
         self.graph_label_config = GraphLabelConfig.from_dict(graph_labels)
         self.transforms = instantiate_transforms(transforms)
@@ -179,11 +184,19 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             self.transforms,
         )
         self._ensure_sampler_strategy()
+        self._ensure_val_sampler_strategy()
 
     def _ensure_sampler_strategy(self) -> BaseSamplerStrategy:
         if self.sampler_strategy is None:
             self.sampler_strategy = get_sampler_strategy(self.sampler_config)
         return self.sampler_strategy
+
+    def _ensure_val_sampler_strategy(self) -> BaseSamplerStrategy:
+        if self.val_sampler_config is None:
+            return self._ensure_sampler_strategy()
+        if self.val_sampler_strategy is None:
+            self.val_sampler_strategy = get_sampler_strategy(self.val_sampler_config)
+        return self.val_sampler_strategy
 
     def train_dataloader(self) -> Any:
         sampler = self._ensure_sampler_strategy()
@@ -196,7 +209,7 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         )
 
     def val_dataloader(self) -> Any:
-        sampler = self._ensure_sampler_strategy()
+        sampler = self._ensure_val_sampler_strategy()
         return sampler.build_dataset_loader(
             dataset=self.dataset_val,
             batch_size=self.hparams.batch_size,

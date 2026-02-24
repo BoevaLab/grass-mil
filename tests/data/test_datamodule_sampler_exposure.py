@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from src.data.components.samplers import SamplerConfig
 from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
 
 
@@ -51,6 +52,7 @@ def _minimal_datamodule(tmp_path: Path, sampler: dict | None) -> SpatialOmicsDat
         feature_reducer={"name": "identity", "kwargs": {}},
         tiling={"tile_size_um": 50.0, "stride_um": 50.0, "min_cells": 1},
         sampler=sampler,
+        val_sampler=None,
         manifest={
             "sample_id": "sample_id",
             "input_path": "input_path",
@@ -92,3 +94,34 @@ def test_datamodule_exposes_configured_sampler_strategy(tmp_path: Path):
     assert strategy.runtime.enabled is True
     assert strategy.runtime.depth == 2
     assert strategy.runtime.num_neighbors == 8
+
+
+def test_datamodule_uses_val_sampler_override(tmp_path: Path):
+    dm = _minimal_datamodule(
+        tmp_path,
+        sampler={"name": "identity", "kwargs": {}},
+    )
+    dm.val_sampler_config = SamplerConfig.from_dict(
+        {
+            "name": "shadow_custom",
+            "kwargs": {},
+            "runtime": {
+                "enabled": True,
+                "depth": 2,
+                "num_neighbors": 8,
+                "subgraph_batch_size": 4,
+                "proportional_root_sampling": False,
+            },
+        }
+    )
+    val_strategy = dm._ensure_val_sampler_strategy()
+    train_strategy = dm._ensure_sampler_strategy()
+    assert train_strategy.__class__.__name__ == "IdentityBatchStrategy"
+    assert val_strategy.__class__.__name__ == "ShadowCustomStrategy"
+
+
+def test_datamodule_val_sampler_falls_back_to_train_sampler(tmp_path: Path):
+    dm = _minimal_datamodule(tmp_path, sampler={"name": "identity", "kwargs": {}})
+    train_strategy = dm._ensure_sampler_strategy()
+    val_strategy = dm._ensure_val_sampler_strategy()
+    assert val_strategy is train_strategy

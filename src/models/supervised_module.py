@@ -4,6 +4,10 @@ from typing import Any, Dict, List, Optional
 
 import lightning as L
 import torch
+import torch.distributed as dist
+from src.inference.aggregation import aggregate_group_logits
+from src.inference.metrics import compute_task_metrics_from_tensors
+from src.inference.schemas import BatchPredictionPayload
 
 from .training import (
     aggregate_bag_logits_attention,
@@ -110,6 +114,7 @@ class SupervisedModule(L.LightningModule):
 
         self._region_total_loss_buffer: list[torch.Tensor] = []
         self._manual_optimizer_steps = 0
+        self._reset_val_epoch_buffers()
 
     # ------------------------------------------------------------------
     # Lightning hooks
@@ -536,7 +541,7 @@ class SupervisedModule(L.LightningModule):
         self.log(
             f"{stage}/loss",
             loss_value,
-            on_step=stage == "train",
+            on_step=stage in {"train", "val"},
             on_epoch=True,
             prog_bar=True,
         )
@@ -564,7 +569,7 @@ class SupervisedModule(L.LightningModule):
                     on_epoch=True,
                     prog_bar=False,
                 )
-        if self.task_cfg["target_type"] == "binary":
+        if stage in {"train", "test"} and self.task_cfg["target_type"] == "binary":
             acc = compute_binary_accuracy(bag_logits, bag_targets)
             self.log(
                 f"{stage}/acc",
@@ -573,7 +578,10 @@ class SupervisedModule(L.LightningModule):
                 on_epoch=True,
                 prog_bar=stage != "train",
             )
-        elif self.task_cfg["target_type"] == "categorical":
+        elif (
+            stage in {"train", "test"}
+            and self.task_cfg["target_type"] == "categorical"
+        ):
             acc = compute_categorical_accuracy(bag_logits, bag_targets)
             self.log(
                 f"{stage}/acc",
@@ -622,11 +630,15 @@ class SupervisedModule(L.LightningModule):
             "bag_ids": list(ordered_bag_ids),
             "bag_logits": bag_logits,
             "bag_targets": bag_targets,
+            "patch_logits": patch_logits,
+            "graph_emb": payload["graph_emb"],
+            "ordered_bag_ids": list(ordered_bag_ids),
+            "bag_indices": bag_indices,
+            "bag_attention": bag_attention,
         }
         if self.use_attention:
             result.update(
                 {
-                    "bag_attention": bag_attention,
                     "region_loss": region_loss,
                     "node_aux_loss": node_aux_loss,
                     "entropy_reg": entropy_reg,
@@ -712,7 +724,31 @@ class SupervisedModule(L.LightningModule):
         return mean_total_loss
 
     def validation_step(self, batch, batch_idx):
-        return self._shared_step(batch, "val")
+        out = self._shared_step(batch, "val")
+        metadata = self._build_predict_group_metadata(
+            batch,
+            patch_logits=out["patch_logits"],
+            graph_emb=out["graph_emb"],
+            ordered_bag_ids=out["ordered_bag_ids"],
+            bag_indices=out["bag_indices"],
+        )
+        self._val_bag_ids.extend([str(v) for v in out["bag_ids"]])
+        self._val_bag_logits_chunks.append(out["bag_logits"].detach().cpu())
+        self._val_row_region_ids.extend(metadata["row_region_ids"])
+        self._val_row_sample_ids.extend(metadata["row_sample_ids"])
+        if out["bag_targets"] is not None:
+            self._val_bag_targets_chunks.append(out["bag_targets"].detach().cpu())
+        self._val_instance_logits_chunks.append(metadata["instance_logits"].detach().cpu())
+        self._val_instance_patch_ids.extend(
+            [str(v) for v in metadata["instance_patch_ids"]]
+        )
+        self._val_instance_region_ids.extend(metadata["instance_region_ids"])
+        self._val_instance_sample_ids.extend(metadata["instance_sample_ids"])
+        if "instance_attention_logits" in metadata:
+            self._val_instance_attention_logits_chunks.append(
+                metadata["instance_attention_logits"].detach().cpu()
+            )
+        return out
 
     def test_step(self, batch, batch_idx):
         return self._shared_step(batch, "test")
@@ -808,6 +844,71 @@ class SupervisedModule(L.LightningModule):
         if self.region_accum_enabled:
             self._region_total_loss_buffer.clear()
 
+    def on_validation_epoch_start(self) -> None:
+        self._reset_val_epoch_buffers()
+
+    def on_validation_epoch_end(self) -> None:
+        payload = self._build_validation_epoch_payload()
+        if payload is None or payload.bag_targets is None:
+            self._reset_val_epoch_buffers()
+            return
+        aggregated = aggregate_group_logits(
+            payload,
+            mode="attention_weighted" if self.use_attention else "mean",
+            bag_scope="region",
+            subsample_fraction=1.0,
+            subsample_seed=None,
+        )
+        if aggregated.bag_targets is None:
+            self._reset_val_epoch_buffers()
+            return
+        target_type = str(self.task_cfg.get("target_type", "binary"))
+        metrics = compute_task_metrics_from_tensors(
+            target_type=target_type,
+            logits=aggregated.bag_logits,
+            targets=aggregated.bag_targets,
+            threshold=0.5,
+        )
+        if target_type in {"binary", "categorical"}:
+            self.log(
+                "val/acc",
+                torch.tensor(float(metrics["accuracy"]), device=self.device),
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+            )
+        elif target_type == "regression":
+            self.log(
+                "val/mae",
+                torch.tensor(float(metrics["mae"]), device=self.device),
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+            )
+            self.log(
+                "val/rmse",
+                torch.tensor(float(metrics["rmse"]), device=self.device),
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+            )
+            self.log(
+                "val/r2",
+                torch.tensor(float(metrics["r2"]), device=self.device),
+                on_step=False,
+                on_epoch=True,
+                prog_bar=False,
+            )
+        elif target_type == "survival":
+            self.log(
+                "val/c_index",
+                torch.tensor(float(metrics["c_index"]), device=self.device),
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+            )
+        self._reset_val_epoch_buffers()
+
     def on_train_epoch_end(self) -> None:
         if not self.region_accum_enabled:
             return
@@ -889,3 +990,114 @@ class SupervisedModule(L.LightningModule):
                 "frequency": 1,
             },
         }
+
+    def _reset_val_epoch_buffers(self) -> None:
+        self._val_bag_ids: list[str] = []
+        self._val_bag_logits_chunks: list[torch.Tensor] = []
+        self._val_bag_targets_chunks: list[torch.Tensor] = []
+        self._val_row_region_ids: list[Optional[str]] = []
+        self._val_row_sample_ids: list[Optional[str]] = []
+        self._val_instance_logits_chunks: list[torch.Tensor] = []
+        self._val_instance_attention_logits_chunks: list[torch.Tensor] = []
+        self._val_instance_patch_ids: list[str] = []
+        self._val_instance_region_ids: list[Optional[str]] = []
+        self._val_instance_sample_ids: list[Optional[str]] = []
+
+    @staticmethod
+    def _cat_or_none(chunks: list[torch.Tensor]) -> Optional[torch.Tensor]:
+        if not chunks:
+            return None
+        return torch.cat(chunks, dim=0)
+
+    def _gather_validation_objects(self, obj: dict[str, Any]) -> list[dict[str, Any]]:
+        if not dist.is_available() or not dist.is_initialized():
+            return [obj]
+        gathered: list[dict[str, Any]] = [None] * dist.get_world_size()  # type: ignore[list-item]
+        dist.all_gather_object(gathered, obj)
+        return gathered
+
+    def _build_validation_epoch_payload(self) -> Optional[BatchPredictionPayload]:
+        local_payload = {
+            "bag_ids": self._val_bag_ids,
+            "bag_logits": self._cat_or_none(self._val_bag_logits_chunks),
+            "bag_targets": self._cat_or_none(self._val_bag_targets_chunks),
+            "row_region_ids": self._val_row_region_ids,
+            "row_sample_ids": self._val_row_sample_ids,
+            "instance_logits": self._cat_or_none(self._val_instance_logits_chunks),
+            "instance_attention_logits": self._cat_or_none(
+                self._val_instance_attention_logits_chunks
+            ),
+            "instance_patch_ids": self._val_instance_patch_ids,
+            "instance_region_ids": self._val_instance_region_ids,
+            "instance_sample_ids": self._val_instance_sample_ids,
+        }
+        gathered = self._gather_validation_objects(local_payload)
+
+        bag_ids: list[str] = []
+        bag_logits_chunks: list[torch.Tensor] = []
+        bag_targets_chunks: list[torch.Tensor] = []
+        row_region_ids: list[Optional[str]] = []
+        row_sample_ids: list[Optional[str]] = []
+        instance_logits_chunks: list[torch.Tensor] = []
+        instance_attention_logits_chunks: list[torch.Tensor] = []
+        instance_patch_ids: list[str] = []
+        instance_region_ids: list[Optional[str]] = []
+        instance_sample_ids: list[Optional[str]] = []
+
+        for chunk in gathered:
+            chunk_bag_logits = chunk.get("bag_logits")
+            if chunk_bag_logits is not None and int(chunk_bag_logits.shape[0]) > 0:
+                bag_logits_chunks.append(chunk_bag_logits)
+                bag_ids.extend([str(v) for v in chunk["bag_ids"]])
+                row_region_ids.extend(
+                    [None if v is None else str(v) for v in chunk["row_region_ids"]]
+                )
+                row_sample_ids.extend(
+                    [None if v is None else str(v) for v in chunk["row_sample_ids"]]
+                )
+            chunk_bag_targets = chunk.get("bag_targets")
+            if chunk_bag_targets is not None and int(chunk_bag_targets.shape[0]) > 0:
+                bag_targets_chunks.append(chunk_bag_targets)
+            chunk_instance_logits = chunk.get("instance_logits")
+            if (
+                chunk_instance_logits is not None
+                and int(chunk_instance_logits.shape[0]) > 0
+            ):
+                instance_logits_chunks.append(chunk_instance_logits)
+                instance_patch_ids.extend(
+                    [str(v) for v in chunk.get("instance_patch_ids", [])]
+                )
+                instance_region_ids.extend(
+                    [
+                        None if v is None else str(v)
+                        for v in chunk.get("instance_region_ids", [])
+                    ]
+                )
+                instance_sample_ids.extend(
+                    [
+                        None if v is None else str(v)
+                        for v in chunk.get("instance_sample_ids", [])
+                    ]
+                )
+            chunk_instance_attn = chunk.get("instance_attention_logits")
+            if chunk_instance_attn is not None and int(chunk_instance_attn.shape[0]) > 0:
+                instance_attention_logits_chunks.append(chunk_instance_attn)
+
+        if not bag_logits_chunks:
+            return None
+        bag_targets = self._cat_or_none(bag_targets_chunks)
+        instance_logits = self._cat_or_none(instance_logits_chunks)
+        instance_attention_logits = self._cat_or_none(instance_attention_logits_chunks)
+        return BatchPredictionPayload(
+            bag_ids=bag_ids,
+            bag_logits=torch.cat(bag_logits_chunks, dim=0),
+            bag_targets=bag_targets,
+            bag_attention=None,
+            row_region_ids=row_region_ids,
+            row_sample_ids=row_sample_ids,
+            instance_logits=instance_logits,
+            instance_attention_logits=instance_attention_logits,
+            instance_patch_ids=instance_patch_ids if instance_logits is not None else None,
+            instance_region_ids=instance_region_ids if instance_logits is not None else None,
+            instance_sample_ids=instance_sample_ids if instance_logits is not None else None,
+        )

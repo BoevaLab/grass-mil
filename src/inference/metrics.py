@@ -150,7 +150,7 @@ def _survival_metrics(logits: torch.Tensor, targets: torch.Tensor) -> Dict[str, 
     return {"c_index": c_index}
 
 
-def _compute_task_metrics(
+def compute_task_metrics_from_tensors(
     *, target_type: str, logits: torch.Tensor, targets: torch.Tensor, threshold: float
 ) -> Dict[str, float]:
     if target_type == "binary":
@@ -175,7 +175,7 @@ def compute_task_metrics(
         return {"global": {}, "per_group": {}}
 
     threshold = float(metrics_cfg.categorical.threshold)
-    global_metrics = _compute_task_metrics(
+    global_metrics = compute_task_metrics_from_tensors(
         target_type=target_type,
         logits=payload.bag_logits,
         targets=payload.bag_targets,
@@ -192,7 +192,7 @@ def compute_task_metrics(
             idx_tensor = torch.tensor(indices, dtype=torch.long)
             group_logits = payload.bag_logits.index_select(0, idx_tensor)
             group_targets = payload.bag_targets.index_select(0, idx_tensor)
-            per_group[bag_id] = _compute_task_metrics(
+            per_group[bag_id] = compute_task_metrics_from_tensors(
                 target_type=target_type,
                 logits=group_logits,
                 targets=group_targets,

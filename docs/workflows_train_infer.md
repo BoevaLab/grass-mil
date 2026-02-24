@@ -544,6 +544,30 @@ See the capability matrix in [`capabilities_and_modes.md`](capabilities_and_mode
 6. Notebook-based smoke tests for data loading, components, and regime behavior.
 7. CI and pre-commit checks for quality and compatibility.
 
+## 5.1) Train-vs-Validation Sampler Split
+
+Validation can use a dedicated sampler config (`data.val_sampler`) while training
+keeps `data.sampler`. This is useful when training should keep proportional root
+sampling but validation should approximate tissue-level uniform sampling.
+
+Example:
+
+```bash
+python src/train.py \
+  data.sampler.runtime.proportional_root_sampling=true \
+  data.val_sampler.name=shadow_custom \
+  data.val_sampler.kwargs="{}" \
+  data.val_sampler.runtime.enabled=true \
+  data.val_sampler.runtime.depth=2 \
+  data.val_sampler.runtime.num_neighbors=8 \
+  data.val_sampler.runtime.subgraph_batch_size=32 \
+  data.val_sampler.runtime.proportional_root_sampling=false \
+  data.val_sampler.runtime.subsample_fraction=0.5 \
+  data.val_sampler.runtime.subsample_seed=7
+```
+
+When `data.val_sampler=null`, validation reuses `data.sampler`.
+
 ## 6) Optional Smoke Validation Commands
 
 Quick config and runtime checks:
