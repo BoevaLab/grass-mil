@@ -163,13 +163,10 @@ def _instance_group_ids(payload: BatchPredictionPayload, *, bag_scope: str) -> L
     )
 
 
-def _maybe_group_row_indices(
+def _group_row_indices(
     payload: BatchPredictionPayload, *, bag_scope: str
 ) -> Dict[str, List[int]]:
-    try:
-        row_group_ids = _row_group_ids(payload, bag_scope=bag_scope)
-    except ValueError:
-        return {}
+    row_group_ids = _row_group_ids(payload, bag_scope=bag_scope)
     return _group_indices(row_group_ids)
 
 
@@ -238,7 +235,7 @@ def aggregate_group_logits(
             "Mismatch between bag_ids and attention rows for aggregation: "
             f"{len(payload.bag_ids)} ids vs {len(payload.bag_attention)} attention rows."
         )
-    grouped_row_indices = _maybe_group_row_indices(payload, bag_scope=bag_scope)
+    grouped_row_indices = _group_row_indices(payload, bag_scope=bag_scope)
 
     if mode == "attention_weighted":
         if payload.instance_attention_logits is None:

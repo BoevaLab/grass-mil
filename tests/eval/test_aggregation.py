@@ -249,3 +249,21 @@ def test_attention_weighted_subsample_fraction_zero_raises() -> None:
             mode="attention_weighted",
             subsample_fraction=0.0,
         )
+
+
+def test_instance_aggregation_raises_when_row_group_metadata_missing() -> None:
+    payload = BatchPredictionPayload(
+        bag_ids=["chunk_a", "chunk_b"],
+        bag_logits=torch.tensor([[5.0], [2.0]]),
+        bag_targets=torch.tensor([[1.0], [0.0]]),
+        bag_attention=None,
+        row_region_ids=[None, "rB"],
+        row_sample_ids=[None, "sB"],
+        instance_logits=torch.tensor([[1.0], [9.0], [3.0]]),
+        instance_attention_logits=None,
+        instance_patch_ids=["chunk_a", "chunk_a", "chunk_b"],
+        instance_region_ids=["rA", "rA", "rB"],
+        instance_sample_ids=["sA", "sA", "sB"],
+    )
+    with pytest.raises(ValueError, match="Missing both 'row_region_ids' and fallback 'row_sample_ids'"):
+        aggregate_group_logits(payload, mode="mean", bag_scope="region")
