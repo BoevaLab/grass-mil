@@ -22,7 +22,7 @@ class BGRLModule(L.LightningModule):
         self,
         encoder: Dict[str, Any],
         ssl: Dict[str, Any],
-        optim: Dict[str, Any],
+        optim: Optional[Dict[str, Any]] = None,
         scheduler: Optional[Dict[str, Any]] = None,
         task: Optional[Dict[str, Any]] = None,
         init_from_ckpt: Optional[str] = None,
@@ -150,6 +150,11 @@ class BGRLModule(L.LightningModule):
     def configure_optimizers(self):
         if not self._built:
             self.setup("fit")
+        if self.optim_cfg is None:
+            raise ValueError(
+                "Missing optimizer config for training. Compose an optim group "
+                "(for example '+optim=adamw') or set model.optim explicitly."
+            )
         optimizer = instantiate_optimizer(
             self.optim_cfg, self.ssl_model.trainable_parameters()
         )

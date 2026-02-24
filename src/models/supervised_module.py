@@ -42,7 +42,7 @@ class SupervisedModule(L.LightningModule):
         encoder: Dict[str, Any],
         graph_head: Dict[str, Any],
         loss: Dict[str, Any],
-        optim: Dict[str, Any],
+        optim: Optional[Dict[str, Any]] = None,
         attention: Optional[Dict[str, Any]] = None,
         scheduler: Optional[Dict[str, Any]] = None,
         task: Optional[Dict[str, Any]] = None,
@@ -819,6 +819,11 @@ class SupervisedModule(L.LightningModule):
     def configure_optimizers(self):
         if not self._built:
             self.setup("fit")
+        if self.optim_cfg is None:
+            raise ValueError(
+                "Missing optimizer config for training. Compose an optim group "
+                "(for example '+optim=adamw') or set model.optim explicitly."
+            )
 
         optimization_cfg = dict(self.task_cfg.get("optimization", {}))
         backbone_lr = optimization_cfg.get("backbone_lr")
