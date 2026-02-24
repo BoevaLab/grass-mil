@@ -104,22 +104,12 @@ def collect_predictions(
             _align_chunk_attention_to_rows(chunk_bag_ids, chunk.get("bag_attention"))
         )
         if "instance_logits" in chunk and chunk["instance_logits"] is not None:
-            if "instance_attention_logits" not in chunk:
-                raise KeyError(
-                    "predict_step provided instance_logits without instance_attention_logits."
-                )
             for field in ("instance_patch_ids", "instance_region_ids", "instance_sample_ids"):
                 if field not in chunk:
                     raise KeyError(
                         f"predict_step provided instance_logits without required field '{field}'."
                     )
             chunk_instance_logits = _ensure_2d(chunk["instance_logits"])
-            chunk_instance_attn = _ensure_2d(chunk["instance_attention_logits"])
-            if chunk_instance_logits.shape[0] != chunk_instance_attn.shape[0]:
-                raise ValueError(
-                    "Mismatch between instance_logits and instance_attention_logits rows: "
-                    f"{chunk_instance_logits.shape[0]} vs {chunk_instance_attn.shape[0]}."
-                )
             if len(chunk["instance_patch_ids"]) != chunk_instance_logits.shape[0]:
                 raise ValueError(
                     "Mismatch between instance_logits and instance_patch_ids rows: "
@@ -136,7 +126,15 @@ def collect_predictions(
                     f"{chunk_instance_logits.shape[0]} vs {len(chunk['instance_sample_ids'])}."
                 )
             instance_logits_chunks.append(chunk_instance_logits)
-            instance_attention_logits_chunks.append(chunk_instance_attn)
+            chunk_instance_attn = chunk.get("instance_attention_logits")
+            if chunk_instance_attn is not None:
+                chunk_instance_attn = _ensure_2d(chunk_instance_attn)
+                if chunk_instance_logits.shape[0] != chunk_instance_attn.shape[0]:
+                    raise ValueError(
+                        "Mismatch between instance_logits and instance_attention_logits rows: "
+                        f"{chunk_instance_logits.shape[0]} vs {chunk_instance_attn.shape[0]}."
+                    )
+                instance_attention_logits_chunks.append(chunk_instance_attn)
             instance_patch_ids.extend([str(v) for v in chunk["instance_patch_ids"]])
             instance_region_ids.extend(
                 [None if v is None else str(v) for v in chunk["instance_region_ids"]]
@@ -176,10 +174,6 @@ def collect_predictions(
             f"{len(bag_ids)} ids vs {len(row_sample_ids)} row ids."
         )
     if instance_logits is not None:
-        if instance_attention_logits is None:
-            raise ValueError(
-                "instance_attention_logits must be present when instance_logits are collected."
-            )
         if len(instance_patch_ids) != instance_logits.shape[0]:
             raise ValueError(
                 "Mismatch between collected instance_logits and instance_patch_ids: "

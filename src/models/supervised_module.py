@@ -241,42 +241,41 @@ class SupervisedModule(L.LightningModule):
             "row_region_ids": row_region_ids,
             "row_sample_ids": row_sample_ids,
         }
-        if not self.use_attention:
-            return metadata
-
-        assert self.attention is not None
         instance_logits_chunks: list[torch.Tensor] = []
-        instance_attention_logits_chunks: list[torch.Tensor] = []
         instance_patch_ids: list[str] = []
         instance_region_ids: list[Optional[str]] = []
         instance_sample_ids: list[Optional[str]] = []
+        instance_attention_logits_chunks: list[torch.Tensor] = []
+        compute_attention_logits = self.use_attention and self.attention is not None
 
         for bag_id, indices in zip(ordered_bag_ids, bag_indices):
             if not indices:
                 continue
             idx = torch.tensor(indices, dtype=torch.long, device=patch_logits.device)
             sub_logits = patch_logits.index_select(0, idx)
-            sub_emb = graph_emb.index_select(0, idx)
-            attn_logits, _ = self.attention(sub_emb)
             instance_logits_chunks.append(sub_logits)
-            instance_attention_logits_chunks.append(attn_logits.reshape(-1, 1))
             instance_patch_ids.extend([str(bag_id)] * len(indices))
             instance_region_ids.extend([region_ids[i] for i in indices])
             instance_sample_ids.extend([sample_ids[i] for i in indices])
+            if compute_attention_logits:
+                sub_emb = graph_emb.index_select(0, idx)
+                attn_logits, _ = self.attention(sub_emb)
+                instance_attention_logits_chunks.append(attn_logits.reshape(-1, 1))
 
         metadata["instance_logits"] = (
             torch.cat(instance_logits_chunks, dim=0)
             if instance_logits_chunks
             else torch.empty((0, patch_logits.shape[-1]), device=patch_logits.device)
         )
-        metadata["instance_attention_logits"] = (
-            torch.cat(instance_attention_logits_chunks, dim=0)
-            if instance_attention_logits_chunks
-            else torch.empty((0, 1), device=patch_logits.device)
-        )
         metadata["instance_patch_ids"] = instance_patch_ids
         metadata["instance_region_ids"] = instance_region_ids
         metadata["instance_sample_ids"] = instance_sample_ids
+        if compute_attention_logits:
+            metadata["instance_attention_logits"] = (
+                torch.cat(instance_attention_logits_chunks, dim=0)
+                if instance_attention_logits_chunks
+                else torch.empty((0, 1), device=patch_logits.device)
+            )
         return metadata
 
     def collect_graph_embeddings(
@@ -735,15 +734,15 @@ class SupervisedModule(L.LightningModule):
         }
         if out["bag_targets"] is not None:
             result["bag_targets"] = out["bag_targets"].detach()
+        result["instance_logits"] = metadata["instance_logits"].detach()
+        result["instance_patch_ids"] = metadata["instance_patch_ids"]
+        result["instance_region_ids"] = metadata["instance_region_ids"]
+        result["instance_sample_ids"] = metadata["instance_sample_ids"]
         if self.use_attention:
             result["bag_attention"] = out["bag_attention"]
-            result["instance_logits"] = metadata["instance_logits"].detach()
             result["instance_attention_logits"] = metadata[
                 "instance_attention_logits"
             ].detach()
-            result["instance_patch_ids"] = metadata["instance_patch_ids"]
-            result["instance_region_ids"] = metadata["instance_region_ids"]
-            result["instance_sample_ids"] = metadata["instance_sample_ids"]
         return result
 
     # ------------------------------------------------------------------

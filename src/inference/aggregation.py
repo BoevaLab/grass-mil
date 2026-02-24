@@ -99,6 +99,16 @@ def _instance_group_ids(payload: BatchPredictionPayload, *, bag_scope: str) -> L
     )
 
 
+def _maybe_group_row_indices(
+    payload: BatchPredictionPayload, *, bag_scope: str
+) -> Dict[str, List[int]]:
+    try:
+        row_group_ids = _row_group_ids(payload, bag_scope=bag_scope)
+    except ValueError:
+        return {}
+    return _group_indices(row_group_ids)
+
+
 def _sample_indices(
     indices: List[int], *, subsample_fraction: float, generator: Optional[torch.Generator]
 ) -> List[int]:
@@ -148,9 +158,6 @@ def aggregate_group_logits(
             row_sample_ids=payload.row_sample_ids,
         )
 
-    row_group_ids = _row_group_ids(payload, bag_scope=bag_scope)
-    grouped_row_indices = _group_indices(row_group_ids)
-
     aggregated_ids: List[str] = []
     aggregated_logits: List[torch.Tensor] = []
     aggregated_targets: List[torch.Tensor] = []
@@ -167,6 +174,7 @@ def aggregate_group_logits(
             "Mismatch between bag_ids and attention rows for aggregation: "
             f"{len(payload.bag_ids)} ids vs {len(payload.bag_attention)} attention rows."
         )
+    grouped_row_indices = _maybe_group_row_indices(payload, bag_scope=bag_scope)
 
     if mode == "attention_weighted":
         if payload.instance_attention_logits is None:
@@ -222,7 +230,43 @@ def aggregate_group_logits(
                 aggregated_row_sample_ids.append(
                     bag_id if bag_scope == "sample" else None
                 )
+    elif payload.instance_logits is not None:
+        instance_group_ids = _instance_group_ids(payload, bag_scope=bag_scope)
+        grouped_instance_indices = _group_indices(instance_group_ids)
+        for bag_id in sorted(grouped_instance_indices):
+            indices = grouped_instance_indices[bag_id]
+            idx = torch.tensor(indices, dtype=torch.long)
+            instance_logits = payload.instance_logits.index_select(0, idx)
+            agg_logits = _aggregate_rows(instance_logits, mode=mode)
+            aggregated_ids.append(bag_id)
+            aggregated_logits.append(agg_logits)
+
+            row_indices = grouped_row_indices.get(bag_id, [])
+            if row_indices:
+                aggregated_row_region_ids.append(
+                    payload.row_region_ids[row_indices[0]]
+                    if payload.row_region_ids is not None
+                    else None
+                )
+                aggregated_row_sample_ids.append(
+                    payload.row_sample_ids[row_indices[0]]
+                    if payload.row_sample_ids is not None
+                    else None
+                )
+                if payload.bag_targets is not None:
+                    target_idx = torch.tensor(row_indices, dtype=torch.long)
+                    bag_targets = payload.bag_targets.index_select(0, target_idx)
+                    aggregated_targets.append(bag_targets[:1])
+            else:
+                aggregated_row_region_ids.append(
+                    bag_id if bag_scope == "region" else None
+                )
+                aggregated_row_sample_ids.append(
+                    bag_id if bag_scope == "sample" else None
+                )
     else:
+        row_group_ids = _row_group_ids(payload, bag_scope=bag_scope)
+        grouped_row_indices = _group_indices(row_group_ids)
         for bag_id in sorted(grouped_row_indices):
             indices = grouped_row_indices[bag_id]
             idx = torch.tensor(indices, dtype=torch.long)
@@ -254,7 +298,9 @@ def aggregate_group_logits(
                 bag_targets = payload.bag_targets.index_select(0, idx)
                 aggregated_targets.append(bag_targets[:1])
 
-    target_tensor = torch.cat(aggregated_targets, dim=0) if aggregated_targets else None
+    target_tensor = None
+    if aggregated_targets and len(aggregated_targets) == len(aggregated_ids):
+        target_tensor = torch.cat(aggregated_targets, dim=0)
     aggregated_attention: Optional[List[Optional[torch.Tensor]]] = None
     if aggregated_attention_rows:
         aggregated_attention = aggregated_attention_rows
