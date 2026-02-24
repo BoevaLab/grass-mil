@@ -11,6 +11,7 @@ The suite extends checkpoint evaluation with:
 - task-aware metrics for categorical/regression/survival tasks
 - graph embedding export for downstream interpretability workflows
 - optional node embedding export with bag-id mapping
+- single-pass collection for predictions + embeddings (no second dataloader pass)
 
 ## CLI Entry Point
 
@@ -42,8 +43,16 @@ Sub-config groups:
   via `aggregation.subsample_seed`
 - this path applies to aggregation modes `mean`, `max`, and `attention_weighted`
   while avoiding post-aggregation double subsampling
+- if subsampling is requested but cannot be effectively applied preforward
+  (for example, `identity` sampler or `runtime.enabled=false`), inference fails
+  fast with a remediation error
 - `aggregation.subsample_fraction=1.0` disables subsampling and keeps full usage
 - `aggregation.subsample_fraction=0.0` is invalid
+
+Inference summary metadata includes:
+
+- `aggregation.preforward_subsampling_applied` (backward-compatible bool)
+- `aggregation.preforward_subsampling` (structured decision payload)
 
 ## Output Schema
 
@@ -99,7 +108,8 @@ Quick run summary with artifact paths and row count.
 
 High-value legacy utilities from `working_version` are mapped as:
 
-- prediction collectors (`collect_predict_for_all_nodes*`) -> `src/inference/collectors.py`
+- prediction collectors (`collect_predict_for_all_nodes*`) -> unified
+  `collect_inference_payload` in `src/inference/collectors.py`
 - full-graph aggregation (`full_graph_*`) -> `src/inference/aggregation.py`
 - evaluation metrics (`graph_*_evaluate_fn`) -> `src/inference/metrics.py`
 - embedding collectors -> `src/inference/collectors.py` + `src/inference/embeddings.py`

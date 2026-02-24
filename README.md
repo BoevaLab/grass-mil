@@ -83,7 +83,7 @@ python src/eval.py \
 | Supervised MIL attention | `task=finetune_mil` | `model=supervised_module` | `src/train.py` | Attention-weighted bag logits (+ optional MIL auxiliary terms) |
 | SSL pretraining (BGRL) | `task=pretrain_bgrl` | `model=bgrl_module` | `src/train.py` | BGRL-pretrained encoder checkpoint |
 | Checkpoint evaluation | any compatible task/model | matching training stack | `src/eval.py` | Test metrics from selected checkpoint |
-| Advanced prediction (Python API) | compatible with `SupervisedModule.predict_step` | `model=supervised_module` | `Trainer.predict(...)` | `bag_ids`, `bag_logits`, optional `bag_targets`, optional `bag_attention` |
+| Advanced prediction (Python API) | compatible with `SupervisedModule.predict_step` | `model=supervised_module` | `Trainer.predict(...)` | `bag_ids`, `bag_logits`, `row_region_ids`, `row_sample_ids`, optional `bag_targets`, optional `bag_attention`, optional `instance_*`, optional `embedding_*` |
 
 ## Required Inputs (Manifest Summary)
 

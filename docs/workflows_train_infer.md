@@ -472,6 +472,9 @@ python src/inference/predict.py \
   embeddings.extract_node=false
 ```
 
+Internally, this utility performs a single `trainer.predict(...)` pass and
+collects prediction + embedding payloads together.
+
 By default this writes:
 
 - prediction table: `${paths.output_dir}/${predict.output_subdir}/${output.predictions_filename}`
@@ -522,6 +525,9 @@ preds = trainer.predict(
 # - bag_logits
 # - bag_targets (if present in batch)
 # - bag_attention (MIL mode)
+# - row_region_ids / row_sample_ids
+# - instance_* fields (when instance payload emission is enabled)
+# - embedding_* fields (when embedding payload emission is enabled)
 print(preds[0].keys())
 ```
 
@@ -529,8 +535,14 @@ Expected fields from `predict_step`:
 
 - `bag_ids`
 - `bag_logits`
+- `row_region_ids`
+- `row_sample_ids`
 - optional `bag_targets` (if labels present)
 - optional `bag_attention` (when MIL aggregation is active)
+- optional `instance_logits`, `instance_patch_ids`, `instance_region_ids`, `instance_sample_ids`
+- optional `instance_attention_logits` (MIL + instance payload enabled)
+- optional `embedding_bag_ids`, `graph_embeddings`, `embedding_bag_counts`
+- optional `node_embeddings`, `node_bag_ids` (when node embedding extraction enabled)
 
 ## 5) Anything Else This Repo Can Do
 
@@ -567,6 +579,50 @@ python src/train.py \
 ```
 
 When `data.val_sampler=null`, validation reuses `data.sampler`.
+
+## 5.2) Validation Sampling And Epoch Metric Semantics
+
+Validation behavior is split between step-level logging and epoch-end
+aggregation:
+
+- `validation_step(...)` computes region loss on each batch and logs
+  `val/loss` with `on_step=true` and `on_epoch=true`.
+- Validation predictions/metadata are buffered across the epoch.
+- `on_validation_epoch_end(...)` rebuilds a full validation payload (across
+  distributed ranks when DDP is active), then re-aggregates at
+  `bag_scope='region'`.
+- Aggregation mode at validation epoch-end is:
+  - `attention_weighted` when `task.aggregation=mil_attention`
+  - `mean` otherwise
+- Validation epoch-end aggregation always uses full instance usage
+  (`subsample_fraction=1.0`).
+- Final task metrics are logged once per epoch from aggregated region-level
+  outputs:
+  - binary/categorical: `val/acc`
+  - regression: `val/mae`, `val/rmse`, `val/r2`
+  - survival: `val/c_index`
+
+Practical implications:
+
+- If you want validation sampling behavior different from training, configure
+  `data.val_sampler.*` explicitly.
+- If `data.val_sampler` is not set, validation inherits `data.sampler`.
+- Validation metrics are region-aggregated epoch metrics; batch-level
+  `val/loss` can diverge from the final epoch metric trend.
+
+Example: keep training weighted root sampling, but validate with deterministic,
+non-proportional sampling.
+
+```bash
+python src/train.py \
+  data.sampler.runtime.proportional_root_sampling=true \
+  data.val_sampler.name=shadow_custom \
+  data.val_sampler.kwargs="{}" \
+  data.val_sampler.runtime.enabled=true \
+  data.val_sampler.runtime.proportional_root_sampling=false \
+  data.val_sampler.runtime.shuffle_subgraphs=false \
+  data.val_sampler.runtime.subsample_fraction=1.0
+```
 
 ## 6) Optional Smoke Validation Commands
 
