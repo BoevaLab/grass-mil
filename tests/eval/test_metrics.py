@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import torch
 from omegaconf import OmegaConf
+from sklearn.metrics import roc_auc_score
 
 from src.inference.metrics import compute_task_metrics
 from src.inference.schemas import BatchPredictionPayload
@@ -73,3 +74,19 @@ def test_compute_categorical_metrics() -> None:
     assert "recall" in metrics["global"]
     assert "f1" in metrics["global"]
     assert "a" in metrics["per_group"]
+
+
+def test_compute_binary_metrics_matches_sklearn_auc_with_ties() -> None:
+    payload = BatchPredictionPayload(
+        bag_ids=["a", "b", "c", "d"],
+        bag_logits=torch.tensor([[0.0], [0.0], [-1.0], [2.0]]),
+        bag_targets=torch.tensor([[1.0], [0.0], [0.0], [1.0]]),
+        bag_attention=None,
+    )
+    cfg = OmegaConf.create({"categorical": {"threshold": 0.5}, "per_group": False})
+    metrics = compute_task_metrics(payload=payload, target_type="binary", metrics_cfg=cfg)
+    expected = roc_auc_score(
+        payload.bag_targets.view(-1).numpy(),
+        torch.sigmoid(payload.bag_logits).view(-1).numpy(),
+    )
+    assert metrics["global"]["roc_auc"] == expected

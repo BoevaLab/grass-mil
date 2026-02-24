@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 
 import torch
 from omegaconf import DictConfig
+from sklearn.metrics import roc_auc_score
 
 from src.inference.schemas import BatchPredictionPayload
 
@@ -16,21 +17,13 @@ def _safe_div(num: float, den: float) -> float:
 
 
 def _binary_roc_auc(scores: torch.Tensor, labels: torch.Tensor) -> float:
-    labels = labels.long().view(-1)
-    scores = scores.float().view(-1)
-    pos_mask = labels == 1
-    neg_mask = labels == 0
-    n_pos = int(pos_mask.sum().item())
-    n_neg = int(neg_mask.sum().item())
-    if n_pos == 0 or n_neg == 0:
+    y_true = labels.long().view(-1).detach().cpu().numpy()
+    y_score = scores.float().view(-1).detach().cpu().numpy()
+    try:
+        return float(roc_auc_score(y_true, y_score))
+    except ValueError:
+        # Preserve previous behavior when only one class is present.
         return float("nan")
-
-    sorted_idx = torch.argsort(scores, stable=True)
-    ranks = torch.empty_like(sorted_idx, dtype=torch.float)
-    ranks[sorted_idx] = torch.arange(1, scores.numel() + 1, dtype=torch.float)
-    pos_rank_sum = ranks[pos_mask].sum().item()
-    u_stat = pos_rank_sum - (n_pos * (n_pos + 1)) / 2.0
-    return float(u_stat / (n_pos * n_neg))
 
 
 def _classification_binary(
