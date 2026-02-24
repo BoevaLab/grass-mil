@@ -42,10 +42,10 @@ def infer_encoder_input_dim(module: L.LightningModule, fallback: int = 0) -> int
 
 def validate_task_config(task_cfg: Dict[str, Any]) -> None:
     target_type = task_cfg.get("target_type", "binary")
-    if target_type not in {"binary", "regression", "survival"}:
+    if target_type not in {"binary", "categorical", "regression", "survival"}:
         raise ValueError(
             f"Unsupported task.target_type='{target_type}'. "
-            "Expected one of: binary, regression, survival."
+            "Expected one of: binary, categorical, regression, survival."
         )
     instance_sampling = task_cfg.get("instance_sampling", "all")
     if instance_sampling not in {"all", "random"}:

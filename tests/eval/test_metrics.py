@@ -48,3 +48,28 @@ def test_compute_survival_metrics() -> None:
     cfg = OmegaConf.create({"categorical": {"threshold": 0.5}, "per_group": False})
     metrics = compute_task_metrics(payload=payload, target_type="survival", metrics_cfg=cfg)
     assert "c_index" in metrics["global"]
+
+
+def test_compute_categorical_metrics() -> None:
+    payload = BatchPredictionPayload(
+        bag_ids=["a", "b", "c", "d"],
+        bag_logits=torch.tensor(
+            [
+                [4.0, 0.1, -1.0],
+                [0.1, 3.0, 0.2],
+                [-0.2, 0.1, 2.5],
+                [0.5, 1.5, 0.2],
+            ]
+        ),
+        bag_targets=torch.tensor([0, 1, 2, 1]),
+        bag_attention=None,
+    )
+    cfg = OmegaConf.create({"categorical": {"threshold": 0.5}, "per_group": True})
+    metrics = compute_task_metrics(
+        payload=payload, target_type="categorical", metrics_cfg=cfg
+    )
+    assert "accuracy" in metrics["global"]
+    assert "precision" in metrics["global"]
+    assert "recall" in metrics["global"]
+    assert "f1" in metrics["global"]
+    assert "a" in metrics["per_group"]

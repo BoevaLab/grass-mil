@@ -20,6 +20,7 @@ def test_compute_supervised_loss_routes():
     from src.models.components.losses import (
         CoxSGDLoss,
         WeightedBCEWithLogitsLoss,
+        WeightedCrossEntropyLoss,
         WeightedMSELoss,
     )
     from src.models.training.loss_utils import compute_supervised_loss
@@ -42,6 +43,15 @@ def test_compute_supervised_loss_routes():
     )
     assert mse.ndim == 0
 
+    ce = compute_supervised_loss(
+        loss_fn=WeightedCrossEntropyLoss(),
+        task_cfg={"target_type": "categorical"},
+        bag_logits=torch.randn(5, 3),
+        bag_targets=torch.tensor([[0], [1], [2], [1], [0]], dtype=torch.long),
+        bag_weights=torch.ones(5),
+    )
+    assert ce.ndim == 0
+
     cox = compute_supervised_loss(
         loss_fn=CoxSGDLoss(),
         task_cfg={"target_type": "survival"},
@@ -56,6 +66,41 @@ def test_compute_supervised_loss_routes():
         bag_weights=None,
     )
     assert cox.ndim == 0
+
+
+def test_validate_task_config_accepts_categorical():
+    from src.models.training.builders import validate_task_config
+
+    validate_task_config({"target_type": "categorical", "instance_sampling": "all"})
+
+
+def test_supervised_module_logs_categorical_accuracy():
+    pytest.importorskip("lightning")
+    from src.models.supervised_module import SupervisedModule
+
+    module = SupervisedModule(
+        encoder={},
+        graph_head={},
+        loss={},
+        optim={},
+        task={"aggregation": "mean", "target_type": "categorical"},
+    )
+
+    logged = {}
+
+    def _capture_log(name, value, **kwargs):
+        logged[name] = (value, kwargs)
+
+    module.log = _capture_log  # type: ignore[method-assign]
+    module._log_stage_metrics(
+        stage="val",
+        loss_value=torch.tensor(0.2),
+        bag_logits=torch.tensor(
+            [[5.0, 1.0, -1.0], [-2.0, 0.2, 3.0], [0.1, 0.2, 0.3]]
+        ),
+        bag_targets=torch.tensor([0, 2, 1]),
+    )
+    assert "val/acc" in logged
 
 
 def test_attention_bag_aggregation_shapes():

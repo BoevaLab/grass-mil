@@ -12,6 +12,7 @@ from .training import (
     build_supervised_components,
     compute_aux_node_loss,
     compute_binary_accuracy,
+    compute_categorical_accuracy,
     compute_entropy_regularization,
     compute_supervised_loss,
     extract_bag_ids,
@@ -566,6 +567,15 @@ class SupervisedModule(L.LightningModule):
                 )
         if self.task_cfg["target_type"] == "binary":
             acc = compute_binary_accuracy(bag_logits, bag_targets)
+            self.log(
+                f"{stage}/acc",
+                acc,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=stage != "train",
+            )
+        elif self.task_cfg["target_type"] == "categorical":
+            acc = compute_categorical_accuracy(bag_logits, bag_targets)
             self.log(
                 f"{stage}/acc",
                 acc,
