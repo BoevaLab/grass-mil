@@ -26,7 +26,10 @@ from src.inference.io import (  # noqa: E402
     write_json,
 )
 from src.inference.metrics import compute_task_metrics  # noqa: E402
-from src.inference.schemas import BatchPredictionPayload  # noqa: E402
+from src.inference.schemas import (  # noqa: E402
+    BatchPredictionPayload,
+    PreforwardSubsamplingDecision,
+)
 from src.utils import (  # noqa: E402
     RankedLogger,
     extras,
@@ -49,28 +52,93 @@ def _needs_instance_payload(cfg: DictConfig) -> bool:
     return mode in {"mean", "max", "attention_weighted"}
 
 
-def _configure_preforward_subsampling(
+def _plan_preforward_subsampling(
     datamodule: LightningDataModule, cfg: DictConfig
-) -> bool:
-    if not bool(cfg.aggregation.enabled):
-        return False
+) -> PreforwardSubsamplingDecision:
+    aggregation_enabled = bool(cfg.aggregation.enabled)
     mode = str(cfg.aggregation.mode)
-    if not _supports_preforward_subsampling(mode):
-        return False
     subsample_fraction = float(cfg.aggregation.get("subsample_fraction", 1.0))
-    if subsample_fraction >= 1.0:
-        return False
+    subsample_seed_raw = cfg.aggregation.get("subsample_seed")
+    subsample_seed = (
+        None if subsample_seed_raw is None else int(subsample_seed_raw)
+    )
+    requested = aggregation_enabled and subsample_fraction < 1.0
+
+    if not aggregation_enabled:
+        return PreforwardSubsamplingDecision(
+            requested=False,
+            effective=False,
+            fraction=subsample_fraction,
+            seed=subsample_seed,
+            reason="aggregation_disabled",
+        )
+    if not requested:
+        return PreforwardSubsamplingDecision(
+            requested=False,
+            effective=False,
+            fraction=subsample_fraction,
+            seed=subsample_seed,
+            reason="not_requested",
+        )
+    if not _supports_preforward_subsampling(mode):
+        return PreforwardSubsamplingDecision(
+            requested=True,
+            effective=False,
+            fraction=subsample_fraction,
+            seed=subsample_seed,
+            reason="unsupported_mode",
+        )
 
     sampler_cfg = getattr(datamodule, "sampler_config", None)
     if sampler_cfg is None:
-        return False
+        return PreforwardSubsamplingDecision(
+            requested=True,
+            effective=False,
+            fraction=subsample_fraction,
+            seed=subsample_seed,
+            reason="missing_sampler_config",
+        )
+    strategy_name_raw = getattr(sampler_cfg, "name", None)
+    strategy_name = (
+        None if strategy_name_raw is None else str(strategy_name_raw).strip().lower()
+    )
+    if not strategy_name:
+        return PreforwardSubsamplingDecision(
+            requested=True,
+            effective=False,
+            fraction=subsample_fraction,
+            seed=subsample_seed,
+            reason="missing_sampler_config",
+        )
+    if strategy_name == "identity":
+        return PreforwardSubsamplingDecision(
+            requested=True,
+            effective=False,
+            fraction=subsample_fraction,
+            seed=subsample_seed,
+            reason="identity_sampler",
+            strategy_name=strategy_name,
+            runtime_enabled=None,
+        )
+
     runtime = getattr(sampler_cfg, "runtime", None)
     if runtime is None:
         runtime = {}
     runtime = dict(runtime)
+    runtime_enabled = bool(runtime.get("enabled", False))
+    if not runtime_enabled:
+        return PreforwardSubsamplingDecision(
+            requested=True,
+            effective=False,
+            fraction=subsample_fraction,
+            seed=subsample_seed,
+            reason="runtime_disabled",
+            strategy_name=strategy_name,
+            runtime_enabled=False,
+        )
+
     runtime["subsample_fraction"] = subsample_fraction
-    subsample_seed = cfg.aggregation.get("subsample_seed")
-    runtime["subsample_seed"] = None if subsample_seed is None else int(subsample_seed)
+    runtime["subsample_seed"] = subsample_seed
     sampler_cfg.runtime = runtime
 
     # Force a strategy rebuild in case setup() was invoked previously.
@@ -78,7 +146,15 @@ def _configure_preforward_subsampling(
         setattr(datamodule, "sampler_strategy", None)
     if hasattr(datamodule, "val_sampler_strategy"):
         setattr(datamodule, "val_sampler_strategy", None)
-    return True
+    return PreforwardSubsamplingDecision(
+        requested=True,
+        effective=True,
+        fraction=subsample_fraction,
+        seed=subsample_seed,
+        reason="applied",
+        strategy_name=strategy_name,
+        runtime_enabled=True,
+    )
 
 
 def _as_batch_payload(payload: Any) -> BatchPredictionPayload:
@@ -95,6 +171,20 @@ def _as_batch_payload(payload: Any) -> BatchPredictionPayload:
         instance_region_ids=getattr(payload, "instance_region_ids", None),
         instance_sample_ids=getattr(payload, "instance_sample_ids", None),
     )
+
+
+def _preforward_decision_to_dict(
+    decision: PreforwardSubsamplingDecision,
+) -> Dict[str, Any]:
+    return {
+        "requested": bool(decision.requested),
+        "effective": bool(decision.effective),
+        "fraction": float(decision.fraction),
+        "seed": decision.seed,
+        "reason": str(decision.reason),
+        "strategy_name": decision.strategy_name,
+        "runtime_enabled": decision.runtime_enabled,
+    }
 
 
 @task_wrapper
@@ -131,9 +221,19 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         base_output_dir=base_output_dir,
         output_subdir=str(cfg.predict.output_subdir),
     )
-    preforward_subsampling_applied = _configure_preforward_subsampling(
+    preforward_subsampling = _plan_preforward_subsampling(
         datamodule, cfg
     )
+    if preforward_subsampling.requested and not preforward_subsampling.effective:
+        raise ValueError(
+            "Preforward subsampling was requested via aggregation.subsample_fraction < 1.0 "
+            "but cannot be applied effectively. "
+            "Use data.sampler.name in {'shadow_native','shadow_custom'} with "
+            "data.sampler.runtime.enabled=true, or set aggregation.subsample_fraction=1.0. "
+            f"reason={preforward_subsampling.reason!r}, "
+            f"strategy={preforward_subsampling.strategy_name!r}, "
+            f"runtime_enabled={preforward_subsampling.runtime_enabled!r}."
+        )
     aggregation_metadata: Dict[str, Any] | None = None
     include_instance_payload = _needs_instance_payload(cfg)
     previous_emit_setting = getattr(model, "_predict_emit_instance_payload", None)
@@ -159,7 +259,7 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             cfg.aggregation.get("subsample_fraction", 1.0)
         )
         aggregation_subsample_seed = cfg.aggregation.get("subsample_seed")
-        if preforward_subsampling_applied:
+        if preforward_subsampling.effective:
             aggregation_subsample_fraction = 1.0
             aggregation_subsample_seed = None
         aggregated = aggregate_group_logits(
@@ -171,7 +271,10 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         )
         aggregation_metadata = dict(getattr(aggregated, "metadata", {}))
         aggregation_metadata["preforward_subsampling_applied"] = bool(
-            preforward_subsampling_applied
+            preforward_subsampling.effective
+        )
+        aggregation_metadata["preforward_subsampling"] = _preforward_decision_to_dict(
+            preforward_subsampling
         )
         pred_payload = _as_batch_payload(aggregated)
 

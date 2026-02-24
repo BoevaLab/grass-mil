@@ -10,8 +10,8 @@ from omegaconf import OmegaConf
 
 from src.inference.schemas import AggregatedPredictionPayload, BatchPredictionPayload
 from src.inference.predict import (
-    _configure_preforward_subsampling,
     _needs_instance_payload,
+    _plan_preforward_subsampling,
     predict,
 )
 from src.train import train
@@ -43,18 +43,23 @@ def test_predict_cli_smoke(cfg_train: DictConfig, cfg_predict: DictConfig, tmp_p
     assert (output_dir / "graph_embeddings.csv").exists()
 
 
-def test_configure_preforward_subsampling_injects_runtime_and_resets_strategy() -> None:
-    class _SamplerCfg:
-        def __init__(self):
-            self.runtime = {"enabled": True}
+class _SamplerCfg:
+    def __init__(self, *, name: str, runtime: dict):
+        self.name = name
+        self.runtime = runtime
 
-    class _DataModule:
-        def __init__(self):
-            self.sampler_config = _SamplerCfg()
-            self.sampler_strategy = object()
-            self.val_sampler_strategy = object()
 
-    datamodule = _DataModule()
+class _DataModule:
+    def __init__(self, *, sampler_name: str, runtime: dict):
+        self.sampler_config = _SamplerCfg(name=sampler_name, runtime=runtime)
+        self.sampler_strategy = object()
+        self.val_sampler_strategy = object()
+
+
+def test_plan_preforward_subsampling_applies_for_enabled_runtime_sampler() -> None:
+    datamodule = _DataModule(
+        sampler_name="shadow_native", runtime={"enabled": True}
+    )
     cfg = OmegaConf.create(
         {
             "aggregation": {
@@ -65,26 +70,24 @@ def test_configure_preforward_subsampling_injects_runtime_and_resets_strategy() 
             }
         }
     )
-    changed = _configure_preforward_subsampling(datamodule, cfg)
-    assert changed is True
+    decision = _plan_preforward_subsampling(datamodule, cfg)
+    assert decision.requested is True
+    assert decision.effective is True
+    assert decision.reason == "applied"
+    assert decision.strategy_name == "shadow_native"
+    assert decision.runtime_enabled is True
     assert datamodule.sampler_config.runtime["subsample_fraction"] == 0.5
     assert datamodule.sampler_config.runtime["subsample_seed"] == 123
     assert datamodule.sampler_strategy is None
     assert datamodule.val_sampler_strategy is None
 
 
-def test_configure_preforward_subsampling_noop_for_full_fraction() -> None:
-    class _SamplerCfg:
-        def __init__(self):
-            self.runtime = {"enabled": True}
-
-    class _DataModule:
-        def __init__(self):
-            self.sampler_config = _SamplerCfg()
-            self.sampler_strategy = "keep"
-            self.val_sampler_strategy = "keep_val"
-
-    datamodule = _DataModule()
+def test_plan_preforward_subsampling_not_requested_for_full_fraction() -> None:
+    datamodule = _DataModule(
+        sampler_name="shadow_native", runtime={"enabled": True}
+    )
+    datamodule.sampler_strategy = "keep"
+    datamodule.val_sampler_strategy = "keep_val"
     cfg = OmegaConf.create(
         {
             "aggregation": {
@@ -95,11 +98,71 @@ def test_configure_preforward_subsampling_noop_for_full_fraction() -> None:
             }
         }
     )
-    changed = _configure_preforward_subsampling(datamodule, cfg)
-    assert changed is False
+    decision = _plan_preforward_subsampling(datamodule, cfg)
+    assert decision.requested is False
+    assert decision.effective is False
+    assert decision.reason == "not_requested"
     assert "subsample_fraction" not in datamodule.sampler_config.runtime
     assert datamodule.sampler_strategy == "keep"
     assert datamodule.val_sampler_strategy == "keep_val"
+
+
+def test_plan_preforward_subsampling_identity_sampler_is_ineffective() -> None:
+    datamodule = _DataModule(sampler_name="identity", runtime={"enabled": True})
+    cfg = OmegaConf.create(
+        {
+            "aggregation": {
+                "enabled": True,
+                "mode": "mean",
+                "subsample_fraction": 0.5,
+                "subsample_seed": 7,
+            }
+        }
+    )
+    decision = _plan_preforward_subsampling(datamodule, cfg)
+    assert decision.requested is True
+    assert decision.effective is False
+    assert decision.reason == "identity_sampler"
+    assert decision.strategy_name == "identity"
+    assert decision.runtime_enabled is None
+
+
+def test_plan_preforward_subsampling_runtime_disabled_is_ineffective() -> None:
+    datamodule = _DataModule(sampler_name="shadow_custom", runtime={"enabled": False})
+    cfg = OmegaConf.create(
+        {
+            "aggregation": {
+                "enabled": True,
+                "mode": "max",
+                "subsample_fraction": 0.5,
+                "subsample_seed": 11,
+            }
+        }
+    )
+    decision = _plan_preforward_subsampling(datamodule, cfg)
+    assert decision.requested is True
+    assert decision.effective is False
+    assert decision.reason == "runtime_disabled"
+    assert decision.strategy_name == "shadow_custom"
+    assert decision.runtime_enabled is False
+
+
+def test_plan_preforward_subsampling_unsupported_mode_is_ineffective() -> None:
+    datamodule = _DataModule(sampler_name="shadow_native", runtime={"enabled": True})
+    cfg = OmegaConf.create(
+        {
+            "aggregation": {
+                "enabled": True,
+                "mode": "none",
+                "subsample_fraction": 0.5,
+                "subsample_seed": 5,
+            }
+        }
+    )
+    decision = _plan_preforward_subsampling(datamodule, cfg)
+    assert decision.requested is True
+    assert decision.effective is False
+    assert decision.reason == "unsupported_mode"
 
 
 @pytest.mark.parametrize(
@@ -115,6 +178,162 @@ def test_configure_preforward_subsampling_noop_for_full_fraction() -> None:
 def test_needs_instance_payload(cfg_dict, expected) -> None:
     cfg = OmegaConf.create(cfg_dict)
     assert _needs_instance_payload(cfg) is expected
+
+
+def test_predict_raises_when_preforward_subsampling_is_requested_but_ineffective(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import src.inference.predict as predict_module
+
+    datamodule = _DataModule(sampler_name="identity", runtime={"enabled": True})
+
+    def _fake_instantiate(cfg, *args, **kwargs):
+        target = cfg.get("_target_")
+        if target == "fake.DataModule":
+            return datamodule
+        if target == "fake.Model":
+            return object()
+        if target == "fake.Trainer":
+            return object()
+        raise AssertionError(f"Unexpected instantiate target: {target}")
+
+    monkeypatch.setattr(predict_module.hydra.utils, "instantiate", _fake_instantiate)
+    monkeypatch.setattr(predict_module, "instantiate_loggers", lambda cfg: [])
+    monkeypatch.setattr(predict_module, "log_hyperparameters", lambda obj: None)
+
+    cfg = OmegaConf.create(
+        {
+            "ckpt_path": "dummy.ckpt",
+            "data": {"_target_": "fake.DataModule"},
+            "model": {"_target_": "fake.Model"},
+            "trainer": {"_target_": "fake.Trainer"},
+            "logger": None,
+            "paths": {"output_dir": str(tmp_path)},
+            "predict": {
+                "save_predictions": False,
+                "save_metrics": False,
+                "include_targets": False,
+                "include_attention": False,
+                "output_subdir": "predict_artifacts",
+            },
+            "output": {
+                "predictions_filename": "predictions.csv",
+                "metrics_filename": "metrics.json",
+                "summary_filename": "inference_summary.json",
+            },
+            "aggregation": {
+                "enabled": True,
+                "mode": "mean",
+                "bag_scope": "region",
+                "subsample_fraction": 0.5,
+                "subsample_seed": 17,
+            },
+            "metrics": {"enabled": False, "per_group": False, "categorical": {"threshold": 0.5}},
+            "embeddings": {"enabled": False, "save": False, "extract_node": False},
+            "task": {"target_type": "binary"},
+        }
+    )
+    with pytest.raises(ValueError, match="Preforward subsampling was requested"):
+        predict(cfg)
+
+
+def test_predict_disables_post_subsampling_only_when_preforward_is_effective(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import src.inference.predict as predict_module
+
+    datamodule = _DataModule(sampler_name="shadow_native", runtime={"enabled": True})
+    captured = {}
+
+    def _fake_instantiate(cfg, *args, **kwargs):
+        target = cfg.get("_target_")
+        if target == "fake.DataModule":
+            return datamodule
+        if target == "fake.Model":
+            return object()
+        if target == "fake.Trainer":
+            return object()
+        raise AssertionError(f"Unexpected instantiate target: {target}")
+
+    def _fake_aggregate(payload, **kwargs):
+        captured.update(kwargs)
+        return AggregatedPredictionPayload(
+            bag_ids=["r0"],
+            bag_logits=OmegaConf.create([[1.0]]),  # type: ignore[arg-type]
+            bag_targets=None,
+            bag_attention=None,
+            metadata={"mode": "mean", "bag_scope": "region"},
+            row_region_ids=["r0"],
+            row_sample_ids=["s0"],
+        )
+
+    monkeypatch.setattr(predict_module.hydra.utils, "instantiate", _fake_instantiate)
+    monkeypatch.setattr(predict_module, "instantiate_loggers", lambda cfg: [])
+    monkeypatch.setattr(predict_module, "log_hyperparameters", lambda obj: None)
+    monkeypatch.setattr(
+        predict_module,
+        "collect_predictions",
+        lambda **kwargs: BatchPredictionPayload(
+            bag_ids=["r0"],
+            bag_logits=OmegaConf.create([[1.0]]),  # type: ignore[arg-type]
+            bag_targets=None,
+            bag_attention=None,
+            row_region_ids=["r0"],
+            row_sample_ids=["s0"],
+            instance_logits=OmegaConf.create([[1.0]]),  # type: ignore[arg-type]
+            instance_attention_logits=OmegaConf.create([[1.0]]),  # type: ignore[arg-type]
+            instance_patch_ids=["p0"],
+            instance_region_ids=["r0"],
+            instance_sample_ids=["s0"],
+        ),
+    )
+    monkeypatch.setattr(predict_module, "aggregate_group_logits", _fake_aggregate)
+    monkeypatch.setattr(
+        predict_module,
+        "predictions_to_dataframe",
+        lambda payload, include_targets, include_attention: pd.DataFrame(
+            {"bag_id": ["r0"], "logit_0": [1.0]}
+        ),
+    )
+
+    cfg = OmegaConf.create(
+        {
+            "ckpt_path": "dummy.ckpt",
+            "data": {"_target_": "fake.DataModule"},
+            "model": {"_target_": "fake.Model"},
+            "trainer": {"_target_": "fake.Trainer"},
+            "logger": None,
+            "paths": {"output_dir": str(tmp_path)},
+            "predict": {
+                "save_predictions": False,
+                "save_metrics": False,
+                "include_targets": False,
+                "include_attention": False,
+                "output_subdir": "predict_artifacts",
+            },
+            "output": {
+                "predictions_filename": "predictions.csv",
+                "metrics_filename": "metrics.json",
+                "summary_filename": "inference_summary.json",
+            },
+            "aggregation": {
+                "enabled": True,
+                "mode": "mean",
+                "bag_scope": "region",
+                "subsample_fraction": 0.5,
+                "subsample_seed": 17,
+            },
+            "metrics": {"enabled": False, "per_group": False, "categorical": {"threshold": 0.5}},
+            "embeddings": {"enabled": False, "save": False, "extract_node": False},
+            "task": {"target_type": "binary"},
+        }
+    )
+    summary, _ = predict(cfg)
+
+    assert captured["subsample_fraction"] == 1.0
+    assert captured["subsample_seed"] is None
+    assert summary["aggregation"]["preforward_subsampling_applied"] is True
+    assert summary["aggregation"]["preforward_subsampling"]["effective"] is True
 
 
 def test_predict_summary_includes_aggregation_metadata(monkeypatch, tmp_path: Path) -> None:
@@ -224,6 +443,8 @@ def test_predict_summary_includes_aggregation_metadata(monkeypatch, tmp_path: Pa
     assert summary["aggregation"]["mode"] == "mean"
     assert summary["aggregation"]["bag_scope"] == "region"
     assert "preforward_subsampling_applied" in summary["aggregation"]
+    assert "preforward_subsampling" in summary["aggregation"]
+    assert summary["aggregation"]["preforward_subsampling"]["reason"] == "not_requested"
     assert captured_summary_payload["aggregation"]["mode"] == "mean"
 
 

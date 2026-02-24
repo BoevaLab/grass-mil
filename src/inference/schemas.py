@@ -44,3 +44,16 @@ class EmbeddingPayload:
     graph_embeddings: torch.Tensor
     node_embeddings: Optional[torch.Tensor]
     node_bag_ids: Optional[List[str]]
+
+
+@dataclass(frozen=True)
+class PreforwardSubsamplingDecision:
+    """Decision record for preforward subsampling orchestration."""
+
+    requested: bool
+    effective: bool
+    fraction: float
+    seed: Optional[int]
+    reason: str
+    strategy_name: Optional[str] = None
+    runtime_enabled: Optional[bool] = None
