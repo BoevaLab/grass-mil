@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -197,9 +198,9 @@ def test_predict_raises_when_preforward_subsampling_is_requested_but_ineffective
         if target == "fake.DataModule":
             return datamodule
         if target == "fake.Model":
-            return object()
+            return SimpleNamespace()
         if target == "fake.Trainer":
-            return object()
+            return SimpleNamespace()
         raise AssertionError(f"Unexpected instantiate target: {target}")
 
     monkeypatch.setattr(predict_module.hydra.utils, "instantiate", _fake_instantiate)
@@ -255,9 +256,9 @@ def test_predict_disables_post_subsampling_only_when_preforward_is_effective(
         if target == "fake.DataModule":
             return datamodule
         if target == "fake.Model":
-            return object()
+            return SimpleNamespace()
         if target == "fake.Trainer":
-            return object()
+            return SimpleNamespace()
         raise AssertionError(f"Unexpected instantiate target: {target}")
 
     def _fake_aggregate(payload, **kwargs):
@@ -357,9 +358,9 @@ def test_predict_writes_embeddings_from_single_pass_collected_payload(
         if target == "fake.DataModule":
             return datamodule
         if target == "fake.Model":
-            return object()
+            return SimpleNamespace()
         if target == "fake.Trainer":
-            return object()
+            return SimpleNamespace()
         raise AssertionError(f"Unexpected instantiate target: {target}")
 
     monkeypatch.setattr(predict_module.hydra.utils, "instantiate", _fake_instantiate)
