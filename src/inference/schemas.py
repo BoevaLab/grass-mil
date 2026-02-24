@@ -57,3 +57,33 @@ class PreforwardSubsamplingDecision:
     reason: str
     strategy_name: Optional[str] = None
     runtime_enabled: Optional[bool] = None
+
+
+@dataclass(frozen=True)
+class UnifiedPredictPayload:
+    """Raw, per-chunk payload emitted by predict_step for unified collection."""
+
+    bag_ids: List[str]
+    bag_logits: torch.Tensor
+    bag_targets: Optional[torch.Tensor]
+    bag_attention: Optional[Dict[str, torch.Tensor]]
+    row_region_ids: Optional[List[Optional[str]]] = None
+    row_sample_ids: Optional[List[Optional[str]]] = None
+    instance_logits: Optional[torch.Tensor] = None
+    instance_attention_logits: Optional[torch.Tensor] = None
+    instance_patch_ids: Optional[List[str]] = None
+    instance_region_ids: Optional[List[Optional[str]]] = None
+    instance_sample_ids: Optional[List[Optional[str]]] = None
+    embedding_bag_ids: Optional[List[str]] = None
+    graph_embeddings: Optional[torch.Tensor] = None
+    embedding_bag_counts: Optional[List[float]] = None
+    node_embeddings: Optional[torch.Tensor] = None
+    node_bag_ids: Optional[List[str]] = None
+
+
+@dataclass(frozen=True)
+class CollectedInferencePayload:
+    """Normalized payloads gathered from a single trainer.predict pass."""
+
+    prediction_payload: BatchPredictionPayload
+    embedding_payload: Optional[EmbeddingPayload]

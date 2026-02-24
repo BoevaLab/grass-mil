@@ -117,6 +117,8 @@ class SupervisedModule(L.LightningModule):
         # In inference, callers can disable instance-level payload emission to reduce
         # peak memory when aggregation only needs bag-level outputs.
         self._predict_emit_instance_payload = True
+        self._predict_emit_embeddings_payload = False
+        self._predict_emit_node_embeddings = False
         self._reset_val_epoch_buffers()
 
     # ------------------------------------------------------------------
@@ -174,7 +176,7 @@ class SupervisedModule(L.LightningModule):
     # ------------------------------------------------------------------
 
     def _forward_instances(self, batch):
-        _, graph_emb = self.encoder(
+        node_emb, graph_emb = self.encoder(
             batch.x,
             batch.edge_index,
             edge_attr=getattr(batch, "edge_attr", None),
@@ -182,7 +184,7 @@ class SupervisedModule(L.LightningModule):
             return_graph_embedding=True,
         )
         patch_logits = self.graph_head(graph_emb)
-        return patch_logits, graph_emb
+        return patch_logits, graph_emb, node_emb
 
     def _to_optional_str_list(
         self, values: Any, *, expected_length: int, field_name: str
@@ -302,6 +304,55 @@ class SupervisedModule(L.LightningModule):
             )
         return metadata
 
+    def _build_predict_embedding_payload(
+        self,
+        batch,
+        *,
+        graph_emb: torch.Tensor,
+        node_emb: torch.Tensor,
+        ordered_bag_ids: list[str],
+        bag_indices: list[list[int]],
+        include_node_embeddings: bool,
+    ) -> Dict[str, Any]:
+        bag_graph_embeddings: list[torch.Tensor] = []
+        bag_counts: list[int] = []
+        for indices in bag_indices:
+            if not indices:
+                continue
+            idx = torch.tensor(indices, dtype=torch.long, device=graph_emb.device)
+            bag_graph_embeddings.append(
+                graph_emb.index_select(0, idx).mean(dim=0, keepdim=True)
+            )
+            bag_counts.append(int(idx.numel()))
+
+        payload: Dict[str, Any] = {
+            "embedding_bag_ids": [str(v) for v in ordered_bag_ids],
+            "graph_embeddings": (
+                torch.cat(bag_graph_embeddings, dim=0)
+                if bag_graph_embeddings
+                else torch.empty((0, graph_emb.shape[-1]), device=graph_emb.device)
+            ),
+            "embedding_bag_counts": bag_counts,
+        }
+        if include_node_embeddings:
+            bag_ids = extract_bag_ids(
+                batch,
+                bag_key=self.task_cfg.get("bag_key", "region_id"),
+                bag_fallback_key=self.task_cfg.get("bag_fallback_key", "sample_id"),
+            )
+            batch_index = getattr(batch, "batch", None)
+            if batch_index is None:
+                batch_index = torch.zeros(
+                    node_emb.shape[0], dtype=torch.long, device=node_emb.device
+                )
+            node_bag_ids = [
+                str(bag_ids[int(graph_idx)])
+                for graph_idx in batch_index.detach().cpu()
+            ]
+            payload["node_embeddings"] = node_emb
+            payload["node_bag_ids"] = node_bag_ids
+        return payload
+
     def collect_graph_embeddings(
         self, batch, *, return_node_embeddings: bool = False
     ) -> Dict[str, Any]:
@@ -349,7 +400,7 @@ class SupervisedModule(L.LightningModule):
         return payload
 
     def _forward_bags(self, batch, *, allow_missing_targets: bool = False):
-        patch_logits, graph_emb = self._forward_instances(batch)
+        patch_logits, graph_emb, node_emb = self._forward_instances(batch)
 
         bag_ids = extract_bag_ids(
             batch,
@@ -398,6 +449,7 @@ class SupervisedModule(L.LightningModule):
         return {
             "patch_logits": patch_logits,
             "graph_emb": graph_emb,
+            "node_emb": node_emb,
             "bag_logits": bag_logits,
             "ordered_bag_ids": ordered_bag_ids,
             "bag_attention": bag_attention,
@@ -784,6 +836,12 @@ class SupervisedModule(L.LightningModule):
         emit_instance_payload = bool(
             getattr(self, "_predict_emit_instance_payload", True)
         )
+        emit_embeddings_payload = bool(
+            getattr(self, "_predict_emit_embeddings_payload", False)
+        )
+        emit_node_embeddings = bool(
+            getattr(self, "_predict_emit_node_embeddings", False)
+        )
         metadata = self._build_predict_group_metadata(
             batch,
             patch_logits=out["patch_logits"],
@@ -811,6 +869,21 @@ class SupervisedModule(L.LightningModule):
                 result["instance_attention_logits"] = metadata[
                     "instance_attention_logits"
                 ].detach()
+        if emit_embeddings_payload:
+            embedding_payload = self._build_predict_embedding_payload(
+                batch,
+                graph_emb=out.get("graph_emb", out["patch_logits"]),
+                node_emb=out.get("node_emb", out.get("graph_emb", out["patch_logits"])),
+                ordered_bag_ids=out["ordered_bag_ids"],
+                bag_indices=out["bag_indices"],
+                include_node_embeddings=emit_node_embeddings,
+            )
+            result["embedding_bag_ids"] = embedding_payload["embedding_bag_ids"]
+            result["graph_embeddings"] = embedding_payload["graph_embeddings"].detach()
+            result["embedding_bag_counts"] = embedding_payload["embedding_bag_counts"]
+            if emit_node_embeddings:
+                result["node_embeddings"] = embedding_payload["node_embeddings"].detach()
+                result["node_bag_ids"] = embedding_payload["node_bag_ids"]
         return result
 
     # ------------------------------------------------------------------

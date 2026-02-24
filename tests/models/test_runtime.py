@@ -395,6 +395,122 @@ def test_supervised_predict_step_can_disable_instance_payload():
     assert "instance_sample_ids" not in out
 
 
+def test_supervised_predict_step_can_emit_embedding_payload():
+    pytest.importorskip("lightning")
+    pytest.importorskip("torch_geometric")
+    from src.models.supervised_module import SupervisedModule
+
+    module = SupervisedModule(
+        encoder={},
+        graph_head={},
+        loss={},
+        optim={},
+        task={"aggregation": "mean", "target_type": "binary"},
+    )
+
+    def _forward_bags(_batch, *, allow_missing_targets=False):
+        return {
+            "patch_logits": torch.randn(4, 2),
+            "graph_emb": torch.tensor(
+                [[1.0, 1.0], [3.0, 3.0], [10.0, 10.0], [14.0, 14.0]]
+            ),
+            "node_emb": torch.tensor([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6], [0.7, 0.8]]),
+            "bag_logits": torch.randn(2, 1),
+            "ordered_bag_ids": ["b0", "b1"],
+            "bag_attention": None,
+            "bag_indices": [[0, 1], [2, 3]],
+            "bag_targets": None,
+            "bag_weights": None,
+        }
+
+    def _build_predict_group_metadata(
+        _batch,
+        *,
+        patch_logits,
+        graph_emb,
+        ordered_bag_ids,
+        bag_indices,
+        include_instance_payload=True,
+    ):
+        return {
+            "row_region_ids": ["r0", "r1"],
+            "row_sample_ids": ["s0", "s1"],
+        }
+
+    module._forward_bags = _forward_bags  # type: ignore[method-assign]
+    module._build_predict_group_metadata = _build_predict_group_metadata  # type: ignore[method-assign]
+    module._predict_emit_instance_payload = False
+    module._predict_emit_embeddings_payload = True
+    module._predict_emit_node_embeddings = True
+
+    class _Batch:
+        region_id = ["r0", "r0", "r1", "r1"]
+        sample_id = ["s0", "s0", "s1", "s1"]
+        batch = torch.tensor([0, 1, 2, 3], dtype=torch.long)
+
+    out = module.predict_step(batch=_Batch(), batch_idx=0)
+    assert out["embedding_bag_ids"] == ["b0", "b1"]
+    assert torch.allclose(out["graph_embeddings"][0], torch.tensor([2.0, 2.0]))
+    assert torch.allclose(out["graph_embeddings"][1], torch.tensor([12.0, 12.0]))
+    assert out["embedding_bag_counts"] == [2, 2]
+    assert "node_embeddings" in out
+    assert out["node_bag_ids"] == ["s0::r0", "s0::r0", "s1::r1", "s1::r1"]
+
+
+def test_supervised_predict_step_omits_embedding_payload_by_default():
+    pytest.importorskip("lightning")
+    pytest.importorskip("torch_geometric")
+    from src.models.supervised_module import SupervisedModule
+
+    module = SupervisedModule(
+        encoder={},
+        graph_head={},
+        loss={},
+        optim={},
+        task={"aggregation": "mean", "target_type": "binary"},
+    )
+
+    def _forward_bags(_batch, *, allow_missing_targets=False):
+        return {
+            "patch_logits": torch.randn(2, 1),
+            "graph_emb": torch.randn(2, 2),
+            "node_emb": torch.randn(2, 2),
+            "bag_logits": torch.randn(1, 1),
+            "ordered_bag_ids": ["b0"],
+            "bag_attention": None,
+            "bag_indices": [[0, 1]],
+            "bag_targets": None,
+            "bag_weights": None,
+        }
+
+    def _build_predict_group_metadata(
+        _batch,
+        *,
+        patch_logits,
+        graph_emb,
+        ordered_bag_ids,
+        bag_indices,
+        include_instance_payload=True,
+    ):
+        return {
+            "row_region_ids": ["r0"],
+            "row_sample_ids": ["s0"],
+        }
+
+    module._forward_bags = _forward_bags  # type: ignore[method-assign]
+    module._build_predict_group_metadata = _build_predict_group_metadata  # type: ignore[method-assign]
+    module._predict_emit_instance_payload = False
+
+    class _Batch:
+        region_id = ["r0", "r0"]
+        sample_id = ["s0", "s0"]
+
+    out = module.predict_step(batch=_Batch(), batch_idx=0)
+    assert "embedding_bag_ids" not in out
+    assert "graph_embeddings" not in out
+    assert "embedding_bag_counts" not in out
+
+
 def test_extract_bag_ids_falls_back_per_item_when_primary_missing():
     from types import SimpleNamespace
 

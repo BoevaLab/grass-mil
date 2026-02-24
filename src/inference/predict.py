@@ -12,10 +12,7 @@ from omegaconf import DictConfig
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
 from src.inference.aggregation import aggregate_group_logits  # noqa: E402
-from src.inference.collectors import (  # noqa: E402
-    collect_embeddings,
-    collect_predictions,
-)
+from src.inference.collectors import collect_inference_payload  # noqa: E402
 from src.inference.io import (  # noqa: E402
     build_summary_payload,
     embeddings_to_dataframe,
@@ -236,23 +233,59 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         )
     aggregation_metadata: Dict[str, Any] | None = None
     include_instance_payload = _needs_instance_payload(cfg)
+    include_embeddings_payload = bool(cfg.embeddings.enabled) and bool(
+        cfg.embeddings.save
+    )
+    include_node_embeddings = include_embeddings_payload and bool(
+        cfg.embeddings.extract_node
+    )
     previous_emit_setting = getattr(model, "_predict_emit_instance_payload", None)
     had_emit_setting = hasattr(model, "_predict_emit_instance_payload")
+    previous_emit_embeddings_setting = getattr(
+        model, "_predict_emit_embeddings_payload", None
+    )
+    had_emit_embeddings_setting = hasattr(model, "_predict_emit_embeddings_payload")
+    previous_emit_node_embeddings_setting = getattr(
+        model, "_predict_emit_node_embeddings", None
+    )
+    had_emit_node_embeddings_setting = hasattr(model, "_predict_emit_node_embeddings")
     setattr(model, "_predict_emit_instance_payload", include_instance_payload)
+    setattr(model, "_predict_emit_embeddings_payload", include_embeddings_payload)
+    setattr(model, "_predict_emit_node_embeddings", include_node_embeddings)
 
     try:
-        pred_payload = collect_predictions(
+        collected = collect_inference_payload(
             trainer=trainer,
             model=model,
             datamodule=datamodule,
             ckpt_path=cfg.ckpt_path,
             include_instance_payload=include_instance_payload,
+            include_embeddings=include_embeddings_payload,
+            include_node_embeddings=include_node_embeddings,
         )
     finally:
         if had_emit_setting:
             setattr(model, "_predict_emit_instance_payload", previous_emit_setting)
         else:
             delattr(model, "_predict_emit_instance_payload")
+        if had_emit_embeddings_setting:
+            setattr(
+                model,
+                "_predict_emit_embeddings_payload",
+                previous_emit_embeddings_setting,
+            )
+        else:
+            delattr(model, "_predict_emit_embeddings_payload")
+        if had_emit_node_embeddings_setting:
+            setattr(
+                model,
+                "_predict_emit_node_embeddings",
+                previous_emit_node_embeddings_setting,
+            )
+        else:
+            delattr(model, "_predict_emit_node_embeddings")
+
+    pred_payload = collected.prediction_payload
 
     if bool(cfg.aggregation.enabled):
         aggregation_subsample_fraction = float(
@@ -306,17 +339,17 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         write_json(metrics_payload, metrics_path)
 
     embeddings_path = None
-    if bool(cfg.embeddings.enabled) and bool(cfg.embeddings.save):
-        emb_payload = collect_embeddings(
-            model=model,
-            datamodule=datamodule,
-            include_node_embeddings=bool(cfg.embeddings.extract_node),
-        )
+    if include_embeddings_payload:
+        emb_payload = collected.embedding_payload
+        if emb_payload is None:
+            raise ValueError(
+                "Embeddings were requested but no embedding payload was collected."
+            )
         emb_frame = embeddings_to_dataframe(emb_payload)
         embeddings_path = output_dir / str(cfg.embeddings.filename)
         write_dataframe(emb_frame, embeddings_path)
 
-        if bool(cfg.embeddings.extract_node):
+        if include_node_embeddings:
             node_frame = node_embeddings_to_dataframe(emb_payload)
             node_path = output_dir / str(cfg.embeddings.node_filename)
             write_dataframe(node_frame, node_path)
