@@ -43,7 +43,7 @@ def _as_batch_payload(payload: Any) -> BatchPredictionPayload:
         bag_ids=list(payload.bag_ids),
         bag_logits=payload.bag_logits,
         bag_targets=payload.bag_targets,
-        bag_attention=None,
+        bag_attention=getattr(payload, "bag_attention", None),
     )
 
 

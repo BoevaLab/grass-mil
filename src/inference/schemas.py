@@ -23,6 +23,7 @@ class AggregatedPredictionPayload:
     bag_ids: List[str]
     bag_logits: torch.Tensor
     bag_targets: Optional[torch.Tensor]
+    bag_attention: Optional[Dict[str, torch.Tensor]]
     metadata: Dict[str, Any]
 
 

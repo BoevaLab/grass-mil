@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import torch
 
@@ -31,6 +31,7 @@ def aggregate_group_logits(
             bag_ids=payload.bag_ids,
             bag_logits=payload.bag_logits,
             bag_targets=payload.bag_targets,
+            bag_attention=payload.bag_attention,
             metadata={"mode": "none"},
         )
 
@@ -63,9 +64,18 @@ def aggregate_group_logits(
             aggregated_targets.append(bag_targets[:1])
 
     target_tensor = torch.cat(aggregated_targets, dim=0) if aggregated_targets else None
+    aggregated_attention: Optional[Dict[str, torch.Tensor]] = None
+    if payload.bag_attention is not None:
+        aggregated_attention = {
+            bag_id: payload.bag_attention[bag_id]
+            for bag_id in aggregated_ids
+            if bag_id in payload.bag_attention
+        } or None
+
     return AggregatedPredictionPayload(
         bag_ids=aggregated_ids,
         bag_logits=torch.cat(aggregated_logits, dim=0),
         bag_targets=target_tensor,
+        bag_attention=aggregated_attention,
         metadata={"mode": mode, "used_attention": used_attention},
     )
