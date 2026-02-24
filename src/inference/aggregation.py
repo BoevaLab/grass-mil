@@ -22,6 +22,17 @@ def _group_indices(ids: List[str]) -> Dict[str, List[int]]:
     return grouped
 
 
+def _is_missing_group_value(value: object) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        text = value.strip().lower()
+        return text in {"", "nan", "none", "null"}
+    if isinstance(value, float):
+        return value != value
+    return False
+
+
 def _normalize_group_ids(
     ids: Optional[List[Optional[str]]], *, expected_length: int, name: str
 ) -> List[str]:
@@ -35,7 +46,7 @@ def _normalize_group_ids(
         )
     normalized: List[str] = []
     for idx, value in enumerate(ids):
-        if value is None:
+        if _is_missing_group_value(value):
             raise ValueError(
                 f"Missing '{name}' at row {idx}; cannot regroup predictions for this scope."
             )
@@ -43,14 +54,54 @@ def _normalize_group_ids(
     return normalized
 
 
+def _normalize_group_ids_with_fallback(
+    primary_ids: Optional[List[Optional[str]]],
+    fallback_ids: Optional[List[Optional[str]]],
+    *,
+    expected_length: int,
+    primary_name: str,
+    fallback_name: str,
+) -> List[str]:
+    if primary_ids is None and fallback_ids is None:
+        raise ValueError(
+            f"Aggregation requires '{primary_name}' or fallback '{fallback_name}' "
+            "to regroup predictions at the requested bag scope."
+        )
+    if primary_ids is not None and len(primary_ids) != expected_length:
+        raise ValueError(
+            f"Mismatch between rows and '{primary_name}': {expected_length} rows vs "
+            f"{len(primary_ids)} ids."
+        )
+    if fallback_ids is not None and len(fallback_ids) != expected_length:
+        raise ValueError(
+            f"Mismatch between rows and '{fallback_name}': {expected_length} rows vs "
+            f"{len(fallback_ids)} ids."
+        )
+
+    resolved: List[str] = []
+    for idx in range(expected_length):
+        primary_value = primary_ids[idx] if primary_ids is not None else None
+        fallback_value = fallback_ids[idx] if fallback_ids is not None else None
+        use_fallback = _is_missing_group_value(primary_value)
+        if use_fallback and _is_missing_group_value(fallback_value):
+            raise ValueError(
+                f"Missing both '{primary_name}' and fallback '{fallback_name}' at row {idx}; "
+                "cannot regroup predictions for this scope."
+            )
+        resolved.append(str(fallback_value if use_fallback else primary_value))
+    return resolved
+
+
 def _row_group_ids(payload: BatchPredictionPayload, *, bag_scope: str) -> List[str]:
     if bag_scope == "patch":
         return [str(v) for v in payload.bag_ids]
     if bag_scope == "region":
-        return _normalize_group_ids(
+        return _normalize_group_ids_with_fallback(
             payload.row_region_ids,
+            payload.row_sample_ids,
             expected_length=len(payload.bag_ids),
-            name="row_region_ids",
+            primary_name="row_region_ids",
+            fallback_name="row_sample_ids",
         )
     if bag_scope == "sample":
         return _normalize_group_ids(
@@ -83,10 +134,12 @@ def _instance_group_ids(payload: BatchPredictionPayload, *, bag_scope: str) -> L
             )
         return [str(v) for v in patch_ids]
     if bag_scope == "region":
-        return _normalize_group_ids(
+        return _normalize_group_ids_with_fallback(
             payload.instance_region_ids,
+            payload.instance_sample_ids,
             expected_length=n_instances,
-            name="instance_region_ids",
+            primary_name="instance_region_ids",
+            fallback_name="instance_sample_ids",
         )
     if bag_scope == "sample":
         return _normalize_group_ids(

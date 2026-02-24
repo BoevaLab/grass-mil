@@ -113,6 +113,54 @@ def test_aggregate_group_logits_region_max_uses_instance_logits() -> None:
     assert torch.allclose(out.bag_logits[0], torch.tensor([9.0]))
 
 
+def test_aggregate_group_logits_region_scope_falls_back_to_sample_ids_for_rows() -> None:
+    payload = BatchPredictionPayload(
+        bag_ids=["p0", "p1", "p2"],
+        bag_logits=torch.tensor([[1.0], [3.0], [8.0]]),
+        bag_targets=None,
+        bag_attention=None,
+        row_region_ids=[None, "", "r1"],
+        row_sample_ids=["s0", "s0", "s1"],
+    )
+    out = aggregate_group_logits(payload, mode="mean", bag_scope="region")
+    assert out.bag_ids == ["r1", "s0"]
+    assert torch.allclose(out.bag_logits[0], torch.tensor([8.0]))
+    assert torch.allclose(out.bag_logits[1], torch.tensor([2.0]))
+
+
+def test_aggregate_group_logits_region_scope_falls_back_to_sample_ids_for_instances() -> None:
+    payload = BatchPredictionPayload(
+        bag_ids=["chunk_a", "chunk_b"],
+        bag_logits=torch.tensor([[5.0], [2.0]]),
+        bag_targets=None,
+        bag_attention=None,
+        row_region_ids=[None, "rB"],
+        row_sample_ids=["sA", "sB"],
+        instance_logits=torch.tensor([[1.0], [9.0], [3.0]]),
+        instance_attention_logits=None,
+        instance_patch_ids=["chunk_a", "chunk_a", "chunk_b"],
+        instance_region_ids=[None, "", "rB"],
+        instance_sample_ids=["sA", "sA", "sB"],
+    )
+    out = aggregate_group_logits(payload, mode="mean", bag_scope="region")
+    assert out.bag_ids == ["rB", "sA"]
+    assert torch.allclose(out.bag_logits[0], torch.tensor([3.0]))
+    assert torch.allclose(out.bag_logits[1], torch.tensor([5.0]))
+
+
+def test_aggregate_group_logits_region_scope_raises_when_region_and_sample_missing() -> None:
+    payload = BatchPredictionPayload(
+        bag_ids=["p0"],
+        bag_logits=torch.tensor([[1.0]]),
+        bag_targets=None,
+        bag_attention=None,
+        row_region_ids=[None],
+        row_sample_ids=[None],
+    )
+    with pytest.raises(ValueError, match="Missing both 'row_region_ids' and fallback 'row_sample_ids'"):
+        aggregate_group_logits(payload, mode="mean", bag_scope="region")
+
+
 def test_aggregate_group_logits_sample_scope_uses_instance_logits() -> None:
     payload = BatchPredictionPayload(
         bag_ids=["chunk_a", "chunk_b", "chunk_c"],
