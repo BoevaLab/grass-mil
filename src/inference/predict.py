@@ -42,6 +42,13 @@ def _supports_preforward_subsampling(mode: str) -> bool:
     return mode in {"mean", "max", "attention_weighted"}
 
 
+def _needs_instance_payload(cfg: DictConfig) -> bool:
+    if not bool(cfg.aggregation.enabled):
+        return False
+    mode = str(cfg.aggregation.mode)
+    return mode in {"mean", "max", "attention_weighted"}
+
+
 def _configure_preforward_subsampling(
     datamodule: LightningDataModule, cfg: DictConfig
 ) -> bool:
@@ -124,13 +131,24 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         datamodule, cfg
     )
     aggregation_metadata: Dict[str, Any] | None = None
+    include_instance_payload = _needs_instance_payload(cfg)
+    previous_emit_setting = getattr(model, "_predict_emit_instance_payload", None)
+    had_emit_setting = hasattr(model, "_predict_emit_instance_payload")
+    setattr(model, "_predict_emit_instance_payload", include_instance_payload)
 
-    pred_payload = collect_predictions(
-        trainer=trainer,
-        model=model,
-        datamodule=datamodule,
-        ckpt_path=cfg.ckpt_path,
-    )
+    try:
+        pred_payload = collect_predictions(
+            trainer=trainer,
+            model=model,
+            datamodule=datamodule,
+            ckpt_path=cfg.ckpt_path,
+            include_instance_payload=include_instance_payload,
+        )
+    finally:
+        if had_emit_setting:
+            setattr(model, "_predict_emit_instance_payload", previous_emit_setting)
+        else:
+            delattr(model, "_predict_emit_instance_payload")
 
     if bool(cfg.aggregation.enabled):
         aggregation_subsample_fraction = float(

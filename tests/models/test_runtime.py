@@ -332,6 +332,69 @@ def test_supervised_predict_step_allows_missing_targets():
     assert "bag_targets" not in out
 
 
+def test_supervised_predict_step_can_disable_instance_payload():
+    pytest.importorskip("lightning")
+    pytest.importorskip("torch_geometric")
+    from src.models.supervised_module import SupervisedModule
+
+    module = SupervisedModule(
+        encoder={},
+        graph_head={},
+        loss={},
+        optim={},
+        task={"aggregation": "mean", "target_type": "binary"},
+    )
+
+    def _forward_bags(_batch, *, allow_missing_targets=False):
+        return {
+            "patch_logits": torch.randn(4, 1),
+            "bag_logits": torch.randn(2, 1),
+            "ordered_bag_ids": ["b0", "b1"],
+            "bag_attention": None,
+            "bag_indices": [[0, 1], [2, 3]],
+            "bag_targets": None,
+            "bag_weights": None,
+        }
+
+    captured = {"include_instance_payload": None}
+
+    def _build_predict_group_metadata(
+        _batch,
+        *,
+        patch_logits,
+        graph_emb,
+        ordered_bag_ids,
+        bag_indices,
+        include_instance_payload=True,
+    ):
+        captured["include_instance_payload"] = include_instance_payload
+        payload = {
+            "row_region_ids": ["r0", "r1"],
+            "row_sample_ids": ["s0", "s1"],
+        }
+        if include_instance_payload:
+            payload.update(
+                {
+                    "instance_logits": torch.randn(4, 1),
+                    "instance_patch_ids": ["p0", "p1", "p2", "p3"],
+                    "instance_region_ids": ["r0", "r0", "r1", "r1"],
+                    "instance_sample_ids": ["s0", "s0", "s1", "s1"],
+                }
+            )
+        return payload
+
+    module._forward_bags = _forward_bags  # type: ignore[method-assign]
+    module._build_predict_group_metadata = _build_predict_group_metadata  # type: ignore[method-assign]
+    module._predict_emit_instance_payload = False
+
+    out = module.predict_step(batch=None, batch_idx=0)
+    assert captured["include_instance_payload"] is False
+    assert "instance_logits" not in out
+    assert "instance_patch_ids" not in out
+    assert "instance_region_ids" not in out
+    assert "instance_sample_ids" not in out
+
+
 def test_extract_bag_ids_falls_back_per_item_when_primary_missing():
     from types import SimpleNamespace
 

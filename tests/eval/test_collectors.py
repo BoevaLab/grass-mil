@@ -129,6 +129,35 @@ def test_collect_predictions_accepts_instance_logits_without_attention_logits() 
     assert payload.instance_sample_ids == ["sample_a", "sample_a", "sample_b"]
 
 
+def test_collect_predictions_can_skip_instance_payload_collection() -> None:
+    outputs = [
+        {
+            "bag_ids": ["region_1"],
+            "bag_logits": torch.tensor([[1.0]]),
+            "row_region_ids": ["region_1"],
+            "row_sample_ids": ["sample_a"],
+            # Intentionally malformed instance payload to ensure collector ignores it.
+            "instance_logits": torch.tensor([[1.0], [2.0]]),
+            "instance_patch_ids": ["patch_1"],
+            "instance_region_ids": ["region_1"],
+            "instance_sample_ids": ["sample_a"],
+        }
+    ]
+    trainer = _FakeTrainer(outputs)
+    payload = collect_predictions(
+        trainer=trainer,  # type: ignore[arg-type]
+        model=None,  # type: ignore[arg-type]
+        datamodule=None,  # type: ignore[arg-type]
+        ckpt_path=None,
+        include_instance_payload=False,
+    )
+    assert payload.bag_logits.shape == (1, 1)
+    assert payload.instance_logits is None
+    assert payload.instance_patch_ids is None
+    assert payload.instance_region_ids is None
+    assert payload.instance_sample_ids is None
+
+
 def test_collect_predictions_raises_for_inconsistent_target_presence() -> None:
     outputs = [
         {

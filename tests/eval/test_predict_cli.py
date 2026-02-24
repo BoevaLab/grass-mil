@@ -9,7 +9,11 @@ from omegaconf import DictConfig, open_dict
 from omegaconf import OmegaConf
 
 from src.inference.schemas import AggregatedPredictionPayload, BatchPredictionPayload
-from src.inference.predict import _configure_preforward_subsampling, predict
+from src.inference.predict import (
+    _configure_preforward_subsampling,
+    _needs_instance_payload,
+    predict,
+)
 from src.train import train
 
 
@@ -92,6 +96,21 @@ def test_configure_preforward_subsampling_noop_for_full_fraction() -> None:
     assert changed is False
     assert "subsample_fraction" not in datamodule.sampler_config.runtime
     assert datamodule.sampler_strategy == "keep"
+
+
+@pytest.mark.parametrize(
+    ("cfg_dict", "expected"),
+    [
+        ({"aggregation": {"enabled": False, "mode": "mean"}}, False),
+        ({"aggregation": {"enabled": True, "mode": "none"}}, False),
+        ({"aggregation": {"enabled": True, "mode": "mean"}}, True),
+        ({"aggregation": {"enabled": True, "mode": "max"}}, True),
+        ({"aggregation": {"enabled": True, "mode": "attention_weighted"}}, True),
+    ],
+)
+def test_needs_instance_payload(cfg_dict, expected) -> None:
+    cfg = OmegaConf.create(cfg_dict)
+    assert _needs_instance_payload(cfg) is expected
 
 
 def test_predict_summary_includes_aggregation_metadata(monkeypatch, tmp_path: Path) -> None:

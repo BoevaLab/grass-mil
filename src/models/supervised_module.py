@@ -114,6 +114,9 @@ class SupervisedModule(L.LightningModule):
 
         self._region_total_loss_buffer: list[torch.Tensor] = []
         self._manual_optimizer_steps = 0
+        # In inference, callers can disable instance-level payload emission to reduce
+        # peak memory when aggregation only needs bag-level outputs.
+        self._predict_emit_instance_payload = True
         self._reset_val_epoch_buffers()
 
     # ------------------------------------------------------------------
@@ -224,6 +227,7 @@ class SupervisedModule(L.LightningModule):
         graph_emb: torch.Tensor,
         ordered_bag_ids: list[str],
         bag_indices: list[list[int]],
+        include_instance_payload: bool = True,
     ) -> Dict[str, Any]:
         n_instances = int(patch_logits.shape[0])
         region_ids = self._to_optional_str_list(
@@ -236,11 +240,6 @@ class SupervisedModule(L.LightningModule):
             expected_length=n_instances,
             field_name="sample_id",
         )
-        patch_ids = self._to_optional_str_list(
-            getattr(batch, "patch_id", None),
-            expected_length=n_instances,
-            field_name="patch_id",
-        )
         row_region_ids: list[Optional[str]] = []
         row_sample_ids: list[Optional[str]] = []
         for indices in bag_indices:
@@ -251,12 +250,22 @@ class SupervisedModule(L.LightningModule):
             "row_region_ids": row_region_ids,
             "row_sample_ids": row_sample_ids,
         }
+        if not include_instance_payload:
+            return metadata
+
+        patch_ids = self._to_optional_str_list(
+            getattr(batch, "patch_id", None),
+            expected_length=n_instances,
+            field_name="patch_id",
+        )
         instance_logits_chunks: list[torch.Tensor] = []
         instance_patch_ids: list[str] = []
         instance_region_ids: list[Optional[str]] = []
         instance_sample_ids: list[Optional[str]] = []
         instance_attention_logits_chunks: list[torch.Tensor] = []
-        compute_attention_logits = self.use_attention and self.attention is not None
+        compute_attention_logits = (
+            include_instance_payload and self.use_attention and self.attention is not None
+        )
 
         for bag_id, indices in zip(ordered_bag_ids, bag_indices):
             if not indices:
@@ -772,12 +781,16 @@ class SupervisedModule(L.LightningModule):
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         out = self._forward_bags(batch, allow_missing_targets=True)
+        emit_instance_payload = bool(
+            getattr(self, "_predict_emit_instance_payload", True)
+        )
         metadata = self._build_predict_group_metadata(
             batch,
             patch_logits=out["patch_logits"],
             graph_emb=out.get("graph_emb", out["patch_logits"]),
             ordered_bag_ids=out["ordered_bag_ids"],
             bag_indices=out["bag_indices"],
+            include_instance_payload=emit_instance_payload,
         )
         result: Dict[str, Any] = {
             "bag_ids": list(out["ordered_bag_ids"]),
@@ -787,15 +800,17 @@ class SupervisedModule(L.LightningModule):
         }
         if out["bag_targets"] is not None:
             result["bag_targets"] = out["bag_targets"].detach()
-        result["instance_logits"] = metadata["instance_logits"].detach()
-        result["instance_patch_ids"] = metadata["instance_patch_ids"]
-        result["instance_region_ids"] = metadata["instance_region_ids"]
-        result["instance_sample_ids"] = metadata["instance_sample_ids"]
+        if emit_instance_payload:
+            result["instance_logits"] = metadata["instance_logits"].detach()
+            result["instance_patch_ids"] = metadata["instance_patch_ids"]
+            result["instance_region_ids"] = metadata["instance_region_ids"]
+            result["instance_sample_ids"] = metadata["instance_sample_ids"]
         if self.use_attention:
             result["bag_attention"] = out["bag_attention"]
-            result["instance_attention_logits"] = metadata[
-                "instance_attention_logits"
-            ].detach()
+            if emit_instance_payload:
+                result["instance_attention_logits"] = metadata[
+                    "instance_attention_logits"
+                ].detach()
         return result
 
     # ------------------------------------------------------------------

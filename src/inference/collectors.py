@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 from typing import Any, Dict, Iterable, List, Optional
 
 import torch
@@ -21,7 +22,7 @@ def _ensure_2d(values: torch.Tensor) -> torch.Tensor:
 def _stack_optional_tensors(values: List[torch.Tensor]) -> Optional[torch.Tensor]:
     if not values:
         return None
-    return torch.cat([_ensure_2d(v.detach().cpu()) for v in values], dim=0)
+    return torch.cat([_ensure_2d(v) for v in values], dim=0)
 
 
 def _as_positive_count_tensor(values: Any, *, expected_length: int) -> torch.Tensor:
@@ -58,9 +59,12 @@ def collect_predictions(
     model: LightningModule,
     datamodule: LightningDataModule,
     ckpt_path: Optional[str],
+    include_instance_payload: bool = True,
 ) -> BatchPredictionPayload:
     """Collect and normalize `predict_step` payloads across all batches."""
-    outputs = trainer.predict(model=model, datamodule=datamodule, ckpt_path=ckpt_path)
+    outputs = deque(
+        trainer.predict(model=model, datamodule=datamodule, ckpt_path=ckpt_path)
+    )
 
     bag_ids: List[str] = []
     logits_chunks: List[torch.Tensor] = []
@@ -75,14 +79,15 @@ def collect_predictions(
     instance_sample_ids: List[Optional[str]] = []
     expect_targets: Optional[bool] = None
 
-    for chunk in outputs:
+    while outputs:
+        chunk = outputs.popleft()
         if not isinstance(chunk, dict):
             raise TypeError("Expected `predict_step` output to be a dict.")
         if "bag_ids" not in chunk or "bag_logits" not in chunk:
             raise KeyError("`predict_step` must include bag_ids and bag_logits.")
 
         chunk_bag_ids = _as_str_list(chunk["bag_ids"])
-        chunk_logits = _ensure_2d(chunk["bag_logits"])
+        chunk_logits = _ensure_2d(chunk["bag_logits"]).detach().cpu()
         if len(chunk_bag_ids) != chunk_logits.shape[0]:
             raise ValueError(
                 "Mismatch within predict chunk between bag_ids and bag_logits rows: "
@@ -101,7 +106,7 @@ def collect_predictions(
                 "chunks must include bag_targets or none."
             )
         if has_targets:
-            chunk_targets = _ensure_2d(chunk["bag_targets"])
+            chunk_targets = _ensure_2d(chunk["bag_targets"]).detach().cpu()
             if chunk_targets.shape[0] != len(chunk_bag_ids):
                 raise ValueError(
                     "Mismatch within predict chunk between bag_ids and bag_targets rows: "
@@ -135,13 +140,17 @@ def collect_predictions(
         attention_rows.extend(
             _align_chunk_attention_to_rows(chunk_bag_ids, chunk.get("bag_attention"))
         )
-        if "instance_logits" in chunk and chunk["instance_logits"] is not None:
+        if (
+            include_instance_payload
+            and "instance_logits" in chunk
+            and chunk["instance_logits"] is not None
+        ):
             for field in ("instance_patch_ids", "instance_region_ids", "instance_sample_ids"):
                 if field not in chunk:
                     raise KeyError(
                         f"predict_step provided instance_logits without required field '{field}'."
                     )
-            chunk_instance_logits = _ensure_2d(chunk["instance_logits"])
+            chunk_instance_logits = _ensure_2d(chunk["instance_logits"]).detach().cpu()
             if len(chunk["instance_patch_ids"]) != chunk_instance_logits.shape[0]:
                 raise ValueError(
                     "Mismatch between instance_logits and instance_patch_ids rows: "
@@ -161,6 +170,7 @@ def collect_predictions(
             chunk_instance_attn = chunk.get("instance_attention_logits")
             if chunk_instance_attn is not None:
                 chunk_instance_attn = _ensure_2d(chunk_instance_attn)
+                chunk_instance_attn = chunk_instance_attn.detach().cpu()
                 if chunk_instance_logits.shape[0] != chunk_instance_attn.shape[0]:
                     raise ValueError(
                         "Mismatch between instance_logits and instance_attention_logits rows: "
