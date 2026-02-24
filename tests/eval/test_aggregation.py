@@ -137,7 +137,8 @@ def test_aggregate_group_logits_region_scope_falls_back_to_sample_ids_for_rows()
         row_region_ids=[None, "", "r1"],
         row_sample_ids=["s0", "s0", "s1"],
     )
-    out = aggregate_group_logits(payload, mode="mean", bag_scope="region")
+    with pytest.warns(RuntimeWarning, match="Fell back from 'row_region_ids' to 'row_sample_ids'"):
+        out = aggregate_group_logits(payload, mode="mean", bag_scope="region")
     assert out.bag_ids == ["r1", "s0"]
     assert torch.allclose(out.bag_logits[0], torch.tensor([8.0]))
     assert torch.allclose(out.bag_logits[1], torch.tensor([2.0]))
@@ -157,7 +158,11 @@ def test_aggregate_group_logits_region_scope_falls_back_to_sample_ids_for_instan
         instance_region_ids=[None, "", "rB"],
         instance_sample_ids=["sA", "sA", "sB"],
     )
-    out = aggregate_group_logits(payload, mode="mean", bag_scope="region")
+    with pytest.warns(
+        RuntimeWarning,
+        match="Fell back from 'instance_region_ids' to 'instance_sample_ids'",
+    ):
+        out = aggregate_group_logits(payload, mode="mean", bag_scope="region")
     assert out.bag_ids == ["rB", "sA"]
     assert torch.allclose(out.bag_logits[0], torch.tensor([3.0]))
     assert torch.allclose(out.bag_logits[1], torch.tensor([5.0]))

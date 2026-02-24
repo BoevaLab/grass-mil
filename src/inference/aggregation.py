@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import warnings
 from typing import Dict, List, Optional
 
 import torch
@@ -79,16 +80,26 @@ def _normalize_group_ids_with_fallback(
         )
 
     resolved: List[str] = []
+    fallback_count = 0
     for idx in range(expected_length):
         primary_value = primary_ids[idx] if primary_ids is not None else None
         fallback_value = fallback_ids[idx] if fallback_ids is not None else None
         use_fallback = _is_missing_group_value(primary_value)
         if use_fallback and _is_missing_group_value(fallback_value):
             raise ValueError(
-                f"Missing both '{primary_name}' and fallback '{fallback_name}' at row {idx}; "
-                "cannot regroup predictions for this scope."
-            )
+                    f"Missing both '{primary_name}' and fallback '{fallback_name}' at row {idx}; "
+                    "cannot regroup predictions for this scope."
+                )
+        if use_fallback:
+            fallback_count += 1
         resolved.append(str(fallback_value if use_fallback else primary_value))
+    if fallback_count > 0:
+        warnings.warn(
+            f"Fell back from '{primary_name}' to '{fallback_name}' for {fallback_count} "
+            f"of {expected_length} rows while regrouping predictions.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
     return resolved
 
 
