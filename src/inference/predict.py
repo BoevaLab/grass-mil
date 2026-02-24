@@ -76,6 +76,8 @@ def _configure_preforward_subsampling(
     # Force a strategy rebuild in case setup() was invoked previously.
     if hasattr(datamodule, "sampler_strategy"):
         setattr(datamodule, "sampler_strategy", None)
+    if hasattr(datamodule, "val_sampler_strategy"):
+        setattr(datamodule, "val_sampler_strategy", None)
     return True
 
 
@@ -97,7 +99,9 @@ def _as_batch_payload(payload: Any) -> BatchPredictionPayload:
 
 @task_wrapper
 def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    assert cfg.ckpt_path
+    ckpt_path = cfg.get("ckpt_path")
+    if ckpt_path is None or not str(ckpt_path).strip():
+        raise ValueError("Missing required `ckpt_path` for inference.")
 
     log.info(f"Instantiating datamodule <{cfg.data._target_}>")
     datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)

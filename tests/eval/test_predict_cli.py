@@ -52,6 +52,7 @@ def test_configure_preforward_subsampling_injects_runtime_and_resets_strategy() 
         def __init__(self):
             self.sampler_config = _SamplerCfg()
             self.sampler_strategy = object()
+            self.val_sampler_strategy = object()
 
     datamodule = _DataModule()
     cfg = OmegaConf.create(
@@ -69,6 +70,7 @@ def test_configure_preforward_subsampling_injects_runtime_and_resets_strategy() 
     assert datamodule.sampler_config.runtime["subsample_fraction"] == 0.5
     assert datamodule.sampler_config.runtime["subsample_seed"] == 123
     assert datamodule.sampler_strategy is None
+    assert datamodule.val_sampler_strategy is None
 
 
 def test_configure_preforward_subsampling_noop_for_full_fraction() -> None:
@@ -80,6 +82,7 @@ def test_configure_preforward_subsampling_noop_for_full_fraction() -> None:
         def __init__(self):
             self.sampler_config = _SamplerCfg()
             self.sampler_strategy = "keep"
+            self.val_sampler_strategy = "keep_val"
 
     datamodule = _DataModule()
     cfg = OmegaConf.create(
@@ -96,6 +99,7 @@ def test_configure_preforward_subsampling_noop_for_full_fraction() -> None:
     assert changed is False
     assert "subsample_fraction" not in datamodule.sampler_config.runtime
     assert datamodule.sampler_strategy == "keep"
+    assert datamodule.val_sampler_strategy == "keep_val"
 
 
 @pytest.mark.parametrize(
@@ -221,3 +225,34 @@ def test_predict_summary_includes_aggregation_metadata(monkeypatch, tmp_path: Pa
     assert summary["aggregation"]["bag_scope"] == "region"
     assert "preforward_subsampling_applied" in summary["aggregation"]
     assert captured_summary_payload["aggregation"]["mode"] == "mean"
+
+
+def test_predict_raises_when_ckpt_path_missing(tmp_path: Path) -> None:
+    cfg = OmegaConf.create(
+        {
+            "ckpt_path": "",
+            "data": {"_target_": "fake.DataModule"},
+            "model": {"_target_": "fake.Model"},
+            "trainer": {"_target_": "fake.Trainer"},
+            "logger": None,
+            "paths": {"output_dir": str(tmp_path)},
+            "predict": {
+                "save_predictions": False,
+                "save_metrics": False,
+                "include_targets": False,
+                "include_attention": False,
+                "output_subdir": "predict_artifacts",
+            },
+            "output": {
+                "predictions_filename": "predictions.csv",
+                "metrics_filename": "metrics.json",
+                "summary_filename": "inference_summary.json",
+            },
+            "aggregation": {"enabled": False, "mode": "none"},
+            "metrics": {"enabled": False, "per_group": False, "categorical": {"threshold": 0.5}},
+            "embeddings": {"enabled": False, "save": False, "extract_node": False},
+            "task": {"target_type": "binary"},
+        }
+    )
+    with pytest.raises(ValueError, match="Missing required `ckpt_path` for inference."):
+        predict(cfg)
