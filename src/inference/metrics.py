@@ -28,28 +28,68 @@ def _binary_roc_auc(scores: torch.Tensor, labels: torch.Tensor) -> float:
 
 def _classification_binary(
     logits: torch.Tensor, targets: torch.Tensor, threshold: float
-) -> Dict[str, float]:
-    scores = torch.sigmoid(logits.float().view(-1))
-    y_true = targets.float().view(-1)
-    y_pred = (scores >= threshold).float()
+) -> Dict[str, Any]:
+    logits = logits.float()
+    targets = targets.float()
+    if logits.ndim == 1:
+        logits = logits.unsqueeze(-1)
+    if targets.ndim == 1:
+        targets = targets.unsqueeze(-1)
+    if logits.shape[0] != targets.shape[0]:
+        raise ValueError(
+            "Binary metrics require logits and targets to have the same number of rows. "
+            f"Got logits {tuple(logits.shape)} and targets {tuple(targets.shape)}."
+        )
+    if logits.shape[1] != targets.shape[1]:
+        raise ValueError(
+            "Binary metrics require matching task dimensions for logits and targets. "
+            f"Got logits {tuple(logits.shape)} and targets {tuple(targets.shape)}."
+        )
 
-    tp = float(((y_pred == 1) & (y_true == 1)).sum().item())
-    tn = float(((y_pred == 0) & (y_true == 0)).sum().item())
-    fp = float(((y_pred == 1) & (y_true == 0)).sum().item())
-    fn = float(((y_pred == 0) & (y_true == 1)).sum().item())
+    per_task: Dict[str, Dict[str, float]] = {}
+    for task_idx in range(int(logits.shape[1])):
+        scores = torch.sigmoid(logits[:, task_idx].reshape(-1))
+        y_true = targets[:, task_idx].reshape(-1)
+        y_pred = (scores >= threshold).float()
 
-    precision = _safe_div(tp, tp + fp)
-    recall = _safe_div(tp, tp + fn)
-    f1 = _safe_div(2.0 * precision * recall, precision + recall)
-    accuracy = _safe_div(tp + tn, tp + tn + fp + fn)
-    roc_auc = _binary_roc_auc(scores=scores, labels=y_true.long())
-    return {
-        "accuracy": accuracy,
-        "precision": precision,
-        "recall": recall,
-        "f1": f1,
-        "roc_auc": roc_auc,
+        tp = float(((y_pred == 1) & (y_true == 1)).sum().item())
+        tn = float(((y_pred == 0) & (y_true == 0)).sum().item())
+        fp = float(((y_pred == 1) & (y_true == 0)).sum().item())
+        fn = float(((y_pred == 0) & (y_true == 1)).sum().item())
+
+        precision = _safe_div(tp, tp + fp)
+        recall = _safe_div(tp, tp + fn)
+        f1 = _safe_div(2.0 * precision * recall, precision + recall)
+        accuracy = _safe_div(tp + tn, tp + tn + fp + fn)
+        roc_auc = _binary_roc_auc(scores=scores, labels=y_true.long())
+        per_task[f"task_{task_idx}"] = {
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+            "roc_auc": roc_auc,
+        }
+
+    def _metric_mean(metric_name: str) -> float:
+        values = [
+            float(metrics[metric_name])
+            for metrics in per_task.values()
+            if not math.isnan(float(metrics[metric_name]))
+        ]
+        if not values:
+            return float("nan")
+        return float(sum(values) / len(values))
+
+    result: Dict[str, Any] = {
+        "accuracy": _metric_mean("accuracy"),
+        "precision": _metric_mean("precision"),
+        "recall": _metric_mean("recall"),
+        "f1": _metric_mean("f1"),
+        "roc_auc": _metric_mean("roc_auc"),
     }
+    if len(per_task) > 1:
+        result["per_task"] = per_task
+    return result
 
 
 def _classification_multiclass(
@@ -145,7 +185,7 @@ def _survival_metrics(logits: torch.Tensor, targets: torch.Tensor) -> Dict[str, 
 
 def compute_task_metrics_from_tensors(
     *, target_type: str, logits: torch.Tensor, targets: torch.Tensor, threshold: float
-) -> Dict[str, float]:
+) -> Dict[str, Any]:
     if target_type == "binary":
         return _classification_binary(logits=logits, targets=targets, threshold=threshold)
     if target_type == "regression":

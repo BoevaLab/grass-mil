@@ -90,3 +90,34 @@ def test_compute_binary_metrics_matches_sklearn_auc_with_ties() -> None:
         torch.sigmoid(payload.bag_logits).view(-1).numpy(),
     )
     assert metrics["global"]["roc_auc"] == expected
+
+
+def test_compute_binary_multitask_metrics_are_per_task_not_flattened() -> None:
+    # Task 0 is perfect, task 1 is perfectly wrong; macro accuracy should be 0.5.
+    payload = BatchPredictionPayload(
+        bag_ids=["a", "b", "c", "d"],
+        bag_logits=torch.tensor(
+            [
+                [8.0, 8.0],
+                [-8.0, -8.0],
+                [8.0, 8.0],
+                [-8.0, -8.0],
+            ]
+        ),
+        bag_targets=torch.tensor(
+            [
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [1.0, 0.0],
+                [0.0, 1.0],
+            ]
+        ),
+        bag_attention=None,
+    )
+    cfg = OmegaConf.create({"categorical": {"threshold": 0.5}, "per_group": False})
+    metrics = compute_task_metrics(payload=payload, target_type="binary", metrics_cfg=cfg)
+
+    assert metrics["global"]["accuracy"] == 0.5
+    assert "per_task" in metrics["global"]
+    assert metrics["global"]["per_task"]["task_0"]["accuracy"] == 1.0
+    assert metrics["global"]["per_task"]["task_1"]["accuracy"] == 0.0
