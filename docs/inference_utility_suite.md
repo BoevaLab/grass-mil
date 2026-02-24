@@ -32,6 +32,19 @@ Sub-config groups:
 - `configs/inference/aggregation/default.yaml`
 - `configs/inference/embeddings/default.yaml`
 
+## Aggregation Subsampling Semantics
+
+`aggregation.subsample_fraction` supports efficient inference-time subsampling:
+
+- when `< 1.0`, `src/inference/predict.py` injects predict-time sampler runtime
+  subsampling so fewer roots/subgraphs are forwarded through the model
+- sampling is uniform at random over candidate roots, with optional reproducibility
+  via `aggregation.subsample_seed`
+- this path applies to aggregation modes `mean`, `max`, and `attention_weighted`
+  while avoiding post-aggregation double subsampling
+- `aggregation.subsample_fraction=1.0` disables subsampling and keeps full usage
+- `aggregation.subsample_fraction=0.0` is invalid
+
 ## Output Schema
 
 Outputs are written under:

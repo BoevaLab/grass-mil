@@ -38,6 +38,40 @@ from src.utils import (  # noqa: E402
 log = RankedLogger(__name__, rank_zero_only=True)
 
 
+def _supports_preforward_subsampling(mode: str) -> bool:
+    return mode in {"mean", "max", "attention_weighted"}
+
+
+def _configure_preforward_subsampling(
+    datamodule: LightningDataModule, cfg: DictConfig
+) -> bool:
+    if not bool(cfg.aggregation.enabled):
+        return False
+    mode = str(cfg.aggregation.mode)
+    if not _supports_preforward_subsampling(mode):
+        return False
+    subsample_fraction = float(cfg.aggregation.get("subsample_fraction", 1.0))
+    if subsample_fraction >= 1.0:
+        return False
+
+    sampler_cfg = getattr(datamodule, "sampler_config", None)
+    if sampler_cfg is None:
+        return False
+    runtime = getattr(sampler_cfg, "runtime", None)
+    if runtime is None:
+        runtime = {}
+    runtime = dict(runtime)
+    runtime["subsample_fraction"] = subsample_fraction
+    subsample_seed = cfg.aggregation.get("subsample_seed")
+    runtime["subsample_seed"] = None if subsample_seed is None else int(subsample_seed)
+    sampler_cfg.runtime = runtime
+
+    # Force a strategy rebuild in case setup() was invoked previously.
+    if hasattr(datamodule, "sampler_strategy"):
+        setattr(datamodule, "sampler_strategy", None)
+    return True
+
+
 def _as_batch_payload(payload: Any) -> BatchPredictionPayload:
     return BatchPredictionPayload(
         bag_ids=list(payload.bag_ids),
@@ -86,6 +120,9 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         base_output_dir=base_output_dir,
         output_subdir=str(cfg.predict.output_subdir),
     )
+    preforward_subsampling_applied = _configure_preforward_subsampling(
+        datamodule, cfg
+    )
 
     pred_payload = collect_predictions(
         trainer=trainer,
@@ -95,12 +132,19 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     )
 
     if bool(cfg.aggregation.enabled):
+        aggregation_subsample_fraction = float(
+            cfg.aggregation.get("subsample_fraction", 1.0)
+        )
+        aggregation_subsample_seed = cfg.aggregation.get("subsample_seed")
+        if preforward_subsampling_applied:
+            aggregation_subsample_fraction = 1.0
+            aggregation_subsample_seed = None
         aggregated = aggregate_group_logits(
             pred_payload,
             mode=str(cfg.aggregation.mode),
             bag_scope=str(cfg.aggregation.get("bag_scope", "patch")),
-            subsample_fraction=float(cfg.aggregation.get("subsample_fraction", 1.0)),
-            subsample_seed=cfg.aggregation.get("subsample_seed"),
+            subsample_fraction=aggregation_subsample_fraction,
+            subsample_seed=aggregation_subsample_seed,
         )
         pred_payload = _as_batch_payload(aggregated)
 

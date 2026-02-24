@@ -52,6 +52,8 @@ class RuntimeShadowConfig:
     property_name: str = "cell_type"
     weight_mode: str = "inverse"
     min_weight: float = 1e-6
+    subsample_fraction: float = 1.0
+    subsample_seed: Optional[int] = None
 
     @classmethod
     def from_dict(cls, cfg: Optional[Dict[str, Any]]) -> "RuntimeShadowConfig":
@@ -66,6 +68,19 @@ class RuntimeShadowConfig:
         min_weight = float(cfg.get("min_weight", 1e-6))
         if min_weight <= 0:
             min_weight = 1e-6
+        subsample_fraction = float(cfg.get("subsample_fraction", 1.0))
+        if subsample_fraction == 0.0:
+            raise ValueError(
+                "runtime.subsample_fraction=0.0 selects no roots and is invalid."
+            )
+        if not (0.0 < subsample_fraction <= 1.0):
+            raise ValueError(
+                "runtime.subsample_fraction must be within (0, 1]. "
+                f"Got {subsample_fraction}."
+            )
+        subsample_seed = cfg.get("subsample_seed")
+        if subsample_seed is not None:
+            subsample_seed = int(subsample_seed)
         return cls(
             enabled=bool(cfg.get("enabled", False)),
             depth=int(cfg.get("depth", 2)),
@@ -80,6 +95,8 @@ class RuntimeShadowConfig:
             property_name=str(cfg.get("property_name", "cell_type")),
             weight_mode=weight_mode,
             min_weight=min_weight,
+            subsample_fraction=subsample_fraction,
+            subsample_seed=subsample_seed,
         )
 
 
@@ -145,6 +162,47 @@ def _build_weighted_node_idx(
     return torch.multinomial(probs, num_samples=num_samples, replacement=True).long()
 
 
+def _resolve_root_candidates(data: Data, node_idx: Optional[torch.Tensor]) -> torch.Tensor:
+    if node_idx is None:
+        num_nodes = int(getattr(data, "num_nodes", 0))
+        if num_nodes <= 0:
+            return torch.empty(0, dtype=torch.long)
+        return torch.arange(num_nodes, dtype=torch.long)
+    if isinstance(node_idx, torch.Tensor):
+        if node_idx.dtype == torch.bool:
+            return node_idx.nonzero(as_tuple=False).view(-1).long()
+        return node_idx.view(-1).long()
+    if hasattr(node_idx, "__len__"):
+        return torch.as_tensor(list(node_idx), dtype=torch.long)
+    return torch.empty(0, dtype=torch.long)
+
+
+def _subsample_count(num_candidates: int, subsample_fraction: float) -> int:
+    if num_candidates <= 0:
+        return 0
+    if subsample_fraction >= 1.0:
+        return num_candidates
+    n_keep = int(num_candidates * subsample_fraction)
+    if n_keep <= 0:
+        n_keep = 1
+    return min(n_keep, num_candidates)
+
+
+def _subsample_root_candidates(
+    candidates: torch.Tensor,
+    *,
+    subsample_fraction: float,
+    generator: Optional[torch.Generator],
+) -> torch.Tensor:
+    n_candidates = int(candidates.numel())
+    n_keep = _subsample_count(n_candidates, subsample_fraction)
+    if n_keep >= n_candidates:
+        return candidates
+    perm = torch.randperm(n_candidates, generator=generator)
+    selected = perm[:n_keep].sort().values
+    return candidates.index_select(0, selected)
+
+
 class BaseSamplerStrategy:
     """Data-layer agnostic sampler strategy.
 
@@ -208,7 +266,10 @@ class _RuntimeUnitShadowDatasetLoader:
                 )
                 if computed_node_idx is not None:
                     effective_node_idx = computed_node_idx
-            num_roots = _resolve_num_roots(unit_data, effective_node_idx)
+            num_candidate_roots = _resolve_num_roots(unit_data, effective_node_idx)
+            num_roots = _subsample_count(
+                num_candidate_roots, float(self.runtime.subsample_fraction)
+            )
             total_batches += int((num_roots + subgraph_batch_size - 1) // subgraph_batch_size)
         return total_batches
 
@@ -223,6 +284,10 @@ class _RuntimeUnitShadowDatasetLoader:
         subgraph_batch_size = int(self.runtime.subgraph_batch_size)
         if subgraph_batch_size <= 0:
             subgraph_batch_size = max(1, int(self.dataset_batch_size))
+        subsample_generator = None
+        if self.runtime.subsample_seed is not None:
+            subsample_generator = torch.Generator()
+            subsample_generator.manual_seed(int(self.runtime.subsample_seed))
 
         for idx in indices.tolist():
             unit_data = self.dataset[idx]
@@ -236,6 +301,14 @@ class _RuntimeUnitShadowDatasetLoader:
                 )
                 if computed_node_idx is not None:
                     effective_node_idx = computed_node_idx
+            effective_root_candidates = _resolve_root_candidates(
+                unit_data, effective_node_idx
+            )
+            effective_root_candidates = _subsample_root_candidates(
+                effective_root_candidates,
+                subsample_fraction=float(self.runtime.subsample_fraction),
+                generator=subsample_generator,
+            )
             unit_loader_kwargs: Dict[str, Any] = {
                 "num_workers": self.num_workers,
                 "pin_memory": self.pin_memory,
@@ -250,7 +323,7 @@ class _RuntimeUnitShadowDatasetLoader:
                 depth=int(self.runtime.depth),
                 num_neighbors=int(self.runtime.num_neighbors),
                 batch_size=subgraph_batch_size,
-                node_idx=effective_node_idx,
+                node_idx=effective_root_candidates,
                 replace=bool(self.runtime.replace),
                 shuffle=bool(self.runtime.shuffle_subgraphs and self.shuffle),
                 transform=self.kwargs.get("transform"),
