@@ -27,8 +27,8 @@ jobs:
           environment-file: environment.ci-spatial.yaml
           auto-activate-base: false
           mamba-version: "*"
-          channels: pyg,conda-forge,defaults
-          channel-priority: strict
+          channels: pyg,pytorch,conda-forge,defaults
+          channel-priority: flexible
 
       - name: Show Python and key package versions
         shell: bash -el {0}
@@ -69,8 +69,8 @@ jobs:
           environment-file: environment.ci-spatial.yaml
           auto-activate-base: false
           mamba-version: "*"
-          channels: pyg,conda-forge,defaults
-          channel-priority: strict
+          channels: pyg,pytorch,conda-forge,defaults
+          channel-priority: flexible
 
       - name: Run tests and collect coverage
         shell: bash -el {0}

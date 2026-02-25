@@ -16,10 +16,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
       - name: Find modified files
         id: file_changes
@@ -30,7 +32,13 @@ jobs:
       - name: List modified files
         run: echo '${{ steps.file_changes.outputs.files}}'
 
-      - name: Run pre-commits
-        uses: pre-commit/action@v2.0.3
-        with:
-          extra_args: --files ${{ steps.file_changes.outputs.files}}
+      - name: Install pre-commit
+        run: python -m pip install --upgrade pip pre-commit
+
+      - name: Run pre-commit on changed files
+        run: |
+          if [ -z "${{ steps.file_changes.outputs.files }}" ]; then
+            echo "No changed files detected by file-changes action; skipping pre-commit."
+            exit 0
+          fi
+          pre-commit run --files ${{ steps.file_changes.outputs.files }} --show-diff-on-failure
