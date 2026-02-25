@@ -112,6 +112,22 @@ def cfg_predict_global() -> DictConfig:
     return cfg
 
 
+@pytest.fixture(scope="package")
+def cfg_interpret_global() -> DictConfig:
+    with initialize(version_base="1.3", config_path="../configs"):
+        cfg = compose(
+            config_name="interpretability/report.yaml",
+            return_hydra_config=True,
+            overrides=[],
+        )
+        with open_dict(cfg):
+            cfg.paths.root_dir = str(rootutils.find_root(indicator=".project-root"))
+            cfg.extras.print_config = False
+            cfg.extras.enforce_tags = False
+            cfg.report.pdf.enabled = False
+    return cfg
+
+
 @pytest.fixture(scope="function")
 def cfg_train(cfg_train_global: DictConfig, tmp_path: Path) -> DictConfig:
     """A pytest fixture built on top of the `cfg_train_global()` fixture, which accepts a temporary
@@ -132,6 +148,17 @@ def cfg_train(cfg_train_global: DictConfig, tmp_path: Path) -> DictConfig:
 
     yield cfg
 
+    GlobalHydra.instance().clear()
+
+
+@pytest.fixture(scope="function")
+def cfg_interpret(cfg_interpret_global: DictConfig, tmp_path: Path) -> DictConfig:
+    cfg = cfg_interpret_global.copy()
+    with open_dict(cfg):
+        cfg.paths.output_dir = str(tmp_path)
+        cfg.paths.log_dir = str(tmp_path)
+        cfg.output_dir = str(tmp_path / "interpretability_report")
+    yield cfg
     GlobalHydra.instance().clear()
 
 

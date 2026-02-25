@@ -1,0 +1,36 @@
+# @package _global_
+
+defaults:
+  - _self_
+  - /paths: default
+  - /extras: default
+  - reduction: pca
+  - clustering: agglomerative
+  - plugins: default
+
+task_name: "interpretability_report"
+tags: ["dev"]
+
+output_dir: ${paths.output_dir}/interpretability_report
+composition_prefix: comp_
+embedding_prefixes:
+  - inst_emb_
+  - emb_
+  - graph_emb_
+
+data:
+  instance_table: ???
+  bag_table: null
+  spatial_table: null
+  id_column: instance_id
+  bag_id_column: bag_id
+  cell_type_column: cell_type
+  condition_column: null
+
+report:
+  html:
+    enabled: true
+  pdf:
+    enabled: true
+    engine: playwright
+    snapshot_dpi_scale: 2.0

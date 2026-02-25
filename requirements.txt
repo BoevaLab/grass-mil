@@ -29,6 +29,12 @@ scipy
 scikit-learn
 shapely
 anndata
+plotly
+kaleido
+playwright
+jinja2
+scanpy
+squidpy
 torch-geometric
 # optional: required only for SingleCellExperiment/rds loading
 # rpy2

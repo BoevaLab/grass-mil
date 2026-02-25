@@ -2,6 +2,11 @@
 
 This guide provides flow-through instructions for all major `grass-mil` workflows.
 
+Interpretability workflows are documented in:
+
+- `docs/interpretability_suite.md`
+- `docs/interpretability_extension_guide.md`
+
 ## 0) Environment And Dependency Prerequisites
 
 From `/Users/lovrorabuzin/Projects/grass-mil_unification/grass-mil`:

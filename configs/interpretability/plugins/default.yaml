@@ -1,0 +1,20 @@
+enabled:
+  - cluster_profiles
+  - attention_attribution
+params:
+  cluster_profiles: {}
+  attention_attribution:
+    attention_column: attention
+    score_column: score
+  neighborhood_enrichment:
+    label_column: cluster_label
+    n_perms: 0
+  filtration_curves:
+    thresholds:
+      - 0.05
+      - 0.1
+      - 0.2
+      - 0.4
+      - 0.6
+      - 0.8
+      - 1.0
