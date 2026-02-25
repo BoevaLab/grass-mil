@@ -3,7 +3,7 @@ default_language_version:
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v5.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
@@ -13,27 +13,9 @@ repos:
       - id: check-toml
       - id: check-added-large-files
 
-  - repo: https://github.com/psf/black
-    rev: 23.1.0
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
     hooks:
-      - id: black
-        args: [--line-length, "99"]
-
-  - repo: https://github.com/PyCQA/isort
-    rev: 5.12.0
-    hooks:
-      - id: isort
-        args: ["--profile", "black", "--filter-files"]
-
-  - repo: https://github.com/PyCQA/flake8
-    rev: 6.0.0
-    hooks:
-      - id: flake8
-        args:
-          [
-            "--extend-ignore",
-            "E203,E402,E501,F401,F841,RST2,RST301",
-            "--exclude",
-            "logs/*,data/*",
-          ]
-        additional_dependencies: [flake8-rst-docstrings==0.3.0]
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      - id: ruff-format
