@@ -198,9 +198,7 @@ def test_supervised_module_logs_epoch_validation_survival_c_index():
     module.on_validation_epoch_start()
     module._val_bag_ids = ["p0", "p1", "p2"]
     module._val_bag_logits_chunks = [torch.tensor([[3.0], [2.0], [1.0]])]
-    module._val_bag_targets_chunks = [
-        torch.tensor([[1.0, 1.0], [2.0, 1.0], [3.0, 1.0]])
-    ]
+    module._val_bag_targets_chunks = [torch.tensor([[1.0, 1.0], [2.0, 1.0], [3.0, 1.0]])]
     module._val_row_region_ids = ["rA", "rB", "rC"]
     module._val_row_sample_ids = ["s0", "s1", "s2"]
     module._val_instance_logits_chunks = [torch.tensor([[3.0], [2.0], [1.0]])]
@@ -223,9 +221,7 @@ def test_attention_bag_aggregation_shapes():
 
     logits = torch.randn(5, 1)
     emb = torch.randn(5, 8)
-    att = AttnNetGatedProjected(
-        input_dim=8, projection_dim=4, hidden_dim=2, n_classes=1
-    )
+    att = AttnNetGatedProjected(input_dim=8, projection_dim=4, hidden_dim=2, n_classes=1)
     grouped = {"r0": [0, 1, 2], "r1": [3, 4]}
     bag_logits, bag_ids, bag_attn, bag_indices = aggregate_bag_logits_attention(
         logits=logits,
@@ -411,9 +407,7 @@ def test_supervised_predict_step_can_emit_embedding_payload():
     def _forward_bags(_batch, *, allow_missing_targets=False):
         return {
             "patch_logits": torch.randn(4, 2),
-            "graph_emb": torch.tensor(
-                [[1.0, 1.0], [3.0, 3.0], [10.0, 10.0], [14.0, 14.0]]
-            ),
+            "graph_emb": torch.tensor([[1.0, 1.0], [3.0, 3.0], [10.0, 10.0], [14.0, 14.0]]),
             "node_emb": torch.tensor([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6], [0.7, 0.8]]),
             "bag_logits": torch.randn(2, 1),
             "ordered_bag_ids": ["b0", "b1"],

@@ -56,9 +56,7 @@ def _plan_preforward_subsampling(
     mode = str(cfg.aggregation.mode)
     subsample_fraction = float(cfg.aggregation.get("subsample_fraction", 1.0))
     subsample_seed_raw = cfg.aggregation.get("subsample_seed")
-    subsample_seed = (
-        None if subsample_seed_raw is None else int(subsample_seed_raw)
-    )
+    subsample_seed = None if subsample_seed_raw is None else int(subsample_seed_raw)
     requested = aggregation_enabled and subsample_fraction < 1.0
 
     if not aggregation_enabled:
@@ -96,9 +94,7 @@ def _plan_preforward_subsampling(
             reason="missing_sampler_config",
         )
     strategy_name_raw = getattr(sampler_cfg, "name", None)
-    strategy_name = (
-        None if strategy_name_raw is None else str(strategy_name_raw).strip().lower()
-    )
+    strategy_name = None if strategy_name_raw is None else str(strategy_name_raw).strip().lower()
     if not strategy_name:
         return PreforwardSubsamplingDecision(
             requested=True,
@@ -218,9 +214,7 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         base_output_dir=base_output_dir,
         output_subdir=str(cfg.predict.output_subdir),
     )
-    preforward_subsampling = _plan_preforward_subsampling(
-        datamodule, cfg
-    )
+    preforward_subsampling = _plan_preforward_subsampling(datamodule, cfg)
     if preforward_subsampling.requested and not preforward_subsampling.effective:
         raise ValueError(
             "Preforward subsampling was requested via aggregation.subsample_fraction < 1.0 "
@@ -233,21 +227,13 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         )
     aggregation_metadata: Dict[str, Any] | None = None
     include_instance_payload = _needs_instance_payload(cfg)
-    include_embeddings_payload = bool(cfg.embeddings.enabled) and bool(
-        cfg.embeddings.save
-    )
-    include_node_embeddings = include_embeddings_payload and bool(
-        cfg.embeddings.extract_node
-    )
+    include_embeddings_payload = bool(cfg.embeddings.enabled) and bool(cfg.embeddings.save)
+    include_node_embeddings = include_embeddings_payload and bool(cfg.embeddings.extract_node)
     previous_emit_setting = getattr(model, "_predict_emit_instance_payload", None)
     had_emit_setting = hasattr(model, "_predict_emit_instance_payload")
-    previous_emit_embeddings_setting = getattr(
-        model, "_predict_emit_embeddings_payload", None
-    )
+    previous_emit_embeddings_setting = getattr(model, "_predict_emit_embeddings_payload", None)
     had_emit_embeddings_setting = hasattr(model, "_predict_emit_embeddings_payload")
-    previous_emit_node_embeddings_setting = getattr(
-        model, "_predict_emit_node_embeddings", None
-    )
+    previous_emit_node_embeddings_setting = getattr(model, "_predict_emit_node_embeddings", None)
     had_emit_node_embeddings_setting = hasattr(model, "_predict_emit_node_embeddings")
     setattr(model, "_predict_emit_instance_payload", include_instance_payload)
     setattr(model, "_predict_emit_embeddings_payload", include_embeddings_payload)
@@ -288,9 +274,7 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     pred_payload = collected.prediction_payload
 
     if bool(cfg.aggregation.enabled):
-        aggregation_subsample_fraction = float(
-            cfg.aggregation.get("subsample_fraction", 1.0)
-        )
+        aggregation_subsample_fraction = float(cfg.aggregation.get("subsample_fraction", 1.0))
         aggregation_subsample_seed = cfg.aggregation.get("subsample_seed")
         if preforward_subsampling.effective:
             aggregation_subsample_fraction = 1.0
@@ -342,9 +326,7 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     if include_embeddings_payload:
         emb_payload = collected.embedding_payload
         if emb_payload is None:
-            raise ValueError(
-                "Embeddings were requested but no embedding payload was collected."
-            )
+            raise ValueError("Embeddings were requested but no embedding payload was collected.")
         emb_frame = embeddings_to_dataframe(emb_payload)
         embeddings_path = output_dir / str(cfg.embeddings.filename)
         write_dataframe(emb_frame, embeddings_path)

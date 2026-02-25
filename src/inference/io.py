@@ -43,9 +43,7 @@ def predictions_to_dataframe(
                 f"{len(payload.bag_ids)} ids vs {len(payload.bag_attention)} attention rows."
             )
         data["attention"] = [
-            json.dumps(
-                attention.detach().cpu().tolist() if attention is not None else []
-            )
+            json.dumps(attention.detach().cpu().tolist() if attention is not None else [])
             for attention in payload.bag_attention
         ]
 

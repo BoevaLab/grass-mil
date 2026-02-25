@@ -7,9 +7,7 @@ import torch
 try:
     from torch_geometric.data import Data
 except Exception as exc:  # pragma: no cover
-    raise ImportError(
-        "torch_geometric is required for training bagging helpers"
-    ) from exc
+    raise ImportError("torch_geometric is required for training bagging helpers") from exc
 
 
 def extract_bag_ids(
@@ -60,9 +58,7 @@ def extract_bag_ids(
                 continue
             if not _is_missing_value(fallback):
                 if not _is_missing_value(region_value):
-                    resolved.append(
-                        f"{str(fallback)}::{str(region_value)}::{str(primary)}"
-                    )
+                    resolved.append(f"{str(fallback)}::{str(region_value)}::{str(primary)}")
                 else:
                     resolved.append(f"{str(fallback)}::{str(primary)}")
                 continue
@@ -148,9 +144,7 @@ def aggregate_bag_logits_attention(
         sub_logits = logits[selected]
         attn_logits, _ = attention(sub_emb)
         attn_scores = torch.softmax(attn_logits.squeeze(-1), dim=0)
-        weighted_logits = (sub_logits * attn_scores.unsqueeze(-1)).sum(
-            dim=0, keepdim=True
-        )
+        weighted_logits = (sub_logits * attn_scores.unsqueeze(-1)).sum(dim=0, keepdim=True)
         bag_logits.append(weighted_logits)
         bag_ids.append(bag_id)
         bag_indices.append(selected)
@@ -162,9 +156,7 @@ def _find_label_index_by_name(label_names: Any, target_name: str) -> int:
     if isinstance(label_names, (list, tuple)):
         if target_name in label_names:
             return int(label_names.index(target_name))
-    raise ValueError(
-        f"Target '{target_name}' not found in graph_label_names={label_names}."
-    )
+    raise ValueError(f"Target '{target_name}' not found in graph_label_names={label_names}.")
 
 
 def select_target_columns(
@@ -206,9 +198,10 @@ def gather_bag_targets(
     for idxs in bag_indices:
         bag_y = graph_y[idxs]
         ref_y = bag_y[:1]
-        if bag_y.shape[0] > 1 and not torch.isclose(
-            bag_y, ref_y.expand_as(bag_y), atol=0.0, rtol=0.0
-        ).all():
+        if (
+            bag_y.shape[0] > 1
+            and not torch.isclose(bag_y, ref_y.expand_as(bag_y), atol=0.0, rtol=0.0).all()
+        ):
             raise ValueError(
                 "Inconsistent graph_y values detected within the same bag. "
                 "All instances in a bag must share one graph target."
@@ -217,12 +210,11 @@ def gather_bag_targets(
         if graph_w is not None:
             bag_w = graph_w[idxs]
             ref_w = bag_w[:1]
-            if bag_w.shape[0] > 1 and not torch.isclose(
-                bag_w, ref_w.expand_as(bag_w), atol=0.0, rtol=0.0
-            ).all():
-                raise ValueError(
-                    "Inconsistent graph_w values detected within the same bag."
-                )
+            if (
+                bag_w.shape[0] > 1
+                and not torch.isclose(bag_w, ref_w.expand_as(bag_w), atol=0.0, rtol=0.0).all()
+            ):
+                raise ValueError("Inconsistent graph_w values detected within the same bag.")
             bag_weight_rows.append(ref_w)
     bag_targets_t = torch.cat(bag_targets, dim=0)
     if graph_w is not None:

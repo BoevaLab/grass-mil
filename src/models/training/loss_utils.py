@@ -29,9 +29,7 @@ def compute_supervised_loss(
     if target_type == "regression":
         return loss_fn(bag_logits, bag_targets, bag_weights)
     if bag_targets.ndim != 2 or bag_targets.shape[1] < 2:
-        raise ValueError(
-            "Survival task expects at least two target columns [time, event]."
-        )
+        raise ValueError("Survival task expects at least two target columns [time, event].")
     return loss_fn(
         bag_logits.squeeze(-1),
         bag_targets[:, 0].float(),
@@ -57,12 +55,7 @@ def build_mil_aux_targets(
             aux_weights.append(torch.ones_like(repeated_target))
             continue
         if target_mode == "attention_shaped_ti":
-            attn = (
-                bag_attention[bag_id]
-                .detach()
-                .reshape(-1, 1)
-                .to(repeated_target.device)
-            )
+            attn = bag_attention[bag_id].detach().reshape(-1, 1).to(repeated_target.device)
             target = 0.5 + (repeated_target - 0.5) * attn
             aux_targets.append(target)
             aux_weights.append(attn)
@@ -88,9 +81,7 @@ def compute_aux_node_loss(
 ) -> torch.Tensor:
     if loss_mode not in {"bce", "weighted_bce"}:
         raise ValueError("node_aux.loss_mode must be one of ['bce', 'weighted_bce']")
-    loss = F.binary_cross_entropy_with_logits(
-        aux_logits, aux_targets.float(), reduction="none"
-    )
+    loss = F.binary_cross_entropy_with_logits(aux_logits, aux_targets.float(), reduction="none")
     if loss_mode == "weighted_bce":
         if aux_weights is None:
             raise ValueError("weighted_bce requires non-null aux_weights.")
@@ -98,9 +89,7 @@ def compute_aux_node_loss(
     return loss.mean()
 
 
-def compute_entropy_regularization(
-    values: torch.Tensor, eps: float = 1.0e-8
-) -> torch.Tensor:
+def compute_entropy_regularization(values: torch.Tensor, eps: float = 1.0e-8) -> torch.Tensor:
     probs = values.float().clamp(min=eps, max=1.0)
     return -(probs * torch.log(probs + eps)).mean()
 
@@ -112,9 +101,7 @@ def compute_binary_accuracy(logits: torch.Tensor, target: torch.Tensor) -> torch
     return (pred == target.float()).float().mean()
 
 
-def compute_categorical_accuracy(
-    logits: torch.Tensor, target: torch.Tensor
-) -> torch.Tensor:
+def compute_categorical_accuracy(logits: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
     if logits.ndim != 2:
         raise ValueError("Categorical accuracy expects logits with shape [N, C].")
     pred = torch.argmax(logits, dim=1)

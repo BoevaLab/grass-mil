@@ -103,9 +103,7 @@ def _classification_binary(
     return result
 
 
-def _classification_multiclass(
-    logits: torch.Tensor, targets: torch.Tensor
-) -> Dict[str, float]:
+def _classification_multiclass(logits: torch.Tensor, targets: torch.Tensor) -> Dict[str, float]:
     pred_labels = torch.argmax(logits, dim=1)
     true_labels = targets.long().view(-1)
     num_classes = int(logits.shape[1])

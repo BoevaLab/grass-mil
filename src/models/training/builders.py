@@ -55,9 +55,7 @@ def validate_task_config(task_cfg: Dict[str, Any]) -> None:
         )
 
 
-def _resolve_encoder_cfg(
-    encoder_cfg: Dict[str, Any], inferred_input_dim: int
-) -> Dict[str, Any]:
+def _resolve_encoder_cfg(encoder_cfg: Dict[str, Any], inferred_input_dim: int) -> Dict[str, Any]:
     cfg = dict(encoder_cfg)
     if cfg.get("input_dim", 0) in (None, 0):
         if inferred_input_dim <= 0:

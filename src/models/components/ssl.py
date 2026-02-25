@@ -40,9 +40,7 @@ class BGRL(nn.Module):
             param.requires_grad = False
 
     def trainable_parameters(self):
-        return list(self.online_encoder.parameters()) + list(
-            self.predictor.parameters()
-        )
+        return list(self.online_encoder.parameters()) + list(self.predictor.parameters())
 
     @torch.no_grad()
     def update_target_network(self, momentum: float):

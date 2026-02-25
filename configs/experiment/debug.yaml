@@ -23,4 +23,3 @@ data:
   split:
     train_val_test_split: [1.0, 0.0, 0.0]
     split_by: sample
-  

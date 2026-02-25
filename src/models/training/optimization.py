@@ -40,7 +40,9 @@ def instantiate_scheduler_with_warmup(
     optimizer: torch.optim.Optimizer,
     warmup_cfg: Optional[Dict[str, Any] | DictConfig] = None,
 ):
-    warm_cfg = warmup_cfg if isinstance(warmup_cfg, DictConfig) else OmegaConf.create(warmup_cfg or {})
+    warm_cfg = (
+        warmup_cfg if isinstance(warmup_cfg, DictConfig) else OmegaConf.create(warmup_cfg or {})
+    )
     warmup_enabled = bool(warm_cfg.get("enabled", False))
     if not warmup_enabled:
         return instantiate_scheduler(cfg, optimizer)

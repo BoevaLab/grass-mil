@@ -70,15 +70,12 @@ def _discover_folds(cfg: DictConfig) -> List[Dict[str, Optional[str]]]:
         return folds
 
     if fold_unit != "region":
-        raise ValueError(
-            "data.split.loocv.fold_unit must be one of ['region', 'sample']."
-        )
+        raise ValueError("data.split.loocv.fold_unit must be one of ['region', 'sample'].")
 
     region_col = str(cfg.data.manifest.region_id)
     if region_col not in df.columns:
         raise ValueError(
-            "Region-based LOOCV requires a region column in manifest. "
-            f"Missing '{region_col}'."
+            "Region-based LOOCV requires a region column in manifest. " f"Missing '{region_col}'."
         )
 
     pairs = (
@@ -244,15 +241,11 @@ def run_loocv(cfg: DictConfig) -> Dict[str, Any]:
             if bool(cfg.loocv.force_precompute_per_fold):
                 fold_cfg.data.force_precompute = True
             if bool(cfg.loocv.per_fold_processed_dir):
-                fold_cfg.data.processed_dir = str(
-                    base_processed_dir / f"fold_{fold_slug}"
-                )
+                fold_cfg.data.processed_dir = str(base_processed_dir / f"fold_{fold_slug}")
             fold_cfg.paths.output_dir = str(base_output_dir / f"fold_{fold_slug}")
             fold_cfg.task_name = f"{cfg.task_name}_fold_{fold_slug}"
             fold_cfg.tags = (
-                list(cfg.tags) + [f"loocv:{fold_id}"]
-                if cfg.get("tags")
-                else [f"loocv:{fold_id}"]
+                list(cfg.tags) + [f"loocv:{fold_id}"] if cfg.get("tags") else [f"loocv:{fold_id}"]
             )
 
         log.info(f"Starting fold: {fold_id}")

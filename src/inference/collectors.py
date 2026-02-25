@@ -31,9 +31,7 @@ def _stack_optional_tensors(values: List[torch.Tensor]) -> Optional[torch.Tensor
 
 def _as_positive_count_tensor(values: Any, *, expected_length: int) -> torch.Tensor:
     if values is None:
-        raise ValueError(
-            "Missing required 'embedding_bag_counts' while collecting embeddings."
-        )
+        raise ValueError("Missing required 'embedding_bag_counts' while collecting embeddings.")
     if isinstance(values, torch.Tensor):
         counts = values.detach().cpu().reshape(-1).float()
     else:
@@ -71,9 +69,7 @@ def collect_inference_payload(
     include_node_embeddings: bool = False,
 ) -> CollectedInferencePayload:
     """Collect predictions and optional embeddings from a single predict pass."""
-    outputs = deque(
-        trainer.predict(model=model, datamodule=datamodule, ckpt_path=ckpt_path)
-    )
+    outputs = deque(trainer.predict(model=model, datamodule=datamodule, ckpt_path=ckpt_path))
 
     bag_ids: List[str] = []
     logits_chunks: List[torch.Tensor] = []
@@ -137,9 +133,7 @@ def collect_inference_payload(
                     "Mismatch between bag_ids and row_region_ids within predict chunk: "
                     f"{len(chunk_bag_ids)} ids vs {len(chunk_row_region_ids)} row ids."
                 )
-            row_region_ids.extend(
-                [None if v is None else str(v) for v in chunk_row_region_ids]
-            )
+            row_region_ids.extend([None if v is None else str(v) for v in chunk_row_region_ids])
 
         chunk_row_sample_ids = chunk.get("row_sample_ids")
         if chunk_row_sample_ids is None:
@@ -150,9 +144,7 @@ def collect_inference_payload(
                     "Mismatch between bag_ids and row_sample_ids within predict chunk: "
                     f"{len(chunk_bag_ids)} ids vs {len(chunk_row_sample_ids)} row ids."
                 )
-            row_sample_ids.extend(
-                [None if v is None else str(v) for v in chunk_row_sample_ids]
-            )
+            row_sample_ids.extend([None if v is None else str(v) for v in chunk_row_sample_ids])
 
         attention_rows.extend(
             _align_chunk_attention_to_rows(chunk_bag_ids, chunk.get("bag_attention"))
@@ -264,9 +256,7 @@ def collect_inference_payload(
     if bag_logits is None:
         raise ValueError("No logits were collected from predict outputs.")
     bag_targets = _stack_optional_tensors(target_chunks) if expect_targets else None
-    bag_attention = (
-        attention_rows if any(attn is not None for attn in attention_rows) else None
-    )
+    bag_attention = attention_rows if any(attn is not None for attn in attention_rows) else None
     instance_logits = _stack_optional_tensors(instance_logits_chunks)
     instance_attention_logits = _stack_optional_tensors(instance_attention_logits_chunks)
 
@@ -332,10 +322,7 @@ def collect_inference_payload(
             raise ValueError("No embeddings were collected from predict outputs.")
         ordered_bag_ids = sorted(bag_emb_sums.keys())
         graph_embs = torch.stack(
-            [
-                bag_emb_sums[bag_id] / bag_emb_weights[bag_id]
-                for bag_id in ordered_bag_ids
-            ],
+            [bag_emb_sums[bag_id] / bag_emb_weights[bag_id] for bag_id in ordered_bag_ids],
             dim=0,
         )
         embedding_payload = EmbeddingPayload(

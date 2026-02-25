@@ -34,8 +34,7 @@ def _write_manifest(path: Path) -> None:
 def _write_manifest_for_sample_ids(path: Path, sample_ids: list[str]) -> None:
     rows = ["sample_id,input_path,input_type,region_id"]
     rows.extend(
-        f"{sample_id},/tmp/{idx}.csv,csv,r{idx}"
-        for idx, sample_id in enumerate(sample_ids)
+        f"{sample_id},/tmp/{idx}.csv,csv,r{idx}" for idx, sample_id in enumerate(sample_ids)
     )
     path.write_text("\n".join(rows) + "\n")
 
@@ -97,9 +96,7 @@ def test_loocv_runs_with_safe_isolation_flags(tmp_path: Path, monkeypatch) -> No
     def _fake_train(_cfg):
         return {"val/loss": 1.23}, {}
 
-    monkeypatch.setattr(
-        "src.loocv._discover_viable_fold_ids", lambda _cfg: ["s0", "s1"]
-    )
+    monkeypatch.setattr("src.loocv._discover_viable_fold_ids", lambda _cfg: ["s0", "s1"])
     monkeypatch.setattr("src.loocv.train", _fake_train)
     summary = run_loocv(cfg)
     summary_path = Path(cfg.paths.output_dir) / "summary.json"
@@ -143,9 +140,7 @@ def test_loocv_uses_unique_dirs_for_colliding_sanitized_fold_ids(
     GlobalHydra.instance().clear()
 
 
-def test_loocv_fails_fast_when_selected_fold_not_viable(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_loocv_fails_fast_when_selected_fold_not_viable(tmp_path: Path, monkeypatch) -> None:
     cfg = _make_loocv_cfg(tmp_path)
     _write_manifest(Path(cfg.data.raw_manifest_path))
     with open_dict(cfg):
@@ -167,9 +162,7 @@ def test_loocv_fails_fast_when_selected_fold_not_viable(
     GlobalHydra.instance().clear()
 
 
-def test_loocv_preflight_passes_and_runs_all_selected_folds(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_loocv_preflight_passes_and_runs_all_selected_folds(tmp_path: Path, monkeypatch) -> None:
     cfg = _make_loocv_cfg(tmp_path)
     _write_manifest_for_sample_ids(Path(cfg.data.raw_manifest_path), ["s0", "s1", "s2"])
     with open_dict(cfg):
@@ -183,9 +176,7 @@ def test_loocv_preflight_passes_and_runs_all_selected_folds(
         call_count["n"] += 1
         return {"val/loss": 0.75}, {}
 
-    monkeypatch.setattr(
-        "src.loocv._discover_viable_fold_ids", lambda _cfg: ["s0", "s1", "s2"]
-    )
+    monkeypatch.setattr("src.loocv._discover_viable_fold_ids", lambda _cfg: ["s0", "s1", "s2"])
     monkeypatch.setattr("src.loocv.train", _fake_train)
 
     summary = run_loocv(cfg)

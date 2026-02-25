@@ -7,9 +7,7 @@ try:
     from torch_geometric.data import Data
     from torch_geometric.loader import DataLoader
 except Exception as exc:  # pragma: no cover
-    raise ImportError(
-        "torch_geometric is required for synthetic test datamodule"
-    ) from exc
+    raise ImportError("torch_geometric is required for synthetic test datamodule") from exc
 
 
 def _make_graph(
@@ -56,13 +54,9 @@ class SyntheticBagDataModule(L.LightningDataModule):
     def setup(self, stage=None):
         data = []
         for i in range(self.graphs_per_region):
+            data.append(_make_graph("region_0", 0.0, input_dim=self.input_dim, patch_idx=2 * i))
             data.append(
-                _make_graph("region_0", 0.0, input_dim=self.input_dim, patch_idx=2 * i)
-            )
-            data.append(
-                _make_graph(
-                    "region_1", 1.0, input_dim=self.input_dim, patch_idx=2 * i + 1
-                )
+                _make_graph("region_1", 1.0, input_dim=self.input_dim, patch_idx=2 * i + 1)
             )
         self.dataset_train = data
         self.dataset_val = data

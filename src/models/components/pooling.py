@@ -13,9 +13,7 @@ try:
         global_mean_pool,
     )
 except Exception as exc:  # pragma: no cover
-    raise ImportError(
-        "torch_geometric is required for src.models.components.pooling"
-    ) from exc
+    raise ImportError("torch_geometric is required for src.models.components.pooling") from exc
 
 
 class GraphPooling(nn.Module):

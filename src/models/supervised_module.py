@@ -86,9 +86,7 @@ class SupervisedModule(L.LightningModule):
         # MIL-specific config -- only meaningful when use_attention is True.
         if self.use_attention:
             self.region_accum_cfg = dict(self.task_cfg.get("region_accumulation", {}))
-            self.region_accum_enabled = bool(
-                self.region_accum_cfg.get("enabled", False)
-            )
+            self.region_accum_enabled = bool(self.region_accum_cfg.get("enabled", False))
             self.region_accum_hyperbatch_size = int(
                 self.region_accum_cfg.get("hyperbatch_size", 8)
             )
@@ -276,10 +274,7 @@ class SupervisedModule(L.LightningModule):
             sub_logits = patch_logits.index_select(0, idx)
             instance_logits_chunks.append(sub_logits)
             instance_patch_ids.extend(
-                [
-                    patch_ids[i] if patch_ids[i] is not None else str(bag_id)
-                    for i in indices
-                ]
+                [patch_ids[i] if patch_ids[i] is not None else str(bag_id) for i in indices]
             )
             instance_region_ids.extend([region_ids[i] for i in indices])
             instance_sample_ids.extend([sample_ids[i] for i in indices])
@@ -320,9 +315,7 @@ class SupervisedModule(L.LightningModule):
             if not indices:
                 continue
             idx = torch.tensor(indices, dtype=torch.long, device=graph_emb.device)
-            bag_graph_embeddings.append(
-                graph_emb.index_select(0, idx).mean(dim=0, keepdim=True)
-            )
+            bag_graph_embeddings.append(graph_emb.index_select(0, idx).mean(dim=0, keepdim=True))
             bag_counts.append(int(idx.numel()))
 
         payload: Dict[str, Any] = {
@@ -346,8 +339,7 @@ class SupervisedModule(L.LightningModule):
                     node_emb.shape[0], dtype=torch.long, device=node_emb.device
                 )
             node_bag_ids = [
-                str(bag_ids[int(graph_idx)])
-                for graph_idx in batch_index.detach().cpu()
+                str(bag_ids[int(graph_idx)]) for graph_idx in batch_index.detach().cpu()
             ]
             payload["node_embeddings"] = node_emb
             payload["node_bag_ids"] = node_bag_ids
@@ -373,12 +365,8 @@ class SupervisedModule(L.LightningModule):
         bag_graph_embeddings = []
         bag_counts: list[int] = []
         for bag_id in ordered_bag_ids:
-            idx = torch.tensor(
-                bag_groups[bag_id], dtype=torch.long, device=graph_emb.device
-            )
-            bag_graph_embeddings.append(
-                graph_emb.index_select(0, idx).mean(dim=0, keepdim=True)
-            )
+            idx = torch.tensor(bag_groups[bag_id], dtype=torch.long, device=graph_emb.device)
+            bag_graph_embeddings.append(graph_emb.index_select(0, idx).mean(dim=0, keepdim=True))
             bag_counts.append(int(idx.numel()))
 
         payload: Dict[str, Any] = {
@@ -416,9 +404,7 @@ class SupervisedModule(L.LightningModule):
                     embeddings=graph_emb,
                     attention=self.attention,
                     bag_groups=bag_groups,
-                    max_instances_per_bag=int(
-                        self.task_cfg.get("max_instances_per_bag", 0)
-                    ),
+                    max_instances_per_bag=int(self.task_cfg.get("max_instances_per_bag", 0)),
                     instance_sampling=self.task_cfg.get("instance_sampling", "all"),
                 )
             )
@@ -426,9 +412,7 @@ class SupervisedModule(L.LightningModule):
             bag_logits, ordered_bag_ids, bag_indices = aggregate_bag_logits_mean(
                 patch_logits,
                 bag_groups,
-                max_instances_per_bag=int(
-                    self.task_cfg.get("max_instances_per_bag", 0)
-                ),
+                max_instances_per_bag=int(self.task_cfg.get("max_instances_per_bag", 0)),
                 instance_sampling=self.task_cfg.get("instance_sampling", "all"),
             )
             bag_attention = None
@@ -442,9 +426,7 @@ class SupervisedModule(L.LightningModule):
                 target_columns=self.task_cfg.get("target_columns"),
             )
         elif not allow_missing_targets:
-            raise ValueError(
-                "Batch is missing graph_y required for supervised loss computation."
-            )
+            raise ValueError("Batch is missing graph_y required for supervised loss computation.")
 
         return {
             "patch_logits": patch_logits,
@@ -508,9 +490,7 @@ class SupervisedModule(L.LightningModule):
             bag_indices=bag_indices,
             bag_ids=bag_ids,
             bag_attention=bag_attention,
-            target_mode=str(
-                self.node_aux_cfg.get("target_mode", "attention_shaped_ti")
-            ),
+            target_mode=str(self.node_aux_cfg.get("target_mode", "attention_shaped_ti")),
         )
 
         node_aux_loss = None
@@ -525,9 +505,7 @@ class SupervisedModule(L.LightningModule):
 
         entropy_reg = None
         if entropy_enabled:
-            entropy_mode = str(
-                self.entropy_reg_cfg.get("mode", "attention_shaped_target")
-            )
+            entropy_mode = str(self.entropy_reg_cfg.get("mode", "attention_shaped_target"))
             if entropy_mode == "attention":
                 entropy_values = torch.cat(
                     [bag_attention[bag_id].reshape(-1, 1) for bag_id in bag_ids],
@@ -537,8 +515,7 @@ class SupervisedModule(L.LightningModule):
                 entropy_values = aux_targets
             else:
                 raise ValueError(
-                    "entropy_reg.mode must be one of "
-                    "['attention', 'attention_shaped_target']"
+                    "entropy_reg.mode must be one of " "['attention', 'attention_shaped_target']"
                 )
             entropy_reg = compute_entropy_regularization(entropy_values)
 
@@ -554,13 +531,9 @@ class SupervisedModule(L.LightningModule):
             return region_loss
 
         region_w = float(self.loss_weights_cfg.get("region", 1.0))
-        node_w = float(
-            self.node_aux_cfg.get("weight", self.loss_weights_cfg.get("node_aux", 1.0))
-        )
+        node_w = float(self.node_aux_cfg.get("weight", self.loss_weights_cfg.get("node_aux", 1.0)))
         entropy_w = float(
-            self.entropy_reg_cfg.get(
-                "weight", self.loss_weights_cfg.get("entropy", 0.0)
-            )
+            self.entropy_reg_cfg.get("weight", self.loss_weights_cfg.get("entropy", 0.0))
         )
         total = region_w * region_loss
         if node_aux_loss is not None:
@@ -580,9 +553,7 @@ class SupervisedModule(L.LightningModule):
         bag_indices: list[list[int]],
         bag_attention: Optional[dict[str, torch.Tensor]],
         stage: str,
-    ) -> tuple[
-        torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor], torch.Tensor
-    ]:
+    ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor], torch.Tensor]:
         region_loss = self._compute_region_loss(
             bag_logits=bag_logits,
             bag_targets=bag_targets,
@@ -652,10 +623,7 @@ class SupervisedModule(L.LightningModule):
                 on_epoch=True,
                 prog_bar=stage != "train",
             )
-        elif (
-            stage in {"train", "test"}
-            and self.task_cfg["target_type"] == "categorical"
-        ):
+        elif stage in {"train", "test"} and self.task_cfg["target_type"] == "categorical":
             acc = compute_categorical_accuracy(bag_logits, bag_targets)
             self.log(
                 f"{stage}/acc",
@@ -817,9 +785,7 @@ class SupervisedModule(L.LightningModule):
         if out["bag_targets"] is not None:
             self._val_bag_targets_chunks.append(out["bag_targets"].detach().cpu())
         self._val_instance_logits_chunks.append(metadata["instance_logits"].detach().cpu())
-        self._val_instance_patch_ids.extend(
-            [str(v) for v in metadata["instance_patch_ids"]]
-        )
+        self._val_instance_patch_ids.extend([str(v) for v in metadata["instance_patch_ids"]])
         self._val_instance_region_ids.extend(metadata["instance_region_ids"])
         self._val_instance_sample_ids.extend(metadata["instance_sample_ids"])
         if "instance_attention_logits" in metadata:
@@ -833,15 +799,9 @@ class SupervisedModule(L.LightningModule):
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         out = self._forward_bags(batch, allow_missing_targets=True)
-        emit_instance_payload = bool(
-            getattr(self, "_predict_emit_instance_payload", True)
-        )
-        emit_embeddings_payload = bool(
-            getattr(self, "_predict_emit_embeddings_payload", False)
-        )
-        emit_node_embeddings = bool(
-            getattr(self, "_predict_emit_node_embeddings", False)
-        )
+        emit_instance_payload = bool(getattr(self, "_predict_emit_instance_payload", True))
+        emit_embeddings_payload = bool(getattr(self, "_predict_emit_embeddings_payload", False))
+        emit_node_embeddings = bool(getattr(self, "_predict_emit_node_embeddings", False))
         metadata = self._build_predict_group_metadata(
             batch,
             patch_logits=out["patch_logits"],
@@ -893,10 +853,7 @@ class SupervisedModule(L.LightningModule):
     def _flush_region_buffer_if_needed(self, *, force: bool) -> list[torch.Tensor]:
         if not self._region_total_loss_buffer:
             return []
-        if (
-            not force
-            and len(self._region_total_loss_buffer) < self.region_accum_hyperbatch_size
-        ):
+        if not force and len(self._region_total_loss_buffer) < self.region_accum_hyperbatch_size:
             return []
 
         optimizer = self.optimizers()
@@ -908,14 +865,9 @@ class SupervisedModule(L.LightningModule):
             if force:
                 chunk = self._region_total_loss_buffer
             else:
-                if (
-                    len(self._region_total_loss_buffer)
-                    < self.region_accum_hyperbatch_size
-                ):
+                if len(self._region_total_loss_buffer) < self.region_accum_hyperbatch_size:
                     break
-                chunk = self._region_total_loss_buffer[
-                    : self.region_accum_hyperbatch_size
-                ]
+                chunk = self._region_total_loss_buffer[: self.region_accum_hyperbatch_size]
 
             total_loss = torch.stack(chunk, dim=0).mean()
             self.manual_backward(total_loss)
@@ -1063,19 +1015,13 @@ class SupervisedModule(L.LightningModule):
                     out.append(param)
                 return out
 
-            backbone_params = _collect_params(self.encoder) + _collect_params(
-                self.graph_head
-            )
+            backbone_params = _collect_params(self.encoder) + _collect_params(self.graph_head)
             attention_params = _collect_params(self.attention)
             param_groups: list[dict] = []
             if backbone_params:
-                param_groups.append(
-                    {"params": backbone_params, "lr": float(backbone_lr)}
-                )
+                param_groups.append({"params": backbone_params, "lr": float(backbone_lr)})
             if attention_params:
-                param_groups.append(
-                    {"params": attention_params, "lr": float(attention_lr)}
-                )
+                param_groups.append({"params": attention_params, "lr": float(attention_lr)})
             if param_groups:
                 params = param_groups
 
@@ -1164,25 +1110,14 @@ class SupervisedModule(L.LightningModule):
             if chunk_bag_targets is not None and int(chunk_bag_targets.shape[0]) > 0:
                 bag_targets_chunks.append(chunk_bag_targets)
             chunk_instance_logits = chunk.get("instance_logits")
-            if (
-                chunk_instance_logits is not None
-                and int(chunk_instance_logits.shape[0]) > 0
-            ):
+            if chunk_instance_logits is not None and int(chunk_instance_logits.shape[0]) > 0:
                 instance_logits_chunks.append(chunk_instance_logits)
-                instance_patch_ids.extend(
-                    [str(v) for v in chunk.get("instance_patch_ids", [])]
-                )
+                instance_patch_ids.extend([str(v) for v in chunk.get("instance_patch_ids", [])])
                 instance_region_ids.extend(
-                    [
-                        None if v is None else str(v)
-                        for v in chunk.get("instance_region_ids", [])
-                    ]
+                    [None if v is None else str(v) for v in chunk.get("instance_region_ids", [])]
                 )
                 instance_sample_ids.extend(
-                    [
-                        None if v is None else str(v)
-                        for v in chunk.get("instance_sample_ids", [])
-                    ]
+                    [None if v is None else str(v) for v in chunk.get("instance_sample_ids", [])]
                 )
             chunk_instance_attn = chunk.get("instance_attention_logits")
             if chunk_instance_attn is not None and int(chunk_instance_attn.shape[0]) > 0:

@@ -31,18 +31,12 @@ class WeightedCrossEntropyLoss(nn.Module):
         sample_weight: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         if logits.ndim != 2:
-            raise ValueError(
-                "WeightedCrossEntropyLoss expects logits with shape [N, C]"
-            )
+            raise ValueError("WeightedCrossEntropyLoss expects logits with shape [N, C]")
         target = target.long().view(-1)
         class_weight = (
-            self.class_weight.to(logits.device)
-            if self.class_weight is not None
-            else None
+            self.class_weight.to(logits.device) if self.class_weight is not None else None
         )
-        loss = nn.functional.cross_entropy(
-            logits, target, weight=class_weight, reduction="none"
-        )
+        loss = nn.functional.cross_entropy(logits, target, weight=class_weight, reduction="none")
         if sample_weight is not None:
             sw = sample_weight.view(-1).to(loss.device)
             loss = loss * sw
@@ -64,9 +58,7 @@ class WeightedBCEWithLogitsLoss(nn.Module):
             raise ValueError(
                 f"BCE logits and target must have identical shape, got {logits.shape} and {target.shape}"
             )
-        pos_weight = (
-            self.pos_weight.to(logits.device) if self.pos_weight is not None else None
-        )
+        pos_weight = self.pos_weight.to(logits.device) if self.pos_weight is not None else None
         loss = nn.functional.binary_cross_entropy_with_logits(
             logits, target.float(), pos_weight=pos_weight, reduction="none"
         )
@@ -101,9 +93,7 @@ class WeightedHuberLoss(nn.Module):
         target: torch.Tensor,
         sample_weight: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
-        loss = nn.functional.huber_loss(
-            pred, target, delta=self.delta, reduction="none"
-        )
+        loss = nn.functional.huber_loss(pred, target, delta=self.delta, reduction="none")
         sw = _reshape_sample_weight(sample_weight, target.shape, pred.device)
         if sw is not None:
             loss = loss * sw
@@ -150,8 +140,6 @@ class CoxSGDLoss(nn.Module):
         score_diff = y_pred.view(1, -1) - y_pred.view(-1, 1)
         row_max = torch.max(score_diff, dim=1, keepdim=True).values
         exp_terms = torch.exp(score_diff - row_max) * pair_mat
-        loss = row_max[:, 0][valid_sample_is] + torch.log(
-            exp_terms.sum(1)[valid_sample_is]
-        )
+        loss = row_max[:, 0][valid_sample_is] + torch.log(exp_terms.sum(1)[valid_sample_is])
         regularizer = torch.abs(pair_mat.sum(0) * y_pred).sum()
         return loss.sum() + self.regularizer_weight * regularizer

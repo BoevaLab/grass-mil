@@ -87,9 +87,9 @@ def _normalize_group_ids_with_fallback(
         use_fallback = _is_missing_group_value(primary_value)
         if use_fallback and _is_missing_group_value(fallback_value):
             raise ValueError(
-                    f"Missing both '{primary_name}' and fallback '{fallback_name}' at row {idx}; "
-                    "cannot regroup predictions for this scope."
-                )
+                f"Missing both '{primary_name}' and fallback '{fallback_name}' at row {idx}; "
+                "cannot regroup predictions for this scope."
+            )
         if use_fallback:
             fallback_count += 1
         resolved.append(str(fallback_value if use_fallback else primary_value))
@@ -163,9 +163,7 @@ def _instance_group_ids(payload: BatchPredictionPayload, *, bag_scope: str) -> L
     )
 
 
-def _group_row_indices(
-    payload: BatchPredictionPayload, *, bag_scope: str
-) -> Dict[str, List[int]]:
+def _group_row_indices(payload: BatchPredictionPayload, *, bag_scope: str) -> Dict[str, List[int]]:
     row_group_ids = _row_group_ids(payload, bag_scope=bag_scope)
     return _group_indices(row_group_ids)
 
@@ -188,13 +186,10 @@ def _sample_indices(
 
 def _validate_subsample_fraction(subsample_fraction: float) -> None:
     if subsample_fraction == 0.0:
-        raise ValueError(
-            "aggregation.subsample_fraction=0.0 selects no instances and is invalid."
-        )
+        raise ValueError("aggregation.subsample_fraction=0.0 selects no instances and is invalid.")
     if not (0.0 <= subsample_fraction <= 1.0):
         raise ValueError(
-            "aggregation.subsample_fraction must be within [0, 1]. "
-            f"Got {subsample_fraction}."
+            "aggregation.subsample_fraction must be within [0, 1]. " f"Got {subsample_fraction}."
         )
 
 
@@ -261,9 +256,7 @@ def aggregate_group_logits(
             instance_logits = payload.instance_logits.index_select(0, idx)
             attn_logits = payload.instance_attention_logits.index_select(0, idx).reshape(-1)
             attn_scores = torch.softmax(attn_logits, dim=0)
-            agg_logits = (instance_logits * attn_scores.unsqueeze(-1)).sum(
-                dim=0, keepdim=True
-            )
+            agg_logits = (instance_logits * attn_scores.unsqueeze(-1)).sum(dim=0, keepdim=True)
             aggregated_ids.append(bag_id)
             aggregated_logits.append(agg_logits)
             aggregated_attention_rows.append(attn_scores.detach().cpu())
@@ -285,12 +278,8 @@ def aggregate_group_logits(
                     bag_targets = payload.bag_targets.index_select(0, target_idx)
                     aggregated_targets.append(bag_targets[:1])
             else:
-                aggregated_row_region_ids.append(
-                    bag_id if bag_scope == "region" else None
-                )
-                aggregated_row_sample_ids.append(
-                    bag_id if bag_scope == "sample" else None
-                )
+                aggregated_row_region_ids.append(bag_id if bag_scope == "region" else None)
+                aggregated_row_sample_ids.append(bag_id if bag_scope == "sample" else None)
     elif payload.instance_logits is not None:
         instance_group_ids = _instance_group_ids(payload, bag_scope=bag_scope)
         grouped_instance_indices = _group_indices(instance_group_ids)
@@ -319,12 +308,8 @@ def aggregate_group_logits(
                     bag_targets = payload.bag_targets.index_select(0, target_idx)
                     aggregated_targets.append(bag_targets[:1])
             else:
-                aggregated_row_region_ids.append(
-                    bag_id if bag_scope == "region" else None
-                )
-                aggregated_row_sample_ids.append(
-                    bag_id if bag_scope == "sample" else None
-                )
+                aggregated_row_region_ids.append(bag_id if bag_scope == "region" else None)
+                aggregated_row_sample_ids.append(bag_id if bag_scope == "sample" else None)
     else:
         row_group_ids = _row_group_ids(payload, bag_scope=bag_scope)
         grouped_row_indices = _group_indices(row_group_ids)
@@ -336,14 +321,10 @@ def aggregate_group_logits(
             aggregated_ids.append(bag_id)
             aggregated_logits.append(agg_logits)
             aggregated_row_region_ids.append(
-                payload.row_region_ids[indices[0]]
-                if payload.row_region_ids is not None
-                else None
+                payload.row_region_ids[indices[0]] if payload.row_region_ids is not None else None
             )
             aggregated_row_sample_ids.append(
-                payload.row_sample_ids[indices[0]]
-                if payload.row_sample_ids is not None
-                else None
+                payload.row_sample_ids[indices[0]] if payload.row_sample_ids is not None else None
             )
             if payload.bag_targets is not None:
                 bag_targets = payload.bag_targets.index_select(0, idx)

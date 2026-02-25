@@ -30,9 +30,7 @@ def evaluate(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)
 
     if cfg.get("model") is None:
-        raise ValueError(
-            "No model config provided. Set `model=...` in your Hydra config."
-        )
+        raise ValueError("No model config provided. Set `model=...` in your Hydra config.")
     log.info(f"Instantiating model <{cfg.model._target_}>")
     model: LightningModule = hydra.utils.instantiate(cfg.model)
 

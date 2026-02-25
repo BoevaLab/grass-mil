@@ -49,9 +49,7 @@ def _filter_val_monitor_callbacks(
     filtered = OmegaConf.create({})
     removed: List[str] = []
     for name, cb_conf in callbacks_cfg.items():
-        monitor = (
-            cb_conf.get("monitor") if isinstance(cb_conf, DictConfig) else None
-        )
+        monitor = cb_conf.get("monitor") if isinstance(cb_conf, DictConfig) else None
         if isinstance(monitor, str) and monitor.startswith("val/"):
             removed.append(str(name))
             continue
@@ -69,9 +67,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)
 
     if cfg.get("model") is None:
-        raise ValueError(
-            "No model config provided. Set `model=...` in your Hydra config."
-        )
+        raise ValueError("No model config provided. Set `model=...` in your Hydra config.")
     log.info(f"Instantiating model <{cfg.model._target_}>")
     model: LightningModule = hydra.utils.instantiate(cfg.model)
 
@@ -90,9 +86,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
 
     log.info(f"Instantiating trainer <{cfg.trainer._target_}>")
-    trainer: Trainer = hydra.utils.instantiate(
-        cfg.trainer, callbacks=callbacks, logger=logger
-    )
+    trainer: Trainer = hydra.utils.instantiate(cfg.trainer, callbacks=callbacks, logger=logger)
 
     object_dict = {
         "cfg": cfg,
@@ -124,9 +118,7 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         if checkpoint_callback is not None:
             ckpt_path = checkpoint_callback.best_model_path
             if ckpt_path == "":
-                log.warning(
-                    "Best ckpt not found! Using current weights for testing..."
-                )
+                log.warning("Best ckpt not found! Using current weights for testing...")
                 ckpt_path = None
         else:
             log.warning(

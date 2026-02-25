@@ -12,9 +12,7 @@ from .pooling import GraphPooling
 try:
     from torch_geometric.nn import GATConv, GCNConv, GINConv, GINEConv, SAGEConv
 except Exception as exc:  # pragma: no cover
-    raise ImportError(
-        "torch_geometric is required for src.models.components.backbones"
-    ) from exc
+    raise ImportError("torch_geometric is required for src.models.components.backbones") from exc
 
 
 NormType = Literal["batchnorm", "layernorm", "none"]
@@ -79,9 +77,7 @@ class GNNEncoder(nn.Module):
             else nn.Linear(cfg.input_dim, cfg.hidden_dim)
         )
 
-        self.layers = nn.ModuleList(
-            [self._build_conv_layer() for _ in range(cfg.num_layers)]
-        )
+        self.layers = nn.ModuleList([self._build_conv_layer() for _ in range(cfg.num_layers)])
         self.norms = nn.ModuleList(
             [_get_norm(cfg.norm, cfg.hidden_dim) for _ in range(cfg.num_layers)]
         )
@@ -89,9 +85,7 @@ class GNNEncoder(nn.Module):
         combined_dim = self._combined_node_dim()
         final_dim = cfg.out_dim if cfg.out_dim is not None else combined_dim
         self.output_proj = (
-            nn.Identity()
-            if final_dim == combined_dim
-            else nn.Linear(combined_dim, final_dim)
+            nn.Identity() if final_dim == combined_dim else nn.Linear(combined_dim, final_dim)
         )
         self.output_dim = final_dim
         self.graph_pool = (
@@ -132,9 +126,7 @@ class GNNEncoder(nn.Module):
             return SAGEConv(hdim, hdim, aggr="mean")
         if ctype == "gine":
             if self.cfg.edge_attr_dim is None:
-                raise ValueError(
-                    "conv_type='gine' requires edge_attr_dim in EncoderConfig."
-                )
+                raise ValueError("conv_type='gine' requires edge_attr_dim in EncoderConfig.")
             mlp = nn.Sequential(
                 nn.Linear(hdim, hdim * 2),
                 nn.ReLU(),
@@ -148,9 +140,7 @@ class GNNEncoder(nn.Module):
 
     def _validate_edge_attr_config(self) -> None:
         if self.cfg.conv_type == "gine" and self.cfg.edge_attr_dim is None:
-            raise ValueError(
-                "conv_type='gine' requires edge_attr_dim to be set in EncoderConfig."
-            )
+            raise ValueError("conv_type='gine' requires edge_attr_dim to be set in EncoderConfig.")
         if self.cfg.use_edge_attr and not self._supports_edge_attr():
             warnings.warn(
                 f"use_edge_attr=True is ignored for conv_type='{self.cfg.conv_type}'. "
@@ -176,20 +166,14 @@ class GNNEncoder(nn.Module):
                     "use_edge_attr=True with conv_type='gcn' requires edge_attr in forward inputs."
                 )
             if edge_attr.dim() != 2:
-                raise ValueError(
-                    "edge_attr must have shape [num_edges, num_edge_features]."
-                )
+                raise ValueError("edge_attr must have shape [num_edges, num_edge_features].")
             if self.cfg.edge_weight_index >= edge_attr.size(1):
-                raise ValueError(
-                    "edge_weight_index is out of range for provided edge_attr."
-                )
+                raise ValueError("edge_weight_index is out of range for provided edge_attr.")
             edge_weight = edge_attr[:, self.cfg.edge_weight_index]
             return layer(x, edge_index, edge_weight=edge_weight)
         if self.cfg.conv_type == "gine":
             if edge_attr is None:
-                raise ValueError(
-                    "conv_type='gine' requires edge_attr in forward inputs."
-                )
+                raise ValueError("conv_type='gine' requires edge_attr in forward inputs.")
             return layer(x, edge_index, edge_attr)
         return layer(x, edge_index)
 
@@ -227,12 +211,8 @@ class GNNEncoder(nn.Module):
         if not return_graph_embedding:
             return node_emb
         if self.graph_pool is None:
-            raise ValueError(
-                "return_graph_embedding=True requires cfg.pooling to be set"
-            )
+            raise ValueError("return_graph_embedding=True requires cfg.pooling to be set")
         if batch is None:
-            batch = torch.zeros(
-                node_emb.size(0), dtype=torch.long, device=node_emb.device
-            )
+            batch = torch.zeros(node_emb.size(0), dtype=torch.long, device=node_emb.device)
         graph_emb = self.graph_pool(node_emb, batch)
         return node_emb, graph_emb

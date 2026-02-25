@@ -154,7 +154,9 @@ def test_spatial_omics_datamodule_precompute(tmp_path: Path) -> None:
     assert data.categorical_slices["cell_type"] == 0
 
     index_payload = json.loads((data_dir / "processed" / "processed_index.json").read_text())
-    assert all(entry.get("split") in {"train", "val", "test"} for entry in index_payload["entries"])
+    assert all(
+        entry.get("split") in {"train", "val", "test"} for entry in index_payload["entries"]
+    )
 
 
 def test_spatial_omics_datamodule_indices_no_molecular(tmp_path: Path) -> None:
@@ -714,9 +716,7 @@ def test_loocv_supports_sample_fold_unit() -> None:
 
 def _build_loocv_train_only_dm(tmp_path: Path, processed_dir: Path):
     manifest_path = tmp_path / "manifest.csv"
-    manifest_path.write_text(
-        "sample_id,input_path,input_type\ns0,/tmp/fake.csv,csv\n"
-    )
+    manifest_path.write_text("sample_id,input_path,input_type\ns0,/tmp/fake.csv,csv\n")
 
     from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
 
@@ -788,13 +788,9 @@ def test_loocv_train_only_reducer_rejects_existing_processed_index(
     processed_dir = tmp_path / "processed"
     processed_dir.mkdir(parents=True)
     (processed_dir / "processed_index.json").write_text("{}")
-    dm = _build_loocv_train_only_dm(
-        tmp_path=tmp_path, processed_dir=processed_dir
-    )
+    dm = _build_loocv_train_only_dm(tmp_path=tmp_path, processed_dir=processed_dir)
 
-    with pytest.raises(
-        ValueError, match="cannot reuse an existing processed_index"
-    ):
+    with pytest.raises(ValueError, match="cannot reuse an existing processed_index"):
         dm.prepare_data()
 
 
@@ -802,9 +798,7 @@ def test_loocv_train_only_reducer_allows_fresh_processed_dir_without_force(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     processed_dir = tmp_path / "processed_fresh"
-    dm = _build_loocv_train_only_dm(
-        tmp_path=tmp_path, processed_dir=processed_dir
-    )
+    dm = _build_loocv_train_only_dm(tmp_path=tmp_path, processed_dir=processed_dir)
 
     calls = {"precompute": 0}
 

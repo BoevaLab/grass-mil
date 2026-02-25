@@ -60,9 +60,7 @@ class BGRLModule(L.LightningModule):
         if encoder_cfg.get("input_dim", 0) in (None, 0):
             inferred = infer_encoder_input_dim(self)
             if inferred <= 0:
-                raise ValueError(
-                    "BGRLModule could not infer encoder.input_dim from datamodule."
-                )
+                raise ValueError("BGRLModule could not infer encoder.input_dim from datamodule.")
             encoder_cfg["input_dim"] = inferred
         self.encoder = build_encoder(EncoderConfig(**encoder_cfg))
         self.ssl_model = build_ssl(True, self.encoder, dict(self.hparams.ssl))
@@ -143,9 +141,7 @@ class BGRLModule(L.LightningModule):
         step = max(int(self.global_step) - 1, 0)
         momentum = self._momentum_scheduler.value(step)
         self.ssl_model.update_target_network(momentum)
-        self.log(
-            "train/momentum", momentum, on_step=True, on_epoch=False, prog_bar=False
-        )
+        self.log("train/momentum", momentum, on_step=True, on_epoch=False, prog_bar=False)
 
     def configure_optimizers(self):
         if not self._built:
@@ -155,9 +151,7 @@ class BGRLModule(L.LightningModule):
                 "Missing optimizer config for training. Compose an optim group "
                 "(for example '+optim=adamw') or set model.optim explicitly."
             )
-        optimizer = instantiate_optimizer(
-            self.optim_cfg, self.ssl_model.trainable_parameters()
-        )
+        optimizer = instantiate_optimizer(self.optim_cfg, self.ssl_model.trainable_parameters())
         scheduler = instantiate_scheduler_with_warmup(
             self.scheduler_cfg,
             optimizer,

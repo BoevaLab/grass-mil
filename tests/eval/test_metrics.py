@@ -32,9 +32,7 @@ def test_compute_regression_metrics() -> None:
         bag_attention=None,
     )
     cfg = OmegaConf.create({"categorical": {"threshold": 0.5}, "per_group": False})
-    metrics = compute_task_metrics(
-        payload=payload, target_type="regression", metrics_cfg=cfg
-    )
+    metrics = compute_task_metrics(payload=payload, target_type="regression", metrics_cfg=cfg)
     assert "mae" in metrics["global"]
     assert "rmse" in metrics["global"]
     assert "r2" in metrics["global"]
@@ -67,9 +65,7 @@ def test_compute_categorical_metrics() -> None:
         bag_attention=None,
     )
     cfg = OmegaConf.create({"categorical": {"threshold": 0.5}, "per_group": True})
-    metrics = compute_task_metrics(
-        payload=payload, target_type="categorical", metrics_cfg=cfg
-    )
+    metrics = compute_task_metrics(payload=payload, target_type="categorical", metrics_cfg=cfg)
     assert "accuracy" in metrics["global"]
     assert "balanced_accuracy" in metrics["global"]
     assert "precision" in metrics["global"]

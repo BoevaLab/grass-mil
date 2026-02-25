@@ -19,9 +19,7 @@ def load_state_dict_with_optional_mapping(
     if not ckpt_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {init_from_ckpt}")
     raw = torch.load(str(ckpt_path), map_location="cpu")
-    state_dict = (
-        raw["state_dict"] if isinstance(raw, dict) and "state_dict" in raw else raw
-    )
+    state_dict = raw["state_dict"] if isinstance(raw, dict) and "state_dict" in raw else raw
     if not isinstance(state_dict, dict):
         raise ValueError("Checkpoint must resolve to a state_dict dictionary.")
     remapped = remap_encoder_keys(state_dict, encoder_init_map=encoder_init_map)
@@ -35,9 +33,7 @@ def remap_encoder_keys(
     if encoder_init_map == "identity":
         return dict(state_dict)
     if encoder_init_map != "auto_bgrl_or_identity":
-        raise ValueError(
-            "encoder_init_map must be one of ['identity', 'auto_bgrl_or_identity']"
-        )
+        raise ValueError("encoder_init_map must be one of ['identity', 'auto_bgrl_or_identity']")
     remapped: Dict[str, torch.Tensor] = {}
     for key, value in state_dict.items():
         new_key = key

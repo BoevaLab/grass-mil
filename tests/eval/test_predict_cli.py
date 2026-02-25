@@ -63,9 +63,7 @@ class _DataModule:
 
 
 def test_plan_preforward_subsampling_applies_for_enabled_runtime_sampler() -> None:
-    datamodule = _DataModule(
-        sampler_name="shadow_native", runtime={"enabled": True}
-    )
+    datamodule = _DataModule(sampler_name="shadow_native", runtime={"enabled": True})
     cfg = OmegaConf.create(
         {
             "aggregation": {
@@ -89,9 +87,7 @@ def test_plan_preforward_subsampling_applies_for_enabled_runtime_sampler() -> No
 
 
 def test_plan_preforward_subsampling_not_requested_for_full_fraction() -> None:
-    datamodule = _DataModule(
-        sampler_name="shadow_native", runtime={"enabled": True}
-    )
+    datamodule = _DataModule(sampler_name="shadow_native", runtime={"enabled": True})
     datamodule.sampler_strategy = "keep"
     datamodule.val_sampler_strategy = "keep_val"
     cfg = OmegaConf.create(

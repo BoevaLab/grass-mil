@@ -177,7 +177,9 @@ def test_aggregate_group_logits_region_scope_raises_when_region_and_sample_missi
         row_region_ids=[None],
         row_sample_ids=[None],
     )
-    with pytest.raises(ValueError, match="Missing both 'row_region_ids' and fallback 'row_sample_ids'"):
+    with pytest.raises(
+        ValueError, match="Missing both 'row_region_ids' and fallback 'row_sample_ids'"
+    ):
         aggregate_group_logits(payload, mode="mean", bag_scope="region")
 
 
@@ -265,5 +267,7 @@ def test_instance_aggregation_raises_when_row_group_metadata_missing() -> None:
         instance_region_ids=["rA", "rA", "rB"],
         instance_sample_ids=["sA", "sA", "sB"],
     )
-    with pytest.raises(ValueError, match="Missing both 'row_region_ids' and fallback 'row_sample_ids'"):
+    with pytest.raises(
+        ValueError, match="Missing both 'row_region_ids' and fallback 'row_sample_ids'"
+    ):
         aggregate_group_logits(payload, mode="mean", bag_scope="region")
