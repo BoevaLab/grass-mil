@@ -21,12 +21,15 @@ rootutils       # standardizing the project root setup
 pre-commit      # hooks for applying linters on commit
 rich            # beautiful text formatting in terminal
 pytest          # tests
+
 # --------- data --------- #
 numpy
 pandas
 scipy
+scikit-learn
 shapely
 anndata
 torch-geometric
-rpy2
+# optional: required only for SingleCellExperiment/rds loading
+# rpy2
 # sh            # for running bash commands in some tests (linux/macos only)

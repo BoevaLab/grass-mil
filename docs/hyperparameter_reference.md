@@ -586,7 +586,7 @@ Covered files:
 | `wandb.offline` | `False` | bool | `true/false` | `logger=wandb` | `python src/train.py logger.wandb.offline=true` |
 | `wandb.id` | `null` | str/null | run ID or null | `logger=wandb` | `python src/train.py logger.wandb.id=my_id` |
 | `wandb.anonymous` | `null` | str/null | WandB anonymous mode or null | `logger=wandb` | `python src/train.py logger.wandb.anonymous=allow` |
-| `wandb.project` | `lightning-hydra-template` | str | project name | `logger=wandb` | `python src/train.py logger.wandb.project=grass-mil` |
+| `wandb.project` | `grass-mil` | str | project name | `logger=wandb` | `python src/train.py logger.wandb.project=grass-mil` |
 | `wandb.log_model` | `False` | bool | `true/false` | `logger=wandb` | `python src/train.py logger.wandb.log_model=true` |
 | `wandb.prefix` | `""` | str | prefix string | `logger=wandb` | `python src/train.py logger.wandb.prefix=exp` |
 | `wandb.group` | `""` | str | group name | `logger=wandb` | `python src/train.py logger.wandb.group=ablation` |
@@ -610,7 +610,7 @@ Covered files:
 | `comet._target_` | `lightning.pytorch.loggers.comet.CometLogger` | str | import path | `logger=comet` | `python src/train.py logger.comet._target_=...` |
 | `comet.api_key` | `${oc.env:COMET_API_TOKEN}` | str | API key/env ref | `logger=comet` | `python src/train.py logger.comet.api_key=...` |
 | `comet.save_dir` | `${paths.output_dir}` | str | path | `logger=comet` | `python src/train.py logger.comet.save_dir=/tmp/comet` |
-| `comet.project_name` | `lightning-hydra-template` | str | project name | `logger=comet` | `python src/train.py logger.comet.project_name=grass-mil` |
+| `comet.project_name` | `grass-mil` | str | project name | `logger=comet` | `python src/train.py logger.comet.project_name=grass-mil` |
 | `comet.rest_api_key` | `null` | str/null | key or null | `logger=comet` | `python src/train.py logger.comet.rest_api_key=...` |
 | `comet.experiment_key` | `null` | str/null | key or null | `logger=comet` | `python src/train.py logger.comet.experiment_key=...` |
 | `comet.offline` | `False` | bool | `true/false` | `logger=comet` | `python src/train.py logger.comet.offline=true` |
@@ -622,7 +622,7 @@ Covered files:
 |---|---|---|---|---|---|
 | `neptune._target_` | `lightning.pytorch.loggers.neptune.NeptuneLogger` | str | import path | `logger=neptune` | `python src/train.py logger.neptune._target_=...` |
 | `neptune.api_key` | `${oc.env:NEPTUNE_API_TOKEN}` | str | API key/env ref | `logger=neptune` | `python src/train.py logger.neptune.api_key=...` |
-| `neptune.project` | `username/lightning-hydra-template` | str | project slug | `logger=neptune` | `python src/train.py logger.neptune.project=org/project` |
+| `neptune.project` | `org/grass-mil` | str | project slug | `logger=neptune` | `python src/train.py logger.neptune.project=org/project` |
 | `neptune.log_model_checkpoints` | `True` | bool | `true/false` | `logger=neptune` | `python src/train.py logger.neptune.log_model_checkpoints=false` |
 | `neptune.prefix` | `""` | str | prefix | `logger=neptune` | `python src/train.py logger.neptune.prefix=exp` |
 

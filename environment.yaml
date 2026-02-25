@@ -30,6 +30,12 @@ dependencies:
   - rich=13.*
   - pre-commit=3.*
   - pytest=7.*
+  - numpy
+  - pandas
+  - scipy
+  - scikit-learn
+  - shapely
+  - anndata
 
   # --------- loggers --------- #
   # - wandb
@@ -43,3 +49,6 @@ dependencies:
       - hydra-optuna-sweeper
       - hydra-colorlog
       - rootutils
+      - torch-geometric
+      # optional: required only for SingleCellExperiment/rds loading
+      # - rpy2
