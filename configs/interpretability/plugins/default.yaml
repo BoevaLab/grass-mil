@@ -8,6 +8,8 @@ params:
     score_column: score
   neighborhood_enrichment:
     label_column: cluster_label
+    # n_perms=0 uses analytical expected/std (runtime warning emitted).
+    # Set n_perms>0 for Squidpy-style permutation expected/std + p-values.
     n_perms: 0
   filtration_curves:
     thresholds:

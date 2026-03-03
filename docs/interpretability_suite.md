@@ -104,7 +104,7 @@ Required columns for current tier-2 methods:
 - `source_id`
 - `target_id`
 - `distance` (required by filtration curves)
-- `weight` (optional, defaults to `1.0` where missing)
+- `weight` (optional; currently ignored by neighborhood enrichment, which is unweighted/count-based)
 
 ## 4) Python API
 
@@ -131,6 +131,27 @@ from src.interpretability import (
     render_interpretability_report,
 )
 ```
+
+### Neighborhood Enrichment Behavior
+
+`run_neighborhood_enrichment(...)`:
+
+- Uses unweighted edge counts (edge `weight` is ignored).
+- `undirected=true` mirrors each edge (`u->v` and `v->u`).
+- `n_perms > 0`:
+  - expected and std are estimated from label permutations
+  - enrichment is z-score `(observed - expected) / std`
+  - p-values are two-sided empirical permutation p-values
+- `n_perms = 0`:
+  - uses analytical expected/std approximation
+  - emits a warning that analytical mode is active
+
+`run_diff_neighborhood_enrichment(...)`:
+
+- Computes pairwise condition differences: `zscore(cond_a) - zscore(cond_b)`.
+- Per-condition baselines are analytical.
+- If `n_perms > 0`, only the differential p-values are permutation-based (condition-label permutations).
+- Emits a warning that analytical per-condition baselines are used.
 
 ## 5) Reduction And Clustering APIs
 

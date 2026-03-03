@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from src.interpretability.contracts import InterpretabilityDataset
 from src.interpretability.plugins.base import PluginContext
 from src.interpretability.plugins.builtin import register_builtin_plugins
 from src.interpretability.plugins.registry import get_plugin, list_plugins
 from src.interpretability.tier2.filtration import compute_filtration_curves
-from src.interpretability.tier2.neighborhood import run_neighborhood_enrichment
+from src.interpretability.tier2.neighborhood import (
+    run_diff_neighborhood_enrichment,
+    run_neighborhood_enrichment,
+)
 
 
 def _sample_dataset() -> InterpretabilityDataset:
@@ -109,3 +113,149 @@ def test_filtration_subgraph_centric_counts_both_edge_endpoints() -> None:
     # Total for cluster 0: A=3, B=2.
     assert np.allclose(curves.curves["0"]["A"], np.array([1.0, 3.0]))
     assert np.allclose(curves.curves["0"]["B"], np.array([1.0, 2.0]))
+
+
+def test_neighborhood_undirected_option_adds_reverse_direction() -> None:
+    node_table = pd.DataFrame(
+        {
+            "instance_id": ["n0", "n1"],
+            "cluster_label": ["A", "B"],
+        }
+    )
+    spatial_table = pd.DataFrame(
+        {
+            "source_id": ["n0"],
+            "target_id": ["n1"],
+            "weight": [1.0],
+        }
+    )
+    directed = run_neighborhood_enrichment(
+        node_table,
+        spatial_table,
+        label_column="cluster_label",
+        id_column="instance_id",
+        n_perms=0,
+        undirected=False,
+        warn_analytical=False,
+    )
+    undirected = run_neighborhood_enrichment(
+        node_table,
+        spatial_table,
+        label_column="cluster_label",
+        id_column="instance_id",
+        n_perms=0,
+        undirected=True,
+        warn_analytical=False,
+    )
+    assert directed.observed.loc["A", "B"] == 1.0
+    assert directed.observed.loc["B", "A"] == 0.0
+    assert undirected.observed.loc["A", "B"] == 1.0
+    assert undirected.observed.loc["B", "A"] == 1.0
+
+
+def test_neighborhood_ignores_weight_semantics() -> None:
+    node_table = pd.DataFrame(
+        {
+            "instance_id": ["n0", "n1", "n2"],
+            "cluster_label": ["A", "B", "B"],
+        }
+    )
+    spatial_table = pd.DataFrame(
+        {
+            "source_id": ["n0", "n0"],
+            "target_id": ["n1", "n2"],
+            "weight": [100.0, 0.001],
+        }
+    )
+    out = run_neighborhood_enrichment(
+        node_table,
+        spatial_table,
+        label_column="cluster_label",
+        id_column="instance_id",
+        n_perms=0,
+        undirected=False,
+        warn_analytical=False,
+    )
+    # Squidpy-style neighborhood enrichment is count-based, not weighted.
+    assert out.observed.loc["A", "B"] == 2.0
+
+
+def test_diff_neighborhood_returns_pairwise_differences_with_pvalues() -> None:
+    node_table = pd.DataFrame(
+        {
+            "instance_id": ["x0", "x1", "y0", "y1"],
+            "cluster_label": ["A", "B", "A", "B"],
+            "condition": ["X", "X", "Y", "Y"],
+        }
+    )
+    spatial_table = pd.DataFrame(
+        {
+            "source_id": ["x0", "x1", "y1", "y0"],
+            "target_id": ["x1", "x0", "y0", "y1"],
+            "weight": [1.0, 1.0, 1.0, 1.0],
+        }
+    )
+    out = run_diff_neighborhood_enrichment(
+        node_table,
+        spatial_table,
+        label_column="cluster_label",
+        condition_column="condition",
+        id_column="instance_id",
+        n_perms=8,
+        random_state=3,
+        undirected=False,
+        warn_analytical=False,
+    )
+    assert "X_Y" in out
+    diff = out["X_Y"]
+    assert diff.enrichment.shape == (2, 2)
+    assert diff.pvalues is not None
+    assert diff.pvalues.shape == (2, 2)
+
+
+def test_neighborhood_warns_in_analytical_mode() -> None:
+    node_table = pd.DataFrame(
+        {
+            "instance_id": ["n0", "n1"],
+            "cluster_label": ["A", "B"],
+        }
+    )
+    spatial_table = pd.DataFrame(
+        {
+            "source_id": ["n0"],
+            "target_id": ["n1"],
+        }
+    )
+    with pytest.warns(UserWarning, match="analytical expected/std"):
+        run_neighborhood_enrichment(
+            node_table,
+            spatial_table,
+            label_column="cluster_label",
+            id_column="instance_id",
+            n_perms=0,
+        )
+
+
+def test_diff_neighborhood_warns_about_analytical_baseline() -> None:
+    node_table = pd.DataFrame(
+        {
+            "instance_id": ["x0", "x1", "y0", "y1"],
+            "cluster_label": ["A", "B", "A", "B"],
+            "condition": ["X", "X", "Y", "Y"],
+        }
+    )
+    spatial_table = pd.DataFrame(
+        {
+            "source_id": ["x0", "x1", "y1", "y0"],
+            "target_id": ["x1", "x0", "y0", "y1"],
+        }
+    )
+    with pytest.warns(UserWarning, match="analytical neighborhood model"):
+        run_diff_neighborhood_enrichment(
+            node_table,
+            spatial_table,
+            label_column="cluster_label",
+            condition_column="condition",
+            id_column="instance_id",
+            n_perms=0,
+        )

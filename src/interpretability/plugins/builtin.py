@@ -109,6 +109,7 @@ class NeighborhoodEnrichmentPlugin(InterpretabilityPlugin):
             id_column=str(params.get("id_column", dataset.id_column)),
             n_perms=int(params.get("n_perms", 0)),
             random_state=int(params.get("random_state", 42)),
+            undirected=bool(params.get("undirected", False)),
         )
         payload = {
             "enrichment": result.enrichment,
