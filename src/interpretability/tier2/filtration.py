@@ -23,6 +23,8 @@ def compute_filtration_curves(
         raise ValueError(f"Missing cluster column {cluster_column!r}.")
     if cell_type_column not in node_table.columns:
         raise ValueError(f"Missing cell_type column {cell_type_column!r}.")
+    if id_column not in node_table.columns:
+        raise ValueError(f"Missing id column {id_column!r}.")
     if distance_column not in spatial_table.columns:
         raise ValueError(f"Missing distance column {distance_column!r} in spatial table.")
     if {"source_id", "target_id"} - set(spatial_table.columns):
@@ -30,10 +32,19 @@ def compute_filtration_curves(
 
     nodes = node_table[[id_column, cluster_column, cell_type_column]].copy()
     nodes[id_column] = nodes[id_column].astype(str)
+    if nodes[id_column].duplicated().any():
+        raise ValueError(
+            f"Node table contains duplicate IDs in {id_column!r}; "
+            "filtration requires unique node identifiers."
+        )
+    node_to_cell_type = nodes.set_index(id_column)[cell_type_column].astype(str).to_dict()
+    node_to_cluster = nodes.set_index(id_column)[cluster_column].astype(str).to_dict()
+
     edges = spatial_table.copy()
     edges["source_id"] = edges["source_id"].astype(str)
     edges["target_id"] = edges["target_id"].astype(str)
-    edges = edges.merge(nodes, left_on="source_id", right_on=id_column, how="inner")
+    edges = edges[edges["source_id"].isin(node_to_cluster.keys())].copy()
+    edges["source_cluster"] = edges["source_id"].map(node_to_cluster)
 
     clusters = sorted(nodes[cluster_column].astype(str).unique())
     cell_types = sorted(nodes[cell_type_column].astype(str).unique())
@@ -43,12 +54,26 @@ def compute_filtration_curves(
     }
 
     for cluster in clusters:
-        c_edges = edges[edges[cluster_column].astype(str) == str(cluster)]
+        c_edges = edges[edges["source_cluster"] == str(cluster)]
+        by_subgraph = {
+            str(sub_id): frame for sub_id, frame in c_edges.groupby("source_id", sort=False)
+        }
         for i, thr in enumerate(thresholds):
-            selected = c_edges[c_edges[distance_column] <= float(thr)]
-            counts = selected[cell_type_column].astype(str).value_counts()
+            threshold_counts: dict[str, float] = {ct: 0.0 for ct in cell_types}
+            for subgraph_edges in by_subgraph.values():
+                selected = subgraph_edges[subgraph_edges[distance_column] <= float(thr)]
+                if selected.empty:
+                    continue
+                # Subgraph-centric counting: count each node at most once per subgraph.
+                unique_node_ids = set(selected["source_id"].tolist()) | set(
+                    selected["target_id"].tolist()
+                )
+                for node_id in unique_node_ids:
+                    ct = node_to_cell_type.get(str(node_id))
+                    if ct is not None:
+                        threshold_counts[ct] += 1.0
             for ct in cell_types:
-                curves[cluster][ct][i] = float(counts.get(ct, 0.0))
+                curves[cluster][ct][i] = float(threshold_counts.get(ct, 0.0))
         if scale_within_cluster:
             for ct in cell_types:
                 vmax = float(curves[cluster][ct].max())

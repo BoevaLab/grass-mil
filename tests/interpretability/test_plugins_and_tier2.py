@@ -75,3 +75,37 @@ def test_tier2_neighborhood_and_filtration() -> None:
         distance_column="distance",
     )
     assert len(curves.curves) > 0
+
+
+def test_filtration_subgraph_centric_counts_both_edge_endpoints() -> None:
+    node_table = pd.DataFrame(
+        {
+            "instance_id": ["n0", "n1", "n2"],
+            "cluster_label": [0, 0, 1],
+            "cell_type": ["A", "B", "A"],
+        }
+    )
+    spatial_table = pd.DataFrame(
+        {
+            "source_id": ["n0", "n0", "n1"],
+            "target_id": ["n1", "n2", "n2"],
+            "distance": [0.10, 0.20, 0.20],
+        }
+    )
+    curves = compute_filtration_curves(
+        node_table,
+        spatial_table,
+        thresholds=np.array([0.15, 0.25]),
+        cluster_column="cluster_label",
+        cell_type_column="cell_type",
+        id_column="instance_id",
+        distance_column="distance",
+        scale_within_cluster=False,
+    )
+    # At 0.15 only n0->n1 contributes in cluster 0: A=1 (n0), B=1 (n1).
+    # At 0.25:
+    # - subgraph n0 contributes unique nodes {n0,n1,n2}: A=2, B=1
+    # - subgraph n1 contributes unique nodes {n1,n2}: A=1, B=1
+    # Total for cluster 0: A=3, B=2.
+    assert np.allclose(curves.curves["0"]["A"], np.array([1.0, 3.0]))
+    assert np.allclose(curves.curves["0"]["B"], np.array([1.0, 2.0]))
