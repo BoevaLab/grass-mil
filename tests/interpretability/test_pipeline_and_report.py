@@ -88,6 +88,49 @@ def test_pipeline_and_report_render(monkeypatch, tmp_path: Path) -> None:
     assert out["pdf_path"] is not None
 
 
+def test_report_render_tolerates_snapshot_export_failure_when_pdf_disabled(
+    monkeypatch, tmp_path: Path
+) -> None:
+    instance_path, spatial_path = _write_minimal_tables(tmp_path)
+    dataset = load_interpretability_dataset(
+        instance_table_path=instance_path,
+        spatial_table_path=spatial_path,
+        id_column="instance_id",
+        bag_id_column="bag_id",
+        cell_type_column="cell_type",
+    )
+    cfg = {
+        "reduction": {"enabled": True, "method": "pca", "params": {"n_components": 2}},
+        "clustering": {
+            "enabled": True,
+            "method": "agglomerative",
+            "params": {"n_clusters": 2, "linkage": "ward"},
+        },
+        "plugins": {
+            "enabled": ["cluster_profiles"],
+            "params": {},
+        },
+    }
+    bundle = run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
+
+    def _raise_snapshot_error(figures, output_dir, scale=2.0):  # type: ignore[unused-argument]
+        raise RuntimeError("kaleido unavailable")
+
+    monkeypatch.setattr(
+        "src.interpretability.reporting.render.export_plotly_snapshots",
+        _raise_snapshot_error,
+    )
+    out = render_interpretability_report(
+        bundle,
+        output_dir=tmp_path / "report",
+        html_enabled=True,
+        pdf_enabled=False,
+    )
+    assert out["html_path"] is not None
+    assert out["pdf_path"] is None
+    assert out["snapshot_paths"] == {}
+
+
 def test_report_cli_smoke(
     monkeypatch,
     cfg_interpret: DictConfig,
