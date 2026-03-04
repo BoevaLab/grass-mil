@@ -51,25 +51,59 @@ def run_interpretability_pipeline(
             config.get("embedding_prefixes", ("inst_emb_", "emb_", "graph_emb_"))
         ),
     )
-    reduction_cfg = dict(config.get("reduction", {}))
-    reduction_enabled = bool(reduction_cfg.get("enabled", True))
-    reduction_result = None
-    if reduction_enabled:
-        method = str(reduction_cfg.get("method", "pca"))
-        params = dict(reduction_cfg.get("params", {}))
-        reduction_result = run_reduction(method, emb_set.matrix, **params)
-        reduced = reduction_result.embedding
-    else:
-        reduced = emb_set.matrix
 
     clustering_cfg = dict(config.get("clustering", {}))
     clustering_enabled = bool(clustering_cfg.get("enabled", True))
+    cluster_on_pca = bool(clustering_cfg.get("cluster_on_pca", False))
+    cluster_pca_components_raw = clustering_cfg.get("pca_components", None)
+    cluster_pca_components = (
+        int(cluster_pca_components_raw) if cluster_pca_components_raw is not None else None
+    )
+    effective_cluster_pca_components = cluster_pca_components
+    if cluster_on_pca:
+        if cluster_pca_components is None:
+            raise ValueError("clustering.cluster_on_pca=true requires clustering.pca_components.")
+        max_pca_components = int(min(emb_set.matrix.shape[0], emb_set.matrix.shape[1]))
+        if max_pca_components < 1:
+            raise ValueError("Cannot run PCA-based clustering with empty embedding matrix.")
+        effective_cluster_pca_components = min(cluster_pca_components, max_pca_components)
+
+    reduction_cfg = dict(config.get("reduction", {}))
+    reduction_enabled = bool(reduction_cfg.get("enabled", True))
+    reduction_result = None
+    combo_pca_result = None
+    reduced = emb_set.matrix
+    if reduction_enabled:
+        method = str(reduction_cfg.get("method", "pca"))
+        params = dict(reduction_cfg.get("params", {}))
+        reduction_input = emb_set.matrix
+        if method.strip().lower() == "umap" and cluster_on_pca:
+            combo_pca_result = run_reduction(
+                "pca",
+                emb_set.matrix,
+                n_components=effective_cluster_pca_components,
+                random_state=None,
+            )
+            reduction_input = combo_pca_result.embedding
+        reduction_result = run_reduction(method, reduction_input, **params)
+        reduced = reduction_result.embedding
+
     clustering_result = None
     labels: Optional[np.ndarray] = None
     if clustering_enabled:
         method = str(clustering_cfg.get("method", "kmeans"))
         params = dict(clustering_cfg.get("params", {}))
-        clustering_result = run_clustering(method, reduced, **params)
+        clustering_input = reduced
+        if cluster_on_pca:
+            if combo_pca_result is None:
+                combo_pca_result = run_reduction(
+                    "pca",
+                    emb_set.matrix,
+                    n_components=effective_cluster_pca_components,
+                    random_state=None,
+                )
+            clustering_input = combo_pca_result.embedding
+        clustering_result = run_clustering(method, clustering_input, **params)
         labels = clustering_result.labels
 
     cluster_summary: Optional[ClusterSummary] = None
@@ -123,6 +157,8 @@ def run_interpretability_pipeline(
         "rows": int(len(dataset.instance_table)),
         "reduction_method": reduction_result.method if reduction_result else None,
         "clustering_method": clustering_result.method if clustering_result else None,
+        "cluster_on_pca": cluster_on_pca,
+        "cluster_pca_components": effective_cluster_pca_components,
         "enabled_plugins": enabled_plugins,
     }
     _write_json(summary_payload, artifacts_dir / "pipeline_summary.json")

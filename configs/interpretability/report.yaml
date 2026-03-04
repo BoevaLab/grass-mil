@@ -4,8 +4,8 @@ defaults:
   - _self_
   - /paths: default
   - /extras: default
-  - reduction: pca
-  - clustering: agglomerative
+  - reduction: umap
+  - clustering: hdbscan
   - plugins: default
 
 task_name: "interpretability_report"

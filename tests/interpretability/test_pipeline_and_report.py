@@ -103,6 +103,9 @@ def test_report_cli_smoke(
     with open_dict(cfg_interpret):
         cfg_interpret.data.instance_table = str(instance_path)
         cfg_interpret.data.spatial_table = str(spatial_path)
+        # Keep smoke test independent of optional umap-learn dependency.
+        cfg_interpret.reduction.method = "pca"
+        cfg_interpret.reduction.params = {"n_components": 2, "random_state": 42}
         cfg_interpret.plugins.enabled = [
             "cluster_profiles",
             "attention_attribution",
@@ -110,8 +113,9 @@ def test_report_cli_smoke(
             "filtration_curves",
         ]
         cfg_interpret.clustering.method = "agglomerative"
-        cfg_interpret.clustering.params.n_clusters = 2
-        cfg_interpret.clustering.params.linkage = "ward"
+        cfg_interpret.clustering.cluster_on_pca = False
+        cfg_interpret.clustering.pca_components = None
+        cfg_interpret.clustering.params = {"n_clusters": 2, "linkage": "ward"}
         cfg_interpret.report.pdf.enabled = True
     HydraConfig().set_config(cfg_interpret)
     summary, _ = run_report(cfg_interpret)

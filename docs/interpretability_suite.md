@@ -320,12 +320,22 @@ Important knobs:
 - `reduction.params.*`
 - `clustering.method`
 - `clustering.params.*`
+- `clustering.cluster_on_pca`
+- `clustering.pca_components`
 - `plugins.enabled`
 - `plugins.params.<plugin_name>.*`
 - `embedding_prefixes`
 - `report.html.enabled`
 - `report.pdf.enabled`
 - `report.pdf.snapshot_dpi_scale`
+
+Notebook-aligned defaults:
+
+- `reduction=umap` with `n_neighbors=50`, `min_dist=0.1`, `random_state=null`
+- `clustering=hdbscan` with `min_cluster_size=100`
+- `clustering.cluster_on_pca=true`, `clustering.pca_components=10`
+- effect: clustering runs on PCA(10) while report scatter uses UMAP output
+- note: PCA components are capped to `min(n_samples, n_features)` on small datasets
 
 ## 11) Environment Prerequisites
 
