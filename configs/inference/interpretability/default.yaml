@@ -1,0 +1,18 @@
+enabled: false
+instance_filename: instance_table.csv
+spatial_filename: spatial_table.csv
+id_column: instance_id
+bag_id_column: bag_id
+composition_label: cell_type
+composition_prefix: comp_
+embedding_prefix: inst_emb
+score_column: score
+attention_column: attention
+require_composition: true
+
+spatial:
+  enabled: false
+  x_column: center_x
+  y_column: center_y
+  n_neighbors: 8
+  undirected: true

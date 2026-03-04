@@ -29,6 +29,30 @@ def _stack_optional_tensors(values: List[torch.Tensor]) -> Optional[torch.Tensor
     return torch.cat([_ensure_2d(v) for v in values], dim=0)
 
 
+def _stack_optional_tensors_with_padding(
+    values: List[torch.Tensor], *, fill_value: float = 0.0
+) -> Optional[torch.Tensor]:
+    if not values:
+        return None
+    prepared = [_ensure_2d(v) for v in values]
+    max_width = max(int(v.shape[1]) for v in prepared)
+    if max_width <= 0:
+        return torch.cat(prepared, dim=0)
+    padded: List[torch.Tensor] = []
+    for value in prepared:
+        if int(value.shape[1]) == max_width:
+            padded.append(value)
+            continue
+        pad = torch.full(
+            (int(value.shape[0]), max_width - int(value.shape[1])),
+            fill_value=fill_value,
+            dtype=value.dtype,
+            device=value.device,
+        )
+        padded.append(torch.cat([value, pad], dim=1))
+    return torch.cat(padded, dim=0)
+
+
 def _as_positive_count_tensor(values: Any, *, expected_length: int) -> torch.Tensor:
     if values is None:
         raise ValueError("Missing required 'embedding_bag_counts' while collecting embeddings.")
@@ -65,6 +89,7 @@ def collect_inference_payload(
     datamodule: LightningDataModule,
     ckpt_path: Optional[str],
     include_instance_payload: bool = True,
+    include_instance_embeddings: bool = False,
     include_embeddings: bool = False,
     include_node_embeddings: bool = False,
 ) -> CollectedInferencePayload:
@@ -80,8 +105,12 @@ def collect_inference_payload(
     instance_logits_chunks: List[torch.Tensor] = []
     instance_attention_logits_chunks: List[torch.Tensor] = []
     instance_patch_ids: List[str] = []
+    instance_bag_ids: List[str] = []
     instance_region_ids: List[Optional[str]] = []
     instance_sample_ids: List[Optional[str]] = []
+    instance_embedding_chunks: List[torch.Tensor] = []
+    instance_composition_chunks: List[torch.Tensor] = []
+    instance_centroid_chunks: List[torch.Tensor] = []
     expect_targets: Optional[bool] = None
 
     bag_emb_sums: Dict[str, torch.Tensor] = {}
@@ -176,6 +205,19 @@ def collect_inference_payload(
                     "Mismatch between instance_logits and instance_sample_ids rows: "
                     f"{chunk_instance_logits.shape[0]} vs {len(chunk['instance_sample_ids'])}."
                 )
+            chunk_instance_bag_ids = chunk.get("instance_bag_ids")
+            if chunk_instance_bag_ids is not None:
+                if len(chunk_instance_bag_ids) != chunk_instance_logits.shape[0]:
+                    raise ValueError(
+                        "Mismatch between instance_logits and instance_bag_ids rows: "
+                        f"{chunk_instance_logits.shape[0]} vs {len(chunk_instance_bag_ids)}."
+                    )
+                instance_bag_ids.extend([str(v) for v in chunk_instance_bag_ids])
+            elif include_instance_embeddings:
+                raise KeyError(
+                    "predict_step must include 'instance_bag_ids' when interpretability "
+                    "instance export is enabled."
+                )
             instance_logits_chunks.append(chunk_instance_logits)
             chunk_instance_attn = chunk.get("instance_attention_logits")
             if chunk_instance_attn is not None:
@@ -193,6 +235,50 @@ def collect_inference_payload(
             instance_sample_ids.extend(
                 [None if v is None else str(v) for v in chunk["instance_sample_ids"]]
             )
+            chunk_instance_embeddings = chunk.get("instance_embeddings")
+            if include_instance_embeddings:
+                if chunk_instance_embeddings is None:
+                    raise KeyError(
+                        "predict_step must include 'instance_embeddings' when "
+                        "interpretability instance export is enabled."
+                    )
+                chunk_instance_embeddings = _ensure_2d(chunk_instance_embeddings).detach().cpu()
+                if chunk_instance_embeddings.shape[0] != chunk_instance_logits.shape[0]:
+                    raise ValueError(
+                        "Mismatch between instance_logits and instance_embeddings rows: "
+                        f"{chunk_instance_logits.shape[0]} vs "
+                        f"{chunk_instance_embeddings.shape[0]}."
+                    )
+                instance_embedding_chunks.append(chunk_instance_embeddings)
+            elif chunk_instance_embeddings is not None:
+                chunk_instance_embeddings = _ensure_2d(chunk_instance_embeddings).detach().cpu()
+                if chunk_instance_embeddings.shape[0] != chunk_instance_logits.shape[0]:
+                    raise ValueError(
+                        "Mismatch between instance_logits and instance_embeddings rows: "
+                        f"{chunk_instance_logits.shape[0]} vs "
+                        f"{chunk_instance_embeddings.shape[0]}."
+                    )
+                instance_embedding_chunks.append(chunk_instance_embeddings)
+            chunk_instance_composition = chunk.get("instance_composition")
+            if chunk_instance_composition is not None:
+                chunk_instance_composition = _ensure_2d(chunk_instance_composition).detach().cpu()
+                if chunk_instance_composition.shape[0] != chunk_instance_logits.shape[0]:
+                    raise ValueError(
+                        "Mismatch between instance_logits and instance_composition rows: "
+                        f"{chunk_instance_logits.shape[0]} vs "
+                        f"{chunk_instance_composition.shape[0]}."
+                    )
+                instance_composition_chunks.append(chunk_instance_composition)
+            chunk_instance_centroids = chunk.get("instance_centroids")
+            if chunk_instance_centroids is not None:
+                chunk_instance_centroids = _ensure_2d(chunk_instance_centroids).detach().cpu()
+                if chunk_instance_centroids.shape[0] != chunk_instance_logits.shape[0]:
+                    raise ValueError(
+                        "Mismatch between instance_logits and instance_centroids rows: "
+                        f"{chunk_instance_logits.shape[0]} vs "
+                        f"{chunk_instance_centroids.shape[0]}."
+                    )
+                instance_centroid_chunks.append(chunk_instance_centroids)
 
         if include_embeddings:
             missing_embed_fields = [
@@ -259,6 +345,9 @@ def collect_inference_payload(
     bag_attention = attention_rows if any(attn is not None for attn in attention_rows) else None
     instance_logits = _stack_optional_tensors(instance_logits_chunks)
     instance_attention_logits = _stack_optional_tensors(instance_attention_logits_chunks)
+    instance_embeddings = _stack_optional_tensors(instance_embedding_chunks)
+    instance_composition = _stack_optional_tensors_with_padding(instance_composition_chunks)
+    instance_centroids = _stack_optional_tensors(instance_centroid_chunks)
 
     if len(bag_ids) != bag_logits.shape[0]:
         raise ValueError(
@@ -301,6 +390,39 @@ def collect_inference_payload(
                 "Mismatch between collected instance_logits and instance_sample_ids: "
                 f"{instance_logits.shape[0]} vs {len(instance_sample_ids)}."
             )
+        if instance_bag_ids and len(instance_bag_ids) != instance_logits.shape[0]:
+            raise ValueError(
+                "Mismatch between collected instance_logits and instance_bag_ids: "
+                f"{instance_logits.shape[0]} vs {len(instance_bag_ids)}."
+            )
+        if (
+            instance_embeddings is not None
+            and instance_embeddings.shape[0] != instance_logits.shape[0]
+        ):
+            raise ValueError(
+                "Mismatch between collected instance_logits and instance_embeddings rows: "
+                f"{instance_logits.shape[0]} vs {instance_embeddings.shape[0]}."
+            )
+        if (
+            instance_composition is not None
+            and instance_composition.shape[0] != instance_logits.shape[0]
+        ):
+            raise ValueError(
+                "Mismatch between collected instance_logits and instance_composition rows: "
+                f"{instance_logits.shape[0]} vs {instance_composition.shape[0]}."
+            )
+        if (
+            instance_centroids is not None
+            and instance_centroids.shape[0] != instance_logits.shape[0]
+        ):
+            raise ValueError(
+                "Mismatch between collected instance_logits and instance_centroids rows: "
+                f"{instance_logits.shape[0]} vs {instance_centroids.shape[0]}."
+            )
+    if include_instance_embeddings and instance_logits is not None and instance_embeddings is None:
+        raise ValueError(
+            "Interpretability export requested instance embeddings, but none were collected."
+        )
 
     prediction_payload = BatchPredictionPayload(
         bag_ids=bag_ids,
@@ -312,8 +434,12 @@ def collect_inference_payload(
         instance_logits=instance_logits,
         instance_attention_logits=instance_attention_logits,
         instance_patch_ids=instance_patch_ids if instance_logits is not None else None,
+        instance_bag_ids=instance_bag_ids if instance_bag_ids else None,
         instance_region_ids=instance_region_ids if instance_logits is not None else None,
         instance_sample_ids=instance_sample_ids if instance_logits is not None else None,
+        instance_embeddings=instance_embeddings,
+        instance_composition=instance_composition,
+        instance_centroids=instance_centroids,
     )
 
     embedding_payload: Optional[EmbeddingPayload] = None

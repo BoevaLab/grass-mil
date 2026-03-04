@@ -269,6 +269,20 @@ Engine:
 
 ## 9) CLI Usage
 
+Generate interpretability-ready tables directly from inference:
+
+```bash
+python src/inference/predict.py \
+  ckpt_path=/abs/path/model.ckpt \
+  data=spatial_omics \
+  interpretability.enabled=true \
+  interpretability.spatial.enabled=true
+```
+
+This writes `instance_table.csv` (and optionally `spatial_table.csv`) into
+`${paths.output_dir}/${predict.output_subdir}` and records paths in
+`inference_summary.json` under `interpretability.*`.
+
 Entrypoint:
 
 ```bash

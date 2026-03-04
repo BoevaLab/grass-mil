@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 import pytest
+import torch
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, open_dict
 from omegaconf import OmegaConf
@@ -607,3 +608,129 @@ def test_predict_raises_when_ckpt_path_missing(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="Missing required `ckpt_path` for inference."):
         predict(cfg)
+
+
+def test_predict_can_export_interpretability_tables(monkeypatch, tmp_path: Path) -> None:
+    import src.inference.predict as predict_module
+
+    class _FakeDataModule:
+        class _Dataset:
+            label_maps = {"cell_type": {"A": 0, "B": 1}}
+
+        dataset_train = _Dataset()
+
+    class _FakeModel:
+        pass
+
+    class _FakeTrainer:
+        pass
+
+    fake_datamodule = _FakeDataModule()
+    fake_model = _FakeModel()
+    fake_trainer = _FakeTrainer()
+    captured = {"collector_kwargs": None, "frames": {}}
+
+    def _fake_instantiate(cfg, *args, **kwargs):
+        target = cfg.get("_target_")
+        if target == "fake.DataModule":
+            return fake_datamodule
+        if target == "fake.Model":
+            return fake_model
+        if target == "fake.Trainer":
+            return fake_trainer
+        raise AssertionError(f"Unexpected instantiate target: {target}")
+
+    def _fake_collect(**kwargs):
+        captured["collector_kwargs"] = kwargs
+        return CollectedInferencePayload(
+            prediction_payload=BatchPredictionPayload(
+                bag_ids=["r0"],
+                bag_logits=OmegaConf.create([[1.0]]),  # type: ignore[arg-type]
+                bag_targets=None,
+                bag_attention=None,
+                row_region_ids=["r0"],
+                row_sample_ids=["s0"],
+                instance_logits=torch.tensor([[0.2], [0.4]]),
+                instance_attention_logits=torch.tensor([[0.1], [0.2]]),
+                instance_patch_ids=["p0", "p1"],
+                instance_bag_ids=["s0::r0", "s0::r0"],
+                instance_region_ids=["r0", "r0"],
+                instance_sample_ids=["s0", "s0"],
+                instance_embeddings=torch.tensor([[0.11, 0.12], [0.21, 0.22]]),
+                instance_composition=torch.tensor([[1.0, 0.0], [0.0, 1.0]]),
+                instance_centroids=torch.tensor([[0.0, 0.0], [1.0, 0.0]]),
+            ),
+            embedding_payload=None,
+        )
+
+    def _fake_write_dataframe(frame, path):
+        captured["frames"][str(path)] = frame.copy()
+
+    monkeypatch.setattr(predict_module.hydra.utils, "instantiate", _fake_instantiate)
+    monkeypatch.setattr(predict_module, "instantiate_loggers", lambda cfg: [])
+    monkeypatch.setattr(predict_module, "log_hyperparameters", lambda obj: None)
+    monkeypatch.setattr(predict_module, "collect_inference_payload", _fake_collect)
+    monkeypatch.setattr(
+        predict_module,
+        "predictions_to_dataframe",
+        lambda payload, include_targets, include_attention: pd.DataFrame(
+            {"bag_id": ["r0"], "logit_0": [1.0]}
+        ),
+    )
+    monkeypatch.setattr(predict_module, "write_dataframe", _fake_write_dataframe)
+
+    cfg = OmegaConf.create(
+        {
+            "ckpt_path": "dummy.ckpt",
+            "data": {"_target_": "fake.DataModule"},
+            "model": {"_target_": "fake.Model"},
+            "trainer": {"_target_": "fake.Trainer"},
+            "logger": None,
+            "paths": {"output_dir": str(tmp_path)},
+            "predict": {
+                "save_predictions": False,
+                "save_metrics": False,
+                "include_targets": False,
+                "include_attention": False,
+                "output_subdir": "predict_artifacts",
+            },
+            "output": {
+                "predictions_filename": "predictions.csv",
+                "metrics_filename": "metrics.json",
+                "summary_filename": "inference_summary.json",
+            },
+            "aggregation": {"enabled": False, "mode": "none", "subsample_fraction": 1.0},
+            "metrics": {"enabled": False, "per_group": False, "categorical": {"threshold": 0.5}},
+            "embeddings": {"enabled": False, "save": False, "extract_node": False},
+            "interpretability": {
+                "enabled": True,
+                "instance_filename": "instance_table.csv",
+                "spatial_filename": "spatial_table.csv",
+                "id_column": "instance_id",
+                "bag_id_column": "bag_id",
+                "composition_label": "cell_type",
+                "composition_prefix": "comp_",
+                "embedding_prefix": "inst_emb",
+                "score_column": "score",
+                "attention_column": "attention",
+                "require_composition": True,
+                "spatial": {
+                    "enabled": True,
+                    "x_column": "center_x",
+                    "y_column": "center_y",
+                    "n_neighbors": 1,
+                    "undirected": True,
+                },
+            },
+            "task": {"target_type": "binary"},
+        }
+    )
+
+    summary, _ = predict(cfg)
+    assert captured["collector_kwargs"]["include_instance_payload"] is True
+    assert captured["collector_kwargs"]["include_instance_embeddings"] is True
+    assert "interpretability" in summary
+    assert summary["interpretability"]["instance_table_path"].endswith("instance_table.csv")
+    assert summary["interpretability"]["spatial_table_path"].endswith("spatial_table.csv")
+    assert any(path.endswith("instance_table.csv") for path in captured["frames"].keys())
+    assert any(path.endswith("spatial_table.csv") for path in captured["frames"].keys())
