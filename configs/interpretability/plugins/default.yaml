@@ -12,11 +12,7 @@ params:
     # Set n_perms>0 for Squidpy-style permutation expected/std + p-values.
     n_perms: 0
   filtration_curves:
-    thresholds:
-      - 0.05
-      - 0.1
-      - 0.2
-      - 0.4
-      - 0.6
-      - 0.8
-      - 1.0
+    # Distances and thresholds are interpreted in micrometers.
+    threshold_start: 0.0
+    threshold_stop: 55.0
+    threshold_count: 500

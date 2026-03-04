@@ -19,6 +19,22 @@ from src.interpretability.tier2.filtration import compute_filtration_curves
 from src.interpretability.tier2.neighborhood import run_neighborhood_enrichment
 
 
+def _resolve_filtration_thresholds(params: Dict[str, Any]) -> np.ndarray:
+    explicit = params.get("thresholds")
+    if explicit is not None:
+        return np.asarray(explicit, dtype=float)
+
+    # 500 bins from 0 to 55 micrometers.
+    start = float(params.get("threshold_start", 0.0))
+    stop = float(params.get("threshold_stop", 55.0))
+    count = int(params.get("threshold_count", 500))
+    if count < 2:
+        raise ValueError("filtration threshold_count must be >= 2.")
+    if stop < start:
+        raise ValueError("filtration threshold_stop must be >= threshold_start.")
+    return np.linspace(start, stop, count, dtype=float)
+
+
 @dataclass
 class ClusterProfilesPlugin(InterpretabilityPlugin):
     name: str = "cluster_profiles"
@@ -146,7 +162,7 @@ class FiltrationCurvesPlugin(InterpretabilityPlugin):
             raise ValueError("Spatial table is required for filtration curves plugin.")
         table = dataset.instance_table.copy()
         table["cluster_label"] = np.asarray(context.state["cluster_labels"])
-        thresholds = np.asarray(params.get("thresholds", np.linspace(0.0, 1.0, 20)))
+        thresholds = _resolve_filtration_thresholds(dict(params))
         result = compute_filtration_curves(
             table,
             dataset.spatial_table,

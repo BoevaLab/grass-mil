@@ -135,6 +135,11 @@ Columns:
 
 Edges are kNN edges computed within each `bag_id` using exported instance centroids.
 
+Unit contract:
+
+- Preprocessed coordinates (`center_x`, `center_y`) are expected to be in micrometers.
+- Exported `distance` values are therefore expected in micrometers and are consumed as such by interpretability tier-2 analyses.
+
 ## Legacy Parity Mapping
 
 High-value legacy utilities from `working_version` are mapped as:

@@ -109,6 +109,11 @@ Required columns for current tier-2 methods:
 - `distance` (required by filtration curves)
 - `weight` (optional; currently ignored by neighborhood enrichment, which is unweighted/count-based)
 
+Unit contract:
+
+- During preprocessing, spatial coordinates/distances must be normalized to micrometers (`um`).
+- `spatial_table.distance` is treated as micrometers by tier-2 analyses.
+
 ## 4) Python API
 
 Public exports:
@@ -222,6 +227,11 @@ Built-in plugins:
 - `attention_attribution`
 - `neighborhood_enrichment`
 - `filtration_curves`
+
+`filtration_curves` default threshold grid:
+
+- notebook-parity default is `np.linspace(0.0, 55.0, 500)`
+- thresholds are interpreted in micrometers
 
 ## 7) Pipeline Orchestration
 

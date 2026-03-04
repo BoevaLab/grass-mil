@@ -61,6 +61,11 @@ Path resolution behavior:
 
 All options below live under `data.*` in Hydra.
 
+Spatial unit expectation:
+
+- Normalize spatial coordinates to micrometers during preprocessing.
+- This ensures downstream `spatial_table.distance` values are in micrometers and compatible with interpretability defaults (including filtration thresholds).
+
 #### CSV/TSV inputs
 
 Key options (`data.csv.*`):
