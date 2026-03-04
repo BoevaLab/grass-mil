@@ -91,6 +91,9 @@ Common optional columns:
 - `hazard`
 - composition columns `comp_*`
 
+Note: `cluster_profiles` and `attention_attribution` require `comp_*` columns.
+There is no fallback to one-hot `cell_type` composition.
+
 ### Optional table: `bag_table`
 
 Used for downstream joins and metadata context. Not required by default pipeline math.

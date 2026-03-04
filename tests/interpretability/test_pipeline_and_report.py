@@ -20,6 +20,8 @@ def _write_minimal_tables(tmp_path: Path) -> tuple[Path, Path]:
             "instance_id": [f"i{i}" for i in range(8)],
             "bag_id": ["b0"] * 4 + ["b1"] * 4,
             "cell_type": ["A", "A", "B", "B", "A", "B", "B", "A"],
+            "comp_A": [1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
+            "comp_B": [0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0],
             "score": [0.1, 0.2, 0.8, 0.7, 0.2, 0.9, 0.5, 0.3],
             "attention": [0.2, 0.3, 0.2, 0.3, 0.1, 0.5, 0.2, 0.2],
             "inst_emb_0": [0.0, 0.1, 0.2, 0.3, 1.0, 1.1, 1.2, 1.3],

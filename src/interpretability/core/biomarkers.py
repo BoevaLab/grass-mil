@@ -18,11 +18,10 @@ def _infer_composition_matrix(
     if comp_cols:
         return table[comp_cols].astype(float).copy()
 
-    if cell_type_column is None or cell_type_column not in table.columns:
-        raise ValueError(
-            "No composition columns found and no valid cell_type_column provided for one-hot composition."
-        )
-    return pd.get_dummies(table[cell_type_column].astype(str), prefix="ct").astype(float)
+    raise ValueError(
+        f"No composition columns found with prefix {composition_prefix!r}. "
+        "Explicit composition features are required."
+    )
 
 
 def cluster_biomarker_summary(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from src.interpretability.core.biomarkers import (
     cluster_attention_summary,
@@ -29,13 +30,15 @@ def test_cluster_biomarker_and_attention_summary() -> None:
             "instance_id": [f"i{i}" for i in range(6)],
             "bag_id": ["b0", "b0", "b0", "b1", "b1", "b1"],
             "cell_type": ["A", "A", "B", "A", "B", "B"],
+            "comp_A": [1.0, 1.0, 0.0, 1.0, 0.0, 0.0],
+            "comp_B": [0.0, 0.0, 1.0, 0.0, 1.0, 1.0],
             "attention": [0.7, 0.2, 0.1, 0.1, 0.3, 0.6],
             "score": [0.9, 0.8, 0.4, 0.2, 0.3, 0.7],
         }
     )
     labels = np.array([0, 0, 1, 1, 1, 0])
     bio = cluster_biomarker_summary(table, labels, cell_type_column="cell_type")
-    assert "ct_A" in bio.composition.columns
+    assert "comp_A" in bio.composition.columns
     assert bio.cluster_counts.sum() == len(table)
 
     att = cluster_attention_summary(
@@ -48,3 +51,15 @@ def test_cluster_biomarker_and_attention_summary() -> None:
     )
     assert att.weighted_scores is not None
     assert att.attention_lift_present is not None
+
+
+def test_cluster_biomarker_requires_composition_columns() -> None:
+    table = pd.DataFrame(
+        {
+            "instance_id": ["i0", "i1"],
+            "cell_type": ["A", "B"],
+        }
+    )
+    labels = np.array([0, 1])
+    with pytest.raises(ValueError, match="No composition columns found"):
+        cluster_biomarker_summary(table, labels, cell_type_column="cell_type")

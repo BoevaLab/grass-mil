@@ -21,6 +21,8 @@ def _sample_dataset() -> InterpretabilityDataset:
             "instance_id": [f"n{i}" for i in range(6)],
             "bag_id": ["b0", "b0", "b0", "b1", "b1", "b1"],
             "cell_type": ["A", "A", "B", "A", "B", "B"],
+            "comp_A": [1.0, 1.0, 0.0, 1.0, 0.0, 0.0],
+            "comp_B": [0.0, 0.0, 1.0, 0.0, 1.0, 1.0],
             "score": [0.3, 0.4, 0.9, 0.1, 0.8, 0.7],
             "attention": [0.2, 0.5, 0.3, 0.1, 0.2, 0.7],
             "inst_emb_0": [0.0, 0.1, 0.2, 1.0, 1.1, 1.2],
