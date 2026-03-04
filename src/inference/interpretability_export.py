@@ -185,7 +185,8 @@ def build_instance_table(
         "patch_id": patch_ids,
         "region_id": region_ids,
         "sample_id": sample_ids,
-        score_column: logits[:, 0].tolist(),
+        # Notebook parity: interpretability score is sigmoid-transformed first logit.
+        score_column: torch.sigmoid(logits[:, 0]).tolist(),
     }
     for col in range(int(logits.shape[1])):
         data[f"logit_{col}"] = logits[:, col].tolist()

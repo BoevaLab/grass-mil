@@ -121,6 +121,7 @@ Notes:
 
 - `attention` is normalized within each bag.
 - when attention logits are unavailable, `attention` defaults to uniform within bag.
+- `score` is exported as `sigmoid(logit_0)` for notebook parity.
 - by default, missing composition metadata raises (`interpretability.require_composition=true`).
 
 ### `spatial_table.csv` (optional)

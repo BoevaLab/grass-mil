@@ -91,6 +91,10 @@ Common optional columns:
 - `hazard`
 - composition columns `comp_*`
 
+`score` convention:
+
+- exported inference tables use `score = sigmoid(logit_0)` to match notebook-era interpretability calculations.
+
 Note: `cluster_profiles` and `attention_attribution` require `comp_*` columns.
 There is no fallback to one-hot `cell_type` composition.
 
