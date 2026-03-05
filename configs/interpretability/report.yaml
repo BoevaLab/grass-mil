@@ -13,6 +13,7 @@ tags: ["dev"]
 
 output_dir: ${paths.output_dir}/interpretability_report
 composition_prefix: comp_
+variance_estimator: unbiased
 embedding_prefixes:
   - inst_emb_
   - emb_

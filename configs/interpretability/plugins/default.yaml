@@ -2,10 +2,12 @@ enabled:
   - cluster_profiles
   - attention_attribution
 params:
-  cluster_profiles: {}
+  cluster_profiles:
+    variance_estimator: unbiased
   attention_attribution:
     attention_column: attention
     score_column: score
+    variance_estimator: unbiased
   neighborhood_enrichment:
     label_column: cluster_label
     # One of: zscore, obs-exp, log2fc.

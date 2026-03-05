@@ -39,6 +39,7 @@ def run_report(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     pipeline_cfg = {
         "embedding_prefixes": list(cfg.embedding_prefixes),
         "composition_prefix": str(cfg.get("composition_prefix", "comp_")),
+        "variance_estimator": str(cfg.get("variance_estimator", "unbiased")),
         "reduction": _cfg_to_dict(cfg.reduction),
         "clustering": _cfg_to_dict(cfg.clustering),
         "plugins": _cfg_to_dict(cfg.plugins),

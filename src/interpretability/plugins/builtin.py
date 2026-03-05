@@ -49,6 +49,7 @@ class ClusterProfilesPlugin(InterpretabilityPlugin):
             labels,
             cell_type_column=params.get("cell_type_column", dataset.cell_type_column),
             composition_prefix=str(params.get("composition_prefix", "comp_")),
+            variance_estimator=str(params.get("variance_estimator", "unbiased")),
         )
         payload = {
             "composition": summary.composition,
@@ -85,6 +86,7 @@ class AttentionAttributionPlugin(InterpretabilityPlugin):
             bag_id_column=str(params.get("bag_id_column", dataset.bag_id_column)),
             cell_type_column=params.get("cell_type_column", dataset.cell_type_column),
             composition_prefix=str(params.get("composition_prefix", "comp_")),
+            variance_estimator=str(params.get("variance_estimator", "unbiased")),
         )
         payload = {
             "weighted_scores": summary.weighted_scores,

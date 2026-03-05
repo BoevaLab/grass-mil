@@ -65,6 +65,37 @@ def test_cluster_biomarker_requires_composition_columns() -> None:
         cluster_biomarker_summary(table, labels, cell_type_column="cell_type")
 
 
+def test_cluster_biomarker_variance_estimator_is_tunable() -> None:
+    table = pd.DataFrame(
+        {
+            "instance_id": ["i0", "i1", "i2"],
+            "comp_A": [0.0, 1.0, 2.0],
+            "comp_B": [2.0, 1.0, 0.0],
+        }
+    )
+    labels = np.array([0, 1, 1])
+
+    unbiased = cluster_biomarker_summary(table, labels, variance_estimator="unbiased")
+    biased = cluster_biomarker_summary(table, labels, variance_estimator="biased")
+
+    assert unbiased.enrichment.loc[0, "comp_A"] == pytest.approx(-1.0)
+    assert biased.enrichment.loc[0, "comp_A"] == pytest.approx(-1.224744871391589)
+    assert abs(unbiased.enrichment.loc[0, "comp_A"]) < abs(biased.enrichment.loc[0, "comp_A"])
+
+
+def test_cluster_biomarker_variance_estimator_rejects_unknown_values() -> None:
+    table = pd.DataFrame(
+        {
+            "instance_id": ["i0", "i1"],
+            "comp_A": [1.0, 0.0],
+            "comp_B": [0.0, 1.0],
+        }
+    )
+    labels = np.array([0, 1])
+    with pytest.raises(ValueError, match="Unsupported variance_estimator"):
+        cluster_biomarker_summary(table, labels, variance_estimator="invalid_mode")
+
+
 def test_hdbscan_clustering_forwards_selection_and_density_knobs(monkeypatch) -> None:
     class _FakeHDBSCAN:
         def __init__(self, **kwargs):

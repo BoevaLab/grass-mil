@@ -151,6 +151,7 @@ def run_interpretability_pipeline(
             labels,
             cell_type_column=dataset.cell_type_column,
             composition_prefix=str(config.get("composition_prefix", "comp_")),
+            variance_estimator=str(config.get("variance_estimator", "unbiased")),
         )
 
     context = PluginContext(

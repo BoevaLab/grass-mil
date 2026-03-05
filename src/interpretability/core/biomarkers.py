@@ -8,6 +8,15 @@ import pandas as pd
 from src.interpretability.contracts import ClusterSummary
 
 
+def _resolve_variance_estimator(variance_estimator: str) -> int:
+    key = str(variance_estimator).strip().lower()
+    if key in {"unbiased", "sample", "n-1"}:
+        return 1
+    if key in {"biased", "population", "n"}:
+        return 0
+    raise ValueError("Unsupported variance_estimator. Expected one of: " "'unbiased' or 'biased'.")
+
+
 def _infer_composition_matrix(
     table: pd.DataFrame,
     *,
@@ -30,6 +39,7 @@ def cluster_biomarker_summary(
     *,
     cell_type_column: Optional[str] = None,
     composition_prefix: str = "comp_",
+    variance_estimator: str = "unbiased",
 ) -> ClusterSummary:
     if len(table) != int(cluster_labels.shape[0]):
         raise ValueError("table rows and cluster_labels length mismatch.")
@@ -39,8 +49,9 @@ def cluster_biomarker_summary(
     )
     labels = pd.Series(cluster_labels, name="cluster_label")
 
+    ddof = _resolve_variance_estimator(variance_estimator)
     comp_mean = comp.mean(axis=0)
-    comp_std = comp.std(axis=0).replace(0.0, 1.0)
+    comp_std = comp.std(axis=0, ddof=ddof).replace(0.0, 1.0)
     z_comp = (comp - comp_mean) / comp_std
 
     composition = comp.groupby(labels).mean().sort_index()
@@ -64,6 +75,7 @@ def cluster_attention_summary(
     bag_id_column: str = "bag_id",
     cell_type_column: Optional[str] = None,
     composition_prefix: str = "comp_",
+    variance_estimator: str = "unbiased",
     eps: float = 1e-8,
 ) -> ClusterSummary:
     summary = cluster_biomarker_summary(
@@ -71,6 +83,7 @@ def cluster_attention_summary(
         cluster_labels,
         cell_type_column=cell_type_column,
         composition_prefix=composition_prefix,
+        variance_estimator=variance_estimator,
     )
     frame = table.copy()
     frame["cluster_label"] = cluster_labels
@@ -126,6 +139,7 @@ def cluster_survival_attention_summary(
     bag_id_column: str = "bag_id",
     cell_type_column: Optional[str] = None,
     composition_prefix: str = "comp_",
+    variance_estimator: str = "unbiased",
     eps: float = 1e-8,
 ) -> ClusterSummary:
     renamed = table.copy()
@@ -140,5 +154,6 @@ def cluster_survival_attention_summary(
         bag_id_column=bag_id_column,
         cell_type_column=cell_type_column,
         composition_prefix=composition_prefix,
+        variance_estimator=variance_estimator,
         eps=eps,
     )

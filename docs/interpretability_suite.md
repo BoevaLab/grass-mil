@@ -98,6 +98,11 @@ Common optional columns:
 Note: `cluster_profiles` and `attention_attribution` require `comp_*` columns.
 There is no fallback to one-hot `cell_type` composition.
 
+`variance_estimator` convention (biomarker z-scoring):
+
+- `unbiased` (default): sample variance/std (`ddof=1`)
+- `biased`: population variance/std (`ddof=0`, notebook-style scaling)
+
 ### Optional table: `bag_table`
 
 Used for downstream joins and metadata context. Not required by default pipeline math.
@@ -379,6 +384,7 @@ Important knobs:
 - `clustering.pca_components`
 - `plugins.enabled`
 - `plugins.params.<plugin_name>.*`
+- `variance_estimator`
 - `embedding_prefixes`
 - `report.html.enabled`
 - `report.pdf.enabled`
