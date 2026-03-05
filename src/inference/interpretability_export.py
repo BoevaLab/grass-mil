@@ -396,14 +396,16 @@ def _resolve_graph_edge_distances(graph: object, n_edges: int) -> Optional[torch
         return edge_attr.float().view(-1)
     if edge_attr.ndim != 2 or int(edge_attr.shape[1]) == 0:
         return None
-    dist_col = 1
+    dist_col = -1
     names = getattr(graph, "edge_attr_names", None)
     if isinstance(names, (list, tuple)):
         for idx, name in enumerate(names):
             if str(name) == "distance":
                 dist_col = int(idx)
                 break
-        warnings.warn("No distance column found in edge_attr, using column 1.")
+        if dist_col == -1:
+            warnings.warn("No 'distance' column found in edge_attr, using column 1.")
+            dist_col = 1
     if dist_col >= int(edge_attr.shape[1]):
         return None
     return edge_attr[:, dist_col].float().view(-1)
