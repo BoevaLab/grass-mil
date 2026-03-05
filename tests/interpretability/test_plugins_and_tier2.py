@@ -187,6 +187,7 @@ def test_diff_neighborhood_returns_pairwise_differences_with_pvalues() -> None:
         {
             "instance_id": ["x0", "x1", "y0", "y1"],
             "cluster_label": ["A", "B", "A", "B"],
+            "sample_id": ["sx", "sx", "sy", "sy"],
             "condition": ["X", "X", "Y", "Y"],
         }
     )
@@ -213,6 +214,58 @@ def test_diff_neighborhood_returns_pairwise_differences_with_pvalues() -> None:
     assert diff.enrichment.shape == (2, 2)
     assert diff.pvalues is not None
     assert diff.pvalues.shape == (2, 2)
+
+
+def test_diff_neighborhood_requires_permutation_group_column_for_permutation_mode() -> None:
+    node_table = pd.DataFrame(
+        {
+            "instance_id": ["x0", "x1", "y0", "y1"],
+            "cluster_label": ["A", "B", "A", "B"],
+            "condition": ["X", "X", "Y", "Y"],
+        }
+    )
+    spatial_table = pd.DataFrame(
+        {
+            "source_id": ["x0", "x1", "y1", "y0"],
+            "target_id": ["x1", "x0", "y0", "y1"],
+        }
+    )
+    with pytest.raises(ValueError, match="Missing permutation group column"):
+        run_diff_neighborhood_enrichment(
+            node_table,
+            spatial_table,
+            label_column="cluster_label",
+            condition_column="condition",
+            n_perms=4,
+            warn_analytical=False,
+        )
+
+
+def test_diff_neighborhood_rejects_mixed_condition_groups() -> None:
+    node_table = pd.DataFrame(
+        {
+            "instance_id": ["x0", "x1", "y0", "y1"],
+            "cluster_label": ["A", "B", "A", "B"],
+            "sample_id": ["s0", "s0", "s1", "s1"],
+            "condition": ["X", "Y", "X", "Y"],
+        }
+    )
+    spatial_table = pd.DataFrame(
+        {
+            "source_id": ["x0", "x1", "y1", "y0"],
+            "target_id": ["x1", "x0", "y0", "y1"],
+        }
+    )
+    with pytest.raises(ValueError, match="must belong to exactly one condition"):
+        run_diff_neighborhood_enrichment(
+            node_table,
+            spatial_table,
+            label_column="cluster_label",
+            condition_column="condition",
+            permutation_group_column="sample_id",
+            n_perms=4,
+            warn_analytical=False,
+        )
 
 
 def test_neighborhood_warns_in_analytical_mode() -> None:

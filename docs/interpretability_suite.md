@@ -162,7 +162,9 @@ from src.interpretability import (
 
 - Computes pairwise condition differences: `zscore(cond_a) - zscore(cond_b)`.
 - Per-condition baselines are analytical.
-- If `n_perms > 0`, only the differential p-values are permutation-based (condition-label permutations).
+- If `n_perms > 0`, only the differential p-values are permutation-based.
+- Differential permutations are performed at the library/sample level via `permutation_group_column` (defaults to `sample_id`), matching notebook behavior.
+- Each permutation group id must map to exactly one condition.
 - Emits a warning that analytical per-condition baselines are used.
 
 ## 5) Reduction And Clustering APIs

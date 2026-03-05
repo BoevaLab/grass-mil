@@ -129,6 +129,42 @@ def _two_sided_empirical_pvalues(
     return pd.DataFrame(np.clip(p, 0.0, 1.0), index=observed.index, columns=observed.columns)
 
 
+def _condition_assignments_by_group(
+    node_table: pd.DataFrame,
+    *,
+    condition_column: str,
+    group_column: str,
+) -> tuple[np.ndarray, np.ndarray]:
+    if group_column not in node_table.columns:
+        raise ValueError(
+            f"Missing permutation group column {group_column!r}. "
+            "Notebook-consistent differential permutations require a library/sample grouping key."
+        )
+    if node_table[group_column].isna().any():
+        raise ValueError(
+            f"Permutation group column {group_column!r} contains null values; "
+            "all rows must map to a valid library/sample id."
+        )
+
+    group_frame = node_table[[group_column, condition_column]].copy()
+    group_frame[group_column] = group_frame[group_column].astype(str)
+    group_frame[condition_column] = group_frame[condition_column].astype(str)
+    nunique = group_frame.groupby(group_column)[condition_column].nunique()
+    bad = nunique[nunique > 1]
+    if not bad.empty:
+        preview = ", ".join(bad.index.astype(str).tolist()[:5])
+        raise ValueError(
+            "Permutation group ids must belong to exactly one condition. "
+            f"Found mixed-condition groups in {group_column!r}, e.g. {preview}."
+        )
+
+    assignments = group_frame.drop_duplicates(subset=[group_column]).reset_index(drop=True)
+    return (
+        assignments[group_column].to_numpy(dtype=object),
+        assignments[condition_column].to_numpy(dtype=object),
+    )
+
+
 def run_neighborhood_enrichment(
     node_table: pd.DataFrame,
     spatial_table: pd.DataFrame,
@@ -213,6 +249,7 @@ def run_diff_neighborhood_enrichment(
     *,
     label_column: str,
     condition_column: str,
+    permutation_group_column: str = "sample_id",
     id_column: str = "instance_id",
     n_perms: int = 0,
     random_state: int = 42,
@@ -223,7 +260,8 @@ def run_diff_neighborhood_enrichment(
 
     Differential enrichment is `zscore(condition_a) - zscore(condition_b)`.
     Per-condition enrichments are computed in analytical mode for stability/speed; when
-    `n_perms > 0`, differential p-values are estimated by permuting condition labels.
+    `n_perms > 0`, differential p-values are estimated by permuting condition labels at the
+    library/sample group level (`permutation_group_column`), consistent with the notebook.
     """
     if condition_column not in node_table.columns:
         raise ValueError(f"Missing condition column {condition_column!r}.")
@@ -257,19 +295,29 @@ def run_diff_neighborhood_enrichment(
     for left, right in combinations(cond_keys, 2):
         left_res = per_condition[left]
         right_res = per_condition[right]
+        pair_nodes = node_table[
+            node_table[condition_column].astype(str).isin([left, right])
+        ].copy()
         diff_enrichment = left_res.enrichment - right_res.enrichment
         diff_observed = left_res.observed - right_res.observed
         diff_expected = left_res.expected - right_res.expected
 
         pvalues: Optional[pd.DataFrame] = None
         if perms > 0:
+            group_ids, group_conditions = _condition_assignments_by_group(
+                pair_nodes,
+                condition_column=condition_column,
+                group_column=permutation_group_column,
+            )
             rng = np.random.default_rng(int(random_state))
             n_labels = len(category_list)
             perm_scores = np.zeros((perms, n_labels, n_labels), dtype=float)
-            shuffled_conditions = node_table[condition_column].astype(str).to_numpy()
+            pair_group_ids = pair_nodes[permutation_group_column].astype(str)
             for i in range(perms):
-                perm_nodes = node_table.copy()
-                perm_nodes[condition_column] = rng.permutation(shuffled_conditions)
+                permuted_group_conditions = rng.permutation(group_conditions)
+                group_to_condition = dict(zip(group_ids, permuted_group_conditions))
+                perm_nodes = pair_nodes.copy()
+                perm_nodes[condition_column] = pair_group_ids.map(group_to_condition).astype(str)
                 perm_left = perm_nodes[perm_nodes[condition_column].astype(str) == left]
                 perm_right = perm_nodes[perm_nodes[condition_column].astype(str) == right]
                 left_perm_res = run_neighborhood_enrichment(
