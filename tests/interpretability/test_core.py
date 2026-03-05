@@ -37,7 +37,7 @@ def test_cluster_biomarker_and_attention_summary() -> None:
         }
     )
     labels = np.array([0, 0, 1, 1, 1, 0])
-    bio = cluster_biomarker_summary(table, labels, cell_type_column="cell_type")
+    bio = cluster_biomarker_summary(table, labels)
     assert "comp_A" in bio.composition.columns
     assert bio.cluster_counts.sum() == len(table)
 
@@ -47,7 +47,6 @@ def test_cluster_biomarker_and_attention_summary() -> None:
         attention_column="attention",
         score_column="score",
         bag_id_column="bag_id",
-        cell_type_column="cell_type",
     )
     assert att.weighted_scores is not None
     assert att.attention_lift_present is not None
@@ -62,7 +61,7 @@ def test_cluster_biomarker_requires_composition_columns() -> None:
     )
     labels = np.array([0, 1])
     with pytest.raises(ValueError, match="No composition columns found"):
-        cluster_biomarker_summary(table, labels, cell_type_column="cell_type")
+        cluster_biomarker_summary(table, labels)
 
 
 def test_cluster_biomarker_variance_estimator_is_tunable() -> None:

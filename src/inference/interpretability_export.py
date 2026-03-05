@@ -75,8 +75,12 @@ def _make_unique_ids(values: Sequence[str]) -> List[str]:
 
 
 def _softmax_by_group(logits: torch.Tensor, groups: Sequence[str]) -> np.ndarray:
-    if logits.ndim != 2 or logits.shape[1] == 0:
-        raise ValueError("instance_attention_logits must be a 2D tensor with >=1 column.")
+    if logits.ndim != 2 or logits.shape[1] != 1:
+        raise ValueError(
+            "instance_attention_logits must be a 2D tensor with exactly one column. "
+            "Multi-column attention logits are ambiguous for interpretability export; "
+            "emit a single attention logit per instance."
+        )
     if logits.shape[0] != len(groups):
         raise ValueError(
             "Mismatch between attention logits rows and group ids: "

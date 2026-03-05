@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 import pandas as pd
 
@@ -20,7 +18,6 @@ def _resolve_variance_estimator(variance_estimator: str) -> int:
 def _infer_composition_matrix(
     table: pd.DataFrame,
     *,
-    cell_type_column: Optional[str],
     composition_prefix: str,
 ) -> pd.DataFrame:
     comp_cols = [c for c in table.columns if c.startswith(composition_prefix)]
@@ -37,16 +34,13 @@ def cluster_biomarker_summary(
     table: pd.DataFrame,
     cluster_labels: np.ndarray,
     *,
-    cell_type_column: Optional[str] = None,
     composition_prefix: str = "comp_",
     variance_estimator: str = "unbiased",
 ) -> ClusterSummary:
     if len(table) != int(cluster_labels.shape[0]):
         raise ValueError("table rows and cluster_labels length mismatch.")
 
-    comp = _infer_composition_matrix(
-        table, cell_type_column=cell_type_column, composition_prefix=composition_prefix
-    )
+    comp = _infer_composition_matrix(table, composition_prefix=composition_prefix)
     labels = pd.Series(cluster_labels, name="cluster_label")
 
     ddof = _resolve_variance_estimator(variance_estimator)
@@ -73,7 +67,6 @@ def cluster_attention_summary(
     attention_column: str = "attention",
     score_column: str = "score",
     bag_id_column: str = "bag_id",
-    cell_type_column: Optional[str] = None,
     composition_prefix: str = "comp_",
     variance_estimator: str = "unbiased",
     eps: float = 1e-8,
@@ -81,7 +74,6 @@ def cluster_attention_summary(
     summary = cluster_biomarker_summary(
         table,
         cluster_labels,
-        cell_type_column=cell_type_column,
         composition_prefix=composition_prefix,
         variance_estimator=variance_estimator,
     )
@@ -137,7 +129,6 @@ def cluster_survival_attention_summary(
     attention_column: str = "attention",
     hazard_column: str = "hazard",
     bag_id_column: str = "bag_id",
-    cell_type_column: Optional[str] = None,
     composition_prefix: str = "comp_",
     variance_estimator: str = "unbiased",
     eps: float = 1e-8,
@@ -152,7 +143,6 @@ def cluster_survival_attention_summary(
         attention_column=attention_column,
         score_column="score",
         bag_id_column=bag_id_column,
-        cell_type_column=cell_type_column,
         composition_prefix=composition_prefix,
         variance_estimator=variance_estimator,
         eps=eps,

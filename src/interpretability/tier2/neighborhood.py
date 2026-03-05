@@ -41,8 +41,18 @@ def _prepare_edges_with_labels(
     edges["target_id"] = edges["target_id"].astype(str)
 
     if undirected:
-        rev = edges.rename(columns={"source_id": "target_id", "target_id": "source_id"})
-        edges = pd.concat([edges, rev], axis=0, ignore_index=True)
+        src = edges["source_id"].to_numpy(dtype=str)
+        dst = edges["target_id"].to_numpy(dtype=str)
+        src_first = np.where(src <= dst, src, dst)
+        dst_second = np.where(src <= dst, dst, src)
+        canonical = pd.DataFrame(
+            {
+                "source_id": src_first,
+                "target_id": dst_second,
+            }
+        ).drop_duplicates(subset=["source_id", "target_id"], keep="first")
+        rev = canonical.rename(columns={"source_id": "target_id", "target_id": "source_id"})
+        edges = pd.concat([canonical, rev], axis=0, ignore_index=True)
 
     edges = edges[
         edges["source_id"].isin(label_map.index) & edges["target_id"].isin(label_map.index)
@@ -391,8 +401,10 @@ def run_diff_neighborhood_enrichment(
                 )
                 perm_scores[i] = (left_perm_res.enrichment - right_perm_res.enrichment).values
             obs = diff_enrichment.values
-            perm_dev = np.abs(perm_scores)
-            extreme = np.sum(perm_dev >= np.abs(obs)[None, :, :], axis=0)
+            perm_mean = perm_scores.mean(axis=0)
+            obs_dev = np.abs(obs - perm_mean)
+            perm_dev = np.abs(perm_scores - perm_mean[None, :, :])
+            extreme = np.sum(perm_dev >= obs_dev[None, :, :], axis=0)
             pvals = (extreme + 1.0) / (perm_scores.shape[0] + 1.0)
             pvalues = pd.DataFrame(
                 np.clip(pvals, 0.0, 1.0),

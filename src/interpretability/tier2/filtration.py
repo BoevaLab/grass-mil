@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 import numpy as np
 import pandas as pd
 
@@ -37,43 +35,72 @@ def compute_filtration_curves(
             f"Node table contains duplicate IDs in {id_column!r}; "
             "filtration requires unique node identifiers."
         )
-    node_to_cell_type = nodes.set_index(id_column)[cell_type_column].astype(str).to_dict()
-    node_to_cluster = nodes.set_index(id_column)[cluster_column].astype(str).to_dict()
+    nodes[cluster_column] = nodes[cluster_column].astype(str)
+    nodes[cell_type_column] = nodes[cell_type_column].astype(str)
+    node_to_cell_type = nodes.set_index(id_column)[cell_type_column].to_dict()
+    node_to_cluster = nodes.set_index(id_column)[cluster_column].to_dict()
 
     edges = spatial_table.copy()
     edges["source_id"] = edges["source_id"].astype(str)
     edges["target_id"] = edges["target_id"].astype(str)
     edges = edges[edges["source_id"].isin(node_to_cluster.keys())].copy()
+    edges[distance_column] = edges[distance_column].astype(float)
     edges["source_cluster"] = edges["source_id"].map(node_to_cluster)
 
     clusters = sorted(nodes[cluster_column].astype(str).unique())
     cell_types = sorted(nodes[cell_type_column].astype(str).unique())
+    cell_type_to_idx = {name: idx for idx, name in enumerate(cell_types)}
     thresholds = np.asarray(thresholds, dtype=float)
+    if thresholds.ndim != 1:
+        raise ValueError("thresholds must be a 1D array.")
+    if thresholds.size == 0:
+        raise ValueError("thresholds must include at least one value.")
+    sort_order = np.argsort(thresholds)
+    thresholds_sorted = thresholds[sort_order]
     curves: dict[str, dict[str, np.ndarray]] = {
         c: {ct: np.zeros_like(thresholds, dtype=float) for ct in cell_types} for c in clusters
     }
 
     for cluster in clusters:
         c_edges = edges[edges["source_cluster"] == str(cluster)]
-        by_subgraph = {
-            str(sub_id): frame for sub_id, frame in c_edges.groupby("source_id", sort=False)
-        }
-        for i, thr in enumerate(thresholds):
-            threshold_counts: dict[str, float] = {ct: 0.0 for ct in cell_types}
-            for subgraph_edges in by_subgraph.values():
-                selected = subgraph_edges[subgraph_edges[distance_column] <= float(thr)]
-                if selected.empty:
+        per_ct_diff = np.zeros((len(cell_types), thresholds_sorted.shape[0] + 1), dtype=float)
+        for _, subgraph_edges in c_edges.groupby("source_id", sort=False):
+            source_ids = subgraph_edges["source_id"].to_numpy(dtype=str)
+            target_ids = subgraph_edges["target_id"].to_numpy(dtype=str)
+            distances = subgraph_edges[distance_column].to_numpy(dtype=float)
+            if distances.size == 0:
+                continue
+            edge_order = np.argsort(distances)
+            source_ids = source_ids[edge_order]
+            target_ids = target_ids[edge_order]
+            distances = distances[edge_order]
+
+            first_threshold_by_node: dict[str, int] = {}
+            for src_id, tgt_id, distance in zip(source_ids, target_ids, distances):
+                start_idx = int(np.searchsorted(thresholds_sorted, distance, side="left"))
+                if start_idx >= int(thresholds_sorted.shape[0]):
                     continue
-                # Subgraph-centric counting: count each node at most once per subgraph.
-                unique_node_ids = set(selected["source_id"].tolist()) | set(
-                    selected["target_id"].tolist()
-                )
-                for node_id in unique_node_ids:
-                    ct = node_to_cell_type.get(str(node_id))
-                    if ct is not None:
-                        threshold_counts[ct] += 1.0
-            for ct in cell_types:
-                curves[cluster][ct][i] = float(threshold_counts.get(ct, 0.0))
+                prev_src = first_threshold_by_node.get(src_id)
+                if prev_src is None or start_idx < prev_src:
+                    first_threshold_by_node[src_id] = start_idx
+                prev_tgt = first_threshold_by_node.get(tgt_id)
+                if prev_tgt is None or start_idx < prev_tgt:
+                    first_threshold_by_node[tgt_id] = start_idx
+
+            for node_id, start_idx in first_threshold_by_node.items():
+                cell_type = node_to_cell_type.get(node_id)
+                if cell_type is None:
+                    continue
+                ct_idx = cell_type_to_idx.get(cell_type)
+                if ct_idx is None:
+                    continue
+                per_ct_diff[ct_idx, start_idx] += 1.0
+
+        per_ct_sorted = np.cumsum(per_ct_diff[:, :-1], axis=1)
+        per_ct_original = np.zeros_like(per_ct_sorted)
+        per_ct_original[:, sort_order] = per_ct_sorted
+        for ct_idx, ct in enumerate(cell_types):
+            curves[cluster][ct] = per_ct_original[ct_idx].astype(float, copy=False)
         if scale_within_cluster:
             for ct in cell_types:
                 vmax = float(curves[cluster][ct].max())
@@ -81,19 +108,3 @@ def compute_filtration_curves(
                     curves[cluster][ct] = curves[cluster][ct] / vmax
 
     return FiltrationCurvesResult(thresholds=thresholds, curves=curves)
-
-
-def _serialize_filtration_curves(result: FiltrationCurvesResult) -> pd.DataFrame:
-    rows = []
-    for cluster, ct_map in result.curves.items():
-        for cell_type, values in ct_map.items():
-            for idx, val in enumerate(values):
-                rows.append(
-                    {
-                        "cluster_label": cluster,
-                        "cell_type": cell_type,
-                        "threshold": float(result.thresholds[idx]),
-                        "value": float(val),
-                    }
-                )
-    return pd.DataFrame(rows)

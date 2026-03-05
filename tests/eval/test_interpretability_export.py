@@ -182,3 +182,22 @@ def test_build_spatial_table_requires_payload_connectivity() -> None:
     instance_frame = build_instance_table(payload, require_composition=True)
     with pytest.raises(ValueError, match="missing instance_graphs"):
         build_spatial_table(instance_frame, payload)
+
+
+def test_build_instance_table_rejects_multi_column_attention_logits() -> None:
+    payload = BatchPredictionPayload(
+        bag_ids=["b0"],
+        bag_logits=torch.tensor([[1.0, 0.0]]),
+        bag_targets=None,
+        bag_attention=None,
+        instance_logits=torch.tensor([[0.2], [0.5]]),
+        instance_attention_logits=torch.tensor([[0.1, 0.2], [0.3, 0.4]]),
+        instance_patch_ids=["p0", "p1"],
+        instance_bag_ids=["b0", "b0"],
+        instance_region_ids=["r0", "r0"],
+        instance_sample_ids=["s0", "s0"],
+        instance_embeddings=torch.tensor([[0.1, 0.2], [0.3, 0.4]]),
+        instance_composition=torch.tensor([[1.0, 0.0], [0.5, 0.5]]),
+    )
+    with pytest.raises(ValueError, match="exactly one column"):
+        build_instance_table(payload, require_composition=True)

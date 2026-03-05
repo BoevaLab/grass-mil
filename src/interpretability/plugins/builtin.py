@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from src.interpretability.contracts import (
+    ClusterSummary,
     PluginResult,
     ReportSection,
 )
@@ -40,6 +41,21 @@ def _resolve_filtration_thresholds(params: Dict[str, Any]) -> np.ndarray:
     return np.linspace(start, stop, count, dtype=float)
 
 
+def _context_cluster_summary(
+    context: PluginContext,
+    *,
+    labels: np.ndarray,
+) -> ClusterSummary | None:
+    summary = context.state.get("cluster_summary")
+    if not isinstance(summary, ClusterSummary):
+        return None
+    if summary.cluster_labels.shape != labels.shape:
+        return None
+    if not np.array_equal(summary.cluster_labels, labels):
+        return None
+    return summary
+
+
 @dataclass
 class ClusterProfilesPlugin(InterpretabilityPlugin):
     name: str = "cluster_profiles"
@@ -49,13 +65,14 @@ class ClusterProfilesPlugin(InterpretabilityPlugin):
 
     def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
         labels = np.asarray(context.state["cluster_labels"])
-        summary = cluster_biomarker_summary(
-            dataset.instance_table,
-            labels,
-            cell_type_column=params.get("cell_type_column", dataset.cell_type_column),
-            composition_prefix=str(params.get("composition_prefix", "comp_")),
-            variance_estimator=str(params.get("variance_estimator", "unbiased")),
-        )
+        summary = _context_cluster_summary(context, labels=labels)
+        if summary is None:
+            summary = cluster_biomarker_summary(
+                dataset.instance_table,
+                labels,
+                composition_prefix=str(params.get("composition_prefix", "comp_")),
+                variance_estimator=str(params.get("variance_estimator", "unbiased")),
+            )
         payload = {
             "composition": summary.composition,
             "enrichment": summary.enrichment,
@@ -83,16 +100,29 @@ class AttentionAttributionPlugin(InterpretabilityPlugin):
 
     def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
         labels = np.asarray(context.state["cluster_labels"])
-        summary = cluster_attention_summary(
+        attn_summary = cluster_attention_summary(
             dataset.instance_table,
             labels,
             attention_column=str(params.get("attention_column", "attention")),
             score_column=str(params.get("score_column", "score")),
             bag_id_column=str(params.get("bag_id_column", dataset.bag_id_column)),
-            cell_type_column=params.get("cell_type_column", dataset.cell_type_column),
             composition_prefix=str(params.get("composition_prefix", "comp_")),
             variance_estimator=str(params.get("variance_estimator", "unbiased")),
         )
+        base_summary = _context_cluster_summary(context, labels=labels)
+        if base_summary is not None:
+            summary = ClusterSummary(
+                cluster_labels=base_summary.cluster_labels,
+                composition=base_summary.composition,
+                enrichment=base_summary.enrichment,
+                cluster_counts=base_summary.cluster_counts,
+                weighted_scores=attn_summary.weighted_scores,
+                mean_scores=attn_summary.mean_scores,
+                attention_present=attn_summary.attention_present,
+                attention_lift_present=attn_summary.attention_lift_present,
+            )
+        else:
+            summary = attn_summary
         payload = {
             "weighted_scores": summary.weighted_scores,
             "mean_scores": summary.mean_scores,

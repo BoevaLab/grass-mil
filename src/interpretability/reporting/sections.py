@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from typing import List
 
-import pandas as pd
-
 from src.interpretability.contracts import ReportBundle, ReportSection
 
 
@@ -32,11 +30,3 @@ def build_report_sections(bundle: ReportBundle) -> List[ReportSection]:
     for plugin_result in bundle.plugin_results.values():
         sections.extend(plugin_result.sections)
     return sections
-
-
-def flatten_tables(sections: List[ReportSection]) -> dict[str, pd.DataFrame]:
-    out: dict[str, pd.DataFrame] = {}
-    for section in sections:
-        for key, table in section.tables.items():
-            out[f"{section.title}:{key}"] = table
-    return out

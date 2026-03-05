@@ -152,7 +152,6 @@ def run_interpretability_pipeline(
         cluster_summary = cluster_biomarker_summary(
             dataset.instance_table,
             labels,
-            cell_type_column=dataset.cell_type_column,
             composition_prefix=str(config.get("composition_prefix", "comp_")),
             variance_estimator=str(config.get("variance_estimator", "unbiased")),
         )
@@ -162,6 +161,7 @@ def run_interpretability_pipeline(
             "reduction": reduction_result,
             "clustering": clustering_result,
             "cluster_labels": labels,
+            "cluster_summary": cluster_summary,
         }
     )
     plugin_results: Dict[str, PluginResult] = {}

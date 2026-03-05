@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import time
+
 import numpy as np
 import pandas as pd
 import pytest
 
-from src.interpretability.contracts import InterpretabilityDataset
+from src.interpretability.contracts import ClusterSummary, InterpretabilityDataset
 from src.interpretability.plugins.base import PluginContext
 from src.interpretability.plugins.builtin import create_builtin_registry
 from src.interpretability.plugins.registry import create_plugin_registry
 from src.interpretability.tier2.filtration import compute_filtration_curves
 from src.interpretability.tier2.neighborhood import (
+    NeighborhoodEnrichmentResult,
     run_diff_neighborhood_enrichment,
     run_neighborhood_enrichment,
 )
@@ -138,6 +141,66 @@ def test_builtin_diff_neighborhood_plugin_execution() -> None:
         section.title.startswith("Differential Neighborhood Enrichment")
         for section in out.sections
     )
+
+
+def test_cluster_profiles_reuses_context_cluster_summary(monkeypatch) -> None:
+    registry = create_builtin_registry()
+    ds = _sample_dataset()
+    labels = np.array([0, 0, 1, 1, 1, 0])
+    summary = ClusterSummary(
+        cluster_labels=labels.copy(),
+        composition=pd.DataFrame({"comp_A": [0.1, 0.2]}, index=[0, 1]),
+        enrichment=pd.DataFrame({"comp_A": [1.0, -1.0]}, index=[0, 1]),
+        cluster_counts=pd.Series({0: 2, 1: 4}),
+    )
+
+    def _should_not_run(*args, **kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("cluster_biomarker_summary should not be recomputed")
+
+    monkeypatch.setattr(
+        "src.interpretability.plugins.builtin.cluster_biomarker_summary", _should_not_run
+    )
+    plugin = registry.get("cluster_profiles")
+    out = plugin.run(
+        ds,
+        PluginContext(state={"cluster_labels": labels, "cluster_summary": summary}),
+    )
+    assert out.payload["composition"].equals(summary.composition)
+    assert out.payload["enrichment"].equals(summary.enrichment)
+
+
+def test_attention_attribution_reuses_context_base_summary(monkeypatch) -> None:
+    registry = create_builtin_registry()
+    ds = _sample_dataset()
+    labels = np.array([0, 0, 1, 1, 1, 0])
+    base_summary = ClusterSummary(
+        cluster_labels=labels.copy(),
+        composition=pd.DataFrame({"comp_A": [0.6, 0.4]}, index=[0, 1]),
+        enrichment=pd.DataFrame({"comp_A": [0.2, -0.2]}, index=[0, 1]),
+        cluster_counts=pd.Series({0: 3, 1: 3}),
+    )
+    attn_summary = ClusterSummary(
+        cluster_labels=labels.copy(),
+        composition=pd.DataFrame({"comp_A": [0.9, 0.1]}, index=[0, 1]),
+        enrichment=pd.DataFrame({"comp_A": [1.2, -1.2]}, index=[0, 1]),
+        cluster_counts=pd.Series({0: 2, 1: 4}),
+        weighted_scores=pd.Series({0: 0.3, 1: 0.7}),
+        mean_scores=pd.Series({0: 0.2, 1: 0.8}),
+        attention_present=pd.Series({0: 0.4, 1: 0.6}),
+        attention_lift_present=pd.Series({0: 1.1, 1: 0.9}),
+    )
+
+    monkeypatch.setattr(
+        "src.interpretability.plugins.builtin.cluster_attention_summary",
+        lambda *args, **kwargs: attn_summary,  # type: ignore[no-untyped-def]
+    )
+    plugin = registry.get("attention_attribution")
+    out = plugin.run(
+        ds,
+        PluginContext(state={"cluster_labels": labels, "cluster_summary": base_summary}),
+    )
+    assert out.payload["weighted_scores"].equals(attn_summary.weighted_scores)
+    assert out.payload["mean_scores"].equals(attn_summary.mean_scores)
 
 
 def test_plugin_registry_instances_are_isolated() -> None:
@@ -308,6 +371,32 @@ def test_neighborhood_undirected_option_adds_reverse_direction() -> None:
     assert undirected.observed.loc["B", "A"] == 1.0
 
 
+def test_neighborhood_undirected_deduplicates_already_bidirectional_edges() -> None:
+    node_table = pd.DataFrame(
+        {
+            "instance_id": ["n0", "n1"],
+            "cluster_label": ["A", "B"],
+        }
+    )
+    spatial_table = pd.DataFrame(
+        {
+            "source_id": ["n0", "n1"],
+            "target_id": ["n1", "n0"],
+        }
+    )
+    out = run_neighborhood_enrichment(
+        node_table,
+        spatial_table,
+        label_column="cluster_label",
+        id_column="instance_id",
+        n_perms=0,
+        undirected=True,
+        warn_analytical=False,
+    )
+    assert out.observed.loc["A", "B"] == 1.0
+    assert out.observed.loc["B", "A"] == 1.0
+
+
 def test_neighborhood_ignores_weight_semantics() -> None:
     node_table = pd.DataFrame(
         {
@@ -440,6 +529,51 @@ def test_diff_neighborhood_returns_pairwise_differences_with_pvalues() -> None:
     assert diff.enrichment.shape == (2, 2)
     assert diff.pvalues is not None
     assert diff.pvalues.shape == (2, 2)
+
+
+def test_diff_neighborhood_pvalues_are_centered_on_permutation_mean(monkeypatch) -> None:
+    calls = {"i": 0}
+    # First two calls are baseline left/right. Remaining calls are (left,right) per permutation.
+    per_call_scores = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 2.0, 0.0, 3.0, 0.0]
+
+    def _fake_run_neighborhood(*args, **kwargs):  # type: ignore[no-untyped-def]
+        idx = calls["i"]
+        calls["i"] += 1
+        score = per_call_scores[idx]
+        frame = pd.DataFrame([[score]], index=["A"], columns=["A"])
+        zeros = pd.DataFrame([[0.0]], index=["A"], columns=["A"])
+        return NeighborhoodEnrichmentResult(
+            enrichment=frame,
+            observed=zeros,
+            expected=zeros,
+            pvalues=None,
+        )
+
+    monkeypatch.setattr(
+        "src.interpretability.tier2.neighborhood.run_neighborhood_enrichment",
+        _fake_run_neighborhood,
+    )
+    node_table = pd.DataFrame(
+        {
+            "instance_id": ["x0", "x1", "y0", "y1"],
+            "cluster_label": ["A", "A", "A", "A"],
+            "sample_id": ["sx0", "sx1", "sy0", "sy1"],
+            "condition": ["X", "X", "Y", "Y"],
+        }
+    )
+    spatial_table = pd.DataFrame({"source_id": ["x0"], "target_id": ["x1"]})
+    out = run_diff_neighborhood_enrichment(
+        node_table,
+        spatial_table,
+        label_column="cluster_label",
+        condition_column="condition",
+        permutation_group_column="sample_id",
+        n_perms=4,
+        warn_analytical=False,
+    )
+    p = float(out["X_Y"].pvalues.loc["A", "A"])  # type: ignore[union-attr]
+    assert p == pytest.approx(1.0)
+    assert p != pytest.approx(0.8)
 
 
 def test_diff_neighborhood_respects_enrichment_mode() -> None:
@@ -580,3 +714,129 @@ def test_diff_neighborhood_warns_about_analytical_baseline() -> None:
             id_column="instance_id",
             n_perms=0,
         )
+
+
+def _legacy_filtration_curves(
+    node_table: pd.DataFrame,
+    spatial_table: pd.DataFrame,
+    *,
+    thresholds: np.ndarray,
+    cluster_column: str,
+    cell_type_column: str,
+    id_column: str,
+    distance_column: str,
+) -> dict[str, dict[str, np.ndarray]]:
+    node_to_cell_type = node_table.set_index(id_column)[cell_type_column].astype(str).to_dict()
+    node_to_cluster = node_table.set_index(id_column)[cluster_column].astype(str).to_dict()
+    edges = spatial_table.copy()
+    edges["source_id"] = edges["source_id"].astype(str)
+    edges["target_id"] = edges["target_id"].astype(str)
+    edges = edges[edges["source_id"].isin(node_to_cluster.keys())].copy()
+    edges["source_cluster"] = edges["source_id"].map(node_to_cluster)
+
+    clusters = sorted(node_table[cluster_column].astype(str).unique())
+    cell_types = sorted(node_table[cell_type_column].astype(str).unique())
+    curves: dict[str, dict[str, np.ndarray]] = {
+        c: {ct: np.zeros_like(thresholds, dtype=float) for ct in cell_types} for c in clusters
+    }
+    for cluster in clusters:
+        c_edges = edges[edges["source_cluster"] == str(cluster)]
+        by_subgraph = {
+            str(sub_id): frame for sub_id, frame in c_edges.groupby("source_id", sort=False)
+        }
+        for i, thr in enumerate(thresholds):
+            threshold_counts: dict[str, float] = {ct: 0.0 for ct in cell_types}
+            for subgraph_edges in by_subgraph.values():
+                selected = subgraph_edges[subgraph_edges[distance_column] <= float(thr)]
+                if selected.empty:
+                    continue
+                unique_node_ids = set(selected["source_id"].tolist()) | set(
+                    selected["target_id"].tolist()
+                )
+                for node_id in unique_node_ids:
+                    ct = node_to_cell_type.get(str(node_id))
+                    if ct is not None:
+                        threshold_counts[ct] += 1.0
+            for ct in cell_types:
+                curves[cluster][ct][i] = float(threshold_counts.get(ct, 0.0))
+    return curves
+
+
+def test_filtration_vectorized_matches_legacy_counts() -> None:
+    rng = np.random.default_rng(19)
+    n_nodes = 32
+    node_ids = [f"n{i}" for i in range(n_nodes)]
+    node_table = pd.DataFrame(
+        {
+            "instance_id": node_ids,
+            "cluster_label": rng.choice(["0", "1", "2"], size=n_nodes),
+            "cell_type": rng.choice(["A", "B", "C"], size=n_nodes),
+        }
+    )
+    edge_count = 120
+    spatial_table = pd.DataFrame(
+        {
+            "source_id": rng.choice(node_ids, size=edge_count),
+            "target_id": rng.choice(node_ids, size=edge_count),
+            "distance": rng.uniform(0.0, 1.0, size=edge_count),
+        }
+    )
+    thresholds = np.array([0.6, 0.2, 0.9, 0.1, 0.4], dtype=float)
+
+    legacy = _legacy_filtration_curves(
+        node_table,
+        spatial_table,
+        thresholds=thresholds,
+        cluster_column="cluster_label",
+        cell_type_column="cell_type",
+        id_column="instance_id",
+        distance_column="distance",
+    )
+    out = compute_filtration_curves(
+        node_table,
+        spatial_table,
+        thresholds=thresholds,
+        cluster_column="cluster_label",
+        cell_type_column="cell_type",
+        id_column="instance_id",
+        distance_column="distance",
+        scale_within_cluster=False,
+    )
+    for cluster, ct_map in legacy.items():
+        for cell_type, values in ct_map.items():
+            assert np.allclose(out.curves[cluster][cell_type], values)
+
+
+def test_filtration_runtime_sanity() -> None:
+    rng = np.random.default_rng(11)
+    n_nodes = 220
+    node_ids = [f"n{i}" for i in range(n_nodes)]
+    node_table = pd.DataFrame(
+        {
+            "instance_id": node_ids,
+            "cluster_label": rng.choice(["0", "1", "2", "3"], size=n_nodes),
+            "cell_type": rng.choice(["A", "B", "C", "D"], size=n_nodes),
+        }
+    )
+    edge_count = 2400
+    spatial_table = pd.DataFrame(
+        {
+            "source_id": rng.choice(node_ids, size=edge_count),
+            "target_id": rng.choice(node_ids, size=edge_count),
+            "distance": rng.uniform(0.0, 55.0, size=edge_count),
+        }
+    )
+    thresholds = np.linspace(0.0, 55.0, 300)
+    t0 = time.perf_counter()
+    out = compute_filtration_curves(
+        node_table,
+        spatial_table,
+        thresholds=thresholds,
+        cluster_column="cluster_label",
+        cell_type_column="cell_type",
+        id_column="instance_id",
+        distance_column="distance",
+    )
+    elapsed = time.perf_counter() - t0
+    assert len(out.curves) > 0
+    assert elapsed < 8.0
