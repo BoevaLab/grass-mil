@@ -1,25 +1,38 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, Iterable, List
 
 from src.interpretability.plugins.base import InterpretabilityPlugin
 
-_REGISTRY: Dict[str, InterpretabilityPlugin] = {}
+
+class PluginRegistry:
+    def __init__(self, plugins: Iterable[InterpretabilityPlugin] | None = None) -> None:
+        self._plugins: Dict[str, InterpretabilityPlugin] = {}
+        if plugins is not None:
+            for plugin in plugins:
+                self.register(plugin)
+
+    def register(self, plugin: InterpretabilityPlugin) -> None:
+        name = str(plugin.name).strip()
+        if not name:
+            raise ValueError("Plugin name must be non-empty.")
+        self._plugins[name] = plugin
+
+    def register_many(self, plugins: Iterable[InterpretabilityPlugin]) -> None:
+        for plugin in plugins:
+            self.register(plugin)
+
+    def get(self, name: str) -> InterpretabilityPlugin:
+        key = str(name).strip()
+        if key not in self._plugins:
+            raise KeyError(f"Plugin {name!r} is not registered.")
+        return self._plugins[key]
+
+    def list(self) -> List[str]:
+        return sorted(self._plugins.keys())
 
 
-def register_plugin(plugin: InterpretabilityPlugin) -> None:
-    name = str(plugin.name).strip()
-    if not name:
-        raise ValueError("Plugin name must be non-empty.")
-    _REGISTRY[name] = plugin
-
-
-def get_plugin(name: str) -> InterpretabilityPlugin:
-    key = str(name).strip()
-    if key not in _REGISTRY:
-        raise KeyError(f"Plugin {name!r} is not registered.")
-    return _REGISTRY[key]
-
-
-def list_plugins() -> List[str]:
-    return sorted(_REGISTRY.keys())
+def create_plugin_registry(
+    plugins: Iterable[InterpretabilityPlugin] | None = None,
+) -> PluginRegistry:
+    return PluginRegistry(plugins=plugins)

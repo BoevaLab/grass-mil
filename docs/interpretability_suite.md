@@ -225,6 +225,8 @@ Plugin protocol (`InterpretabilityPlugin`):
 `required_inputs()` is enforced by the pipeline before plugin execution; missing inputs
 fail fast with a `ValueError` naming the plugin and missing keys.
 
+Plugin registration is per pipeline run (fresh `PluginRegistry`).
+
 `PluginResult` includes:
 
 - `payload`: machine-readable outputs

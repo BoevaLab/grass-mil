@@ -6,8 +6,8 @@ import pytest
 
 from src.interpretability.contracts import InterpretabilityDataset
 from src.interpretability.plugins.base import PluginContext
-from src.interpretability.plugins.builtin import register_builtin_plugins
-from src.interpretability.plugins.registry import get_plugin, list_plugins
+from src.interpretability.plugins.builtin import create_builtin_registry
+from src.interpretability.plugins.registry import create_plugin_registry
 from src.interpretability.tier2.filtration import compute_filtration_curves
 from src.interpretability.tier2.neighborhood import (
     run_diff_neighborhood_enrichment,
@@ -47,14 +47,32 @@ def _sample_dataset() -> InterpretabilityDataset:
 
 
 def test_plugin_registry_and_builtin_execution() -> None:
-    register_builtin_plugins()
-    assert "cluster_profiles" in list_plugins()
+    registry = create_builtin_registry()
+    assert "cluster_profiles" in registry.list()
     ds = _sample_dataset()
     labels = np.array([0, 0, 1, 1, 1, 0])
-    plugin = get_plugin("cluster_profiles")
+    plugin = registry.get("cluster_profiles")
     out = plugin.run(ds, PluginContext(state={"cluster_labels": labels}))
     assert out.name == "cluster_profiles"
     assert "composition" in out.payload
+
+
+def test_plugin_registry_instances_are_isolated() -> None:
+    class _DummyPlugin:
+        name = "dummy"
+
+        def required_inputs(self) -> list[str]:
+            return []
+
+        def run(self, dataset, context: PluginContext, **params):  # type: ignore[no-untyped-def]
+            raise NotImplementedError
+
+    left = create_plugin_registry()
+    right = create_plugin_registry()
+    left.register(_DummyPlugin())
+
+    assert "dummy" in left.list()
+    assert "dummy" not in right.list()
 
 
 def test_tier2_neighborhood_and_filtration() -> None:

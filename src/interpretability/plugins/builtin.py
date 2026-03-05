@@ -14,7 +14,7 @@ from src.interpretability.core.biomarkers import (
     cluster_biomarker_summary,
 )
 from src.interpretability.plugins.base import InterpretabilityPlugin, PluginContext
-from src.interpretability.plugins.registry import register_plugin
+from src.interpretability.plugins.registry import PluginRegistry, create_plugin_registry
 from src.interpretability.tier2.filtration import compute_filtration_curves
 from src.interpretability.tier2.neighborhood import run_neighborhood_enrichment
 
@@ -184,8 +184,14 @@ class FiltrationCurvesPlugin(InterpretabilityPlugin):
         return PluginResult(name=self.name, payload=payload, sections=sections)
 
 
-def register_builtin_plugins() -> None:
-    register_plugin(ClusterProfilesPlugin())
-    register_plugin(AttentionAttributionPlugin())
-    register_plugin(NeighborhoodEnrichmentPlugin())
-    register_plugin(FiltrationCurvesPlugin())
+def register_builtin_plugins(registry: PluginRegistry) -> None:
+    registry.register(ClusterProfilesPlugin())
+    registry.register(AttentionAttributionPlugin())
+    registry.register(NeighborhoodEnrichmentPlugin())
+    registry.register(FiltrationCurvesPlugin())
+
+
+def create_builtin_registry() -> PluginRegistry:
+    registry = create_plugin_registry()
+    register_builtin_plugins(registry)
+    return registry

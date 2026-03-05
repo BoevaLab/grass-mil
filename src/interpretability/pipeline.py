@@ -18,8 +18,8 @@ from src.interpretability.core.clustering import run_clustering
 from src.interpretability.core.data import extract_embedding_set
 from src.interpretability.core.reduction import run_reduction
 from src.interpretability.plugins.base import PluginContext
-from src.interpretability.plugins.builtin import register_builtin_plugins
-from src.interpretability.plugins.registry import get_plugin
+from src.interpretability.plugins.builtin import create_builtin_registry
+from src.interpretability.plugins.registry import PluginRegistry
 
 
 def _is_plugin_input_available(
@@ -75,10 +75,13 @@ def run_interpretability_pipeline(
     config: Dict[str, Any],
     *,
     artifacts_dir: Path,
+    plugin_registry: Optional[PluginRegistry] = None,
 ) -> ReportBundle:
     artifacts_dir = Path(artifacts_dir)
     artifacts_dir.mkdir(parents=True, exist_ok=True)
-    register_builtin_plugins()
+    resolved_registry = (
+        plugin_registry if plugin_registry is not None else create_builtin_registry()
+    )
 
     emb_set = extract_embedding_set(
         dataset,
@@ -163,7 +166,7 @@ def run_interpretability_pipeline(
     plugin_params = dict(plugin_cfg.get("params", {}))
 
     for plugin_name in enabled_plugins:
-        plugin = get_plugin(str(plugin_name))
+        plugin = resolved_registry.get(str(plugin_name))
         _validate_plugin_required_inputs(
             plugin_name=str(plugin_name),
             required_inputs=list(plugin.required_inputs()),

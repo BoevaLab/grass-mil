@@ -112,13 +112,15 @@ the pipeline raises `ValueError` immediately.
 
 ## 4) Register The Plugin
 
-Register in `register_builtin_plugins()`:
+Register in `register_builtin_plugins(registry)`:
 
 ```python
-register_plugin(SpatialEntropyPlugin())
+def register_builtin_plugins(registry: PluginRegistry) -> None:
+    registry.register(SpatialEntropyPlugin())
 ```
 
-Or create a dedicated registration function and invoke it from pipeline startup.
+The pipeline builds a fresh per-run registry (`create_builtin_registry()`), so plugin
+registration is instance-scoped and not process-global.
 
 ## 5) Add Config Wiring
 

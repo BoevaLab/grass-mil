@@ -1,12 +1,12 @@
 from src.interpretability.plugins.base import InterpretabilityPlugin, PluginContext
-from src.interpretability.plugins.builtin import register_builtin_plugins
-from src.interpretability.plugins.registry import get_plugin, list_plugins, register_plugin
+from src.interpretability.plugins.builtin import create_builtin_registry, register_builtin_plugins
+from src.interpretability.plugins.registry import PluginRegistry, create_plugin_registry
 
 __all__ = [
     "InterpretabilityPlugin",
     "PluginContext",
-    "register_plugin",
-    "get_plugin",
-    "list_plugins",
+    "PluginRegistry",
+    "create_plugin_registry",
+    "create_builtin_registry",
     "register_builtin_plugins",
 ]
