@@ -32,6 +32,7 @@ Sub-config groups:
 - `configs/inference/metrics/default.yaml`
 - `configs/inference/aggregation/default.yaml`
 - `configs/inference/embeddings/default.yaml`
+- `configs/inference/interpretability/default.yaml`
 
 ## Aggregation Subsampling Semantics
 
@@ -104,6 +105,50 @@ Columns:
 
 Quick run summary with artifact paths and row count.
 
+### `instance_table.csv` (optional)
+
+Enabled via `interpretability.enabled=true`.
+
+Columns include:
+
+- `instance_id`, `bag_id`, `patch_id`, `region_id`, `sample_id`
+- `score`, `logit_*`, `attention`
+- `inst_emb_*`
+- `comp_*` (when composition metadata is available)
+- `center_x`, `center_y` (when centroid metadata is available)
+
+Notes:
+
+- `attention` is normalized within each bag.
+- when attention logits are unavailable, `attention` defaults to uniform within bag.
+- `score` export is configurable via `interpretability.score_mode` and
+  `interpretability.score_logit_index`:
+  - `score_mode=sigmoid` (default): `sigmoid(logit[index])`
+  - `score_mode=identity`: raw `logit[index]` (for hazard/log-risk style outputs)
+  - `score_mode=softmax`: class probability `softmax(logits)[index]`
+- by default, missing composition metadata raises (`interpretability.require_composition=true`).
+
+### `spatial_table.csv` (optional)
+
+Enabled via `interpretability.spatial.enabled=true`.
+
+Columns:
+
+- `source_id`
+- `target_id`
+- `distance`
+
+Edges are taken from original subgraph/root connectivity by reading `instance_graphs`
+stored alongside prediction payloads.
+No kNN graph is reconstructed during interpretability export.
+
+Unit contract:
+
+- Preprocessing converts coordinates/distances to micrometers using `data.coord_scale_um`.
+- `data.coord_scale_um=1.0` means input coordinates are already in micrometers.
+- Exported `distance` values are consumed as micrometers by interpretability tier-2 analyses.
+- If `data.coord_scale_um` changes, regenerate processed artifacts before running prediction/export.
+
 ## Legacy Parity Mapping
 
 High-value legacy utilities from `working_version` are mapped as:
@@ -113,3 +158,4 @@ High-value legacy utilities from `working_version` are mapped as:
 - full-graph aggregation (`full_graph_*`) -> `src/inference/aggregation.py`
 - evaluation metrics (`graph_*_evaluate_fn`) -> `src/inference/metrics.py`
 - embedding collectors -> `src/inference/collectors.py` + `src/inference/embeddings.py`
+- interpretability table bridge -> `src/inference/interpretability_export.py`

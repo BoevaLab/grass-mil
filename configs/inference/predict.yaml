@@ -14,6 +14,7 @@ defaults:
   - metrics: default
   - aggregation: default
   - embeddings: default
+  - interpretability: default
 
 task_name: "predict"
 tags: ["dev"]

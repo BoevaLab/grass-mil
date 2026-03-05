@@ -1,0 +1,9 @@
+enabled: true
+method: kmeans
+params:
+  n_clusters: 8
+  random_state: 42
+  init: k-means++
+  n_init: auto
+  max_iter: 300
+  tol: 0.0001

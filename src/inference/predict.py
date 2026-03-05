@@ -13,6 +13,11 @@ rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
 from src.inference.aggregation import aggregate_group_logits  # noqa: E402
 from src.inference.collectors import collect_inference_payload  # noqa: E402
+from src.inference.interpretability_export import (  # noqa: E402
+    build_instance_table,
+    build_spatial_table,
+    resolve_composition_column_names,
+)
 from src.inference.io import (  # noqa: E402
     build_summary_payload,
     embeddings_to_dataframe,
@@ -161,8 +166,13 @@ def _as_batch_payload(payload: Any) -> BatchPredictionPayload:
         instance_logits=getattr(payload, "instance_logits", None),
         instance_attention_logits=getattr(payload, "instance_attention_logits", None),
         instance_patch_ids=getattr(payload, "instance_patch_ids", None),
+        instance_bag_ids=getattr(payload, "instance_bag_ids", None),
         instance_region_ids=getattr(payload, "instance_region_ids", None),
         instance_sample_ids=getattr(payload, "instance_sample_ids", None),
+        instance_embeddings=getattr(payload, "instance_embeddings", None),
+        instance_composition=getattr(payload, "instance_composition", None),
+        instance_centroids=getattr(payload, "instance_centroids", None),
+        instance_graphs=getattr(payload, "instance_graphs", None),
     )
 
 
@@ -226,16 +236,41 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             f"runtime_enabled={preforward_subsampling.runtime_enabled!r}."
         )
     aggregation_metadata: Dict[str, Any] | None = None
-    include_instance_payload = _needs_instance_payload(cfg)
+    interpret_cfg = cfg.get("interpretability")
+    export_interpretability = bool(interpret_cfg and interpret_cfg.get("enabled", False))
+    include_instance_payload = _needs_instance_payload(cfg) or export_interpretability
+    include_instance_embeddings = export_interpretability
     include_embeddings_payload = bool(cfg.embeddings.enabled) and bool(cfg.embeddings.save)
     include_node_embeddings = include_embeddings_payload and bool(cfg.embeddings.extract_node)
     previous_emit_setting = getattr(model, "_predict_emit_instance_payload", None)
     had_emit_setting = hasattr(model, "_predict_emit_instance_payload")
+    previous_emit_instance_embedding_setting = getattr(
+        model, "_predict_emit_instance_embeddings", None
+    )
+    had_emit_instance_embedding_setting = hasattr(model, "_predict_emit_instance_embeddings")
+    previous_emit_instance_comp_setting = getattr(
+        model, "_predict_emit_instance_composition", None
+    )
+    had_emit_instance_comp_setting = hasattr(model, "_predict_emit_instance_composition")
+    previous_emit_instance_centroid_setting = getattr(
+        model, "_predict_emit_instance_centroids", None
+    )
+    had_emit_instance_centroid_setting = hasattr(model, "_predict_emit_instance_centroids")
+    previous_predict_comp_label = getattr(model, "_predict_composition_label", None)
+    had_predict_comp_label = hasattr(model, "_predict_composition_label")
     previous_emit_embeddings_setting = getattr(model, "_predict_emit_embeddings_payload", None)
     had_emit_embeddings_setting = hasattr(model, "_predict_emit_embeddings_payload")
     previous_emit_node_embeddings_setting = getattr(model, "_predict_emit_node_embeddings", None)
     had_emit_node_embeddings_setting = hasattr(model, "_predict_emit_node_embeddings")
     setattr(model, "_predict_emit_instance_payload", include_instance_payload)
+    setattr(model, "_predict_emit_instance_embeddings", include_instance_embeddings)
+    setattr(model, "_predict_emit_instance_composition", include_instance_embeddings)
+    setattr(model, "_predict_emit_instance_centroids", include_instance_embeddings)
+    setattr(
+        model,
+        "_predict_composition_label",
+        str((interpret_cfg or {}).get("composition_label", "cell_type")),
+    )
     setattr(model, "_predict_emit_embeddings_payload", include_embeddings_payload)
     setattr(model, "_predict_emit_node_embeddings", include_node_embeddings)
 
@@ -246,6 +281,7 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             datamodule=datamodule,
             ckpt_path=cfg.ckpt_path,
             include_instance_payload=include_instance_payload,
+            include_instance_embeddings=include_instance_embeddings,
             include_embeddings=include_embeddings_payload,
             include_node_embeddings=include_node_embeddings,
         )
@@ -254,6 +290,30 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             setattr(model, "_predict_emit_instance_payload", previous_emit_setting)
         else:
             delattr(model, "_predict_emit_instance_payload")
+        if had_emit_instance_embedding_setting:
+            setattr(
+                model,
+                "_predict_emit_instance_embeddings",
+                previous_emit_instance_embedding_setting,
+            )
+        else:
+            delattr(model, "_predict_emit_instance_embeddings")
+        if had_emit_instance_comp_setting:
+            setattr(
+                model, "_predict_emit_instance_composition", previous_emit_instance_comp_setting
+            )
+        else:
+            delattr(model, "_predict_emit_instance_composition")
+        if had_emit_instance_centroid_setting:
+            setattr(
+                model, "_predict_emit_instance_centroids", previous_emit_instance_centroid_setting
+            )
+        else:
+            delattr(model, "_predict_emit_instance_centroids")
+        if had_predict_comp_label:
+            setattr(model, "_predict_composition_label", previous_predict_comp_label)
+        else:
+            delattr(model, "_predict_composition_label")
         if had_emit_embeddings_setting:
             setattr(
                 model,
@@ -271,7 +331,8 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         else:
             delattr(model, "_predict_emit_node_embeddings")
 
-    pred_payload = collected.prediction_payload
+    raw_pred_payload = collected.prediction_payload
+    pred_payload = raw_pred_payload
 
     if bool(cfg.aggregation.enabled):
         aggregation_subsample_fraction = float(cfg.aggregation.get("subsample_fraction", 1.0))
@@ -336,6 +397,56 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             node_path = output_dir / str(cfg.embeddings.node_filename)
             write_dataframe(node_frame, node_path)
 
+    interpretability_payload: Dict[str, Any] | None = None
+    if export_interpretability:
+        composition_prefix = str((interpret_cfg or {}).get("composition_prefix", "comp_"))
+        composition_label = str((interpret_cfg or {}).get("composition_label", "cell_type"))
+        composition_names = None
+        if raw_pred_payload.instance_composition is not None:
+            composition_names = resolve_composition_column_names(
+                datamodule,
+                composition_label=composition_label,
+                composition_prefix=composition_prefix,
+                width=int(raw_pred_payload.instance_composition.shape[1]),
+            )
+        instance_frame = build_instance_table(
+            raw_pred_payload,
+            composition_prefix=composition_prefix,
+            embedding_prefix=str((interpret_cfg or {}).get("embedding_prefix", "inst_emb")),
+            composition_column_names=composition_names,
+            require_composition=bool((interpret_cfg or {}).get("require_composition", True)),
+            id_column=str((interpret_cfg or {}).get("id_column", "instance_id")),
+            bag_id_column=str((interpret_cfg or {}).get("bag_id_column", "bag_id")),
+            score_column=str((interpret_cfg or {}).get("score_column", "score")),
+            score_mode=str((interpret_cfg or {}).get("score_mode", "sigmoid")),
+            score_logit_index=int((interpret_cfg or {}).get("score_logit_index", 0)),
+            attention_column=str((interpret_cfg or {}).get("attention_column", "attention")),
+        )
+        instance_path = output_dir / str(
+            (interpret_cfg or {}).get("instance_filename", "instance_table.csv")
+        )
+        write_dataframe(instance_frame, instance_path)
+
+        spatial_path = None
+        spatial_cfg = (interpret_cfg or {}).get("spatial", {})
+        if bool(spatial_cfg.get("enabled", False)):
+            spatial_frame = build_spatial_table(
+                instance_frame,
+                raw_pred_payload,
+                id_column=str((interpret_cfg or {}).get("id_column", "instance_id")),
+                undirected=bool(spatial_cfg.get("undirected", True)),
+            )
+            spatial_path = output_dir / str(
+                (interpret_cfg or {}).get("spatial_filename", "spatial_table.csv")
+            )
+            write_dataframe(spatial_frame, spatial_path)
+
+        interpretability_payload = {
+            "instance_table_path": str(instance_path),
+            "spatial_table_path": str(spatial_path) if spatial_path is not None else None,
+            "rows": int(len(instance_frame)),
+        }
+
     summary_path = output_dir / str(cfg.output.summary_filename)
     summary_payload = build_summary_payload(
         prediction_path=prediction_path,
@@ -346,6 +457,8 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     summary_payload["metrics"] = metrics_payload
     if aggregation_metadata is not None:
         summary_payload["aggregation"] = aggregation_metadata
+    if interpretability_payload is not None:
+        summary_payload["interpretability"] = interpretability_payload
     write_json(summary_payload, summary_path)
     return summary_payload, object_dict
 

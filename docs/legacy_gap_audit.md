@@ -45,6 +45,11 @@ Instead, it ports validated concepts into a clean contract-first architecture.
 - Risk: legacy LOOCV scripts computed class weights and dataset-wide metadata before or across fold boundaries, allowing held-out fold information to influence training.
 - Resolution: configurable LOOCV split assignment is performed in precompute, reducer `train_only` fitting is guarded for fold-specific preprocessing, and validation strategy is explicit (`heldout_fold_items` or `patches_from_train_items`) with deterministic seeds.
 
+9. Fragile cluster transfer state assumptions
+
+- Risk: notebook-era transfer used implicit estimator internals (for example `clusterer._embedding_`) that are absent for some clustering backends and break silently across versions.
+- Resolution: explicit transfer bundle contract persists projector + kNN model + metadata, and transfer fitting reads clustering feature-space outputs from `ReportBundle`.
+
 ## Acceptance Criteria
 
 - Component modules are side-effect free.

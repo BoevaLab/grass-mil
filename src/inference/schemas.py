@@ -19,8 +19,13 @@ class BatchPredictionPayload:
     instance_logits: Optional[torch.Tensor] = None
     instance_attention_logits: Optional[torch.Tensor] = None
     instance_patch_ids: Optional[List[str]] = None
+    instance_bag_ids: Optional[List[str]] = None
     instance_region_ids: Optional[List[Optional[str]]] = None
     instance_sample_ids: Optional[List[Optional[str]]] = None
+    instance_embeddings: Optional[torch.Tensor] = None
+    instance_composition: Optional[torch.Tensor] = None
+    instance_centroids: Optional[torch.Tensor] = None
+    instance_graphs: Optional[List[Any]] = None
 
 
 @dataclass(frozen=True)
@@ -72,8 +77,13 @@ class UnifiedPredictPayload:
     instance_logits: Optional[torch.Tensor] = None
     instance_attention_logits: Optional[torch.Tensor] = None
     instance_patch_ids: Optional[List[str]] = None
+    instance_bag_ids: Optional[List[str]] = None
     instance_region_ids: Optional[List[Optional[str]]] = None
     instance_sample_ids: Optional[List[Optional[str]]] = None
+    instance_embeddings: Optional[torch.Tensor] = None
+    instance_composition: Optional[torch.Tensor] = None
+    instance_centroids: Optional[torch.Tensor] = None
+    instance_graphs: Optional[List[Any]] = None
     embedding_bag_ids: Optional[List[str]] = None
     graph_embeddings: Optional[torch.Tensor] = None
     embedding_bag_counts: Optional[List[float]] = None

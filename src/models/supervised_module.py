@@ -115,6 +115,10 @@ class SupervisedModule(L.LightningModule):
         # In inference, callers can disable instance-level payload emission to reduce
         # peak memory when aggregation only needs bag-level outputs.
         self._predict_emit_instance_payload = True
+        self._predict_emit_instance_embeddings = False
+        self._predict_emit_instance_composition = False
+        self._predict_emit_instance_centroids = False
+        self._predict_composition_label = "cell_type"
         self._predict_emit_embeddings_payload = False
         self._predict_emit_node_embeddings = False
         self._reset_val_epoch_buffers()
@@ -219,6 +223,105 @@ class SupervisedModule(L.LightningModule):
                 normalized.append(str(value))
         return normalized
 
+    @staticmethod
+    def _resolve_categorical_column_index(batch: Any, label_name: str) -> Optional[int]:
+        slices = getattr(batch, "categorical_slices", None)
+        if isinstance(slices, dict):
+            value = slices.get(label_name)
+            return int(value) if value is not None else None
+        if isinstance(slices, (list, tuple)):
+            for item in slices:
+                if isinstance(item, dict) and label_name in item:
+                    value = item[label_name]
+                    return int(value) if value is not None else None
+        labels = getattr(batch, "categorical_labels", None)
+        if isinstance(labels, (list, tuple)):
+            for idx, value in enumerate(labels):
+                if str(value) == str(label_name):
+                    return idx
+        return None
+
+    @staticmethod
+    def _compute_instance_composition(
+        batch: Any,
+        *,
+        n_instances: int,
+        label_name: str,
+        device: torch.device,
+    ) -> Optional[torch.Tensor]:
+        categorical_index = getattr(batch, "categorical_index", None)
+        if not isinstance(categorical_index, torch.Tensor) or categorical_index.numel() == 0:
+            return None
+        categorical_index = categorical_index.to(device=device).long()
+        if categorical_index.ndim != 2:
+            return None
+        col_idx = SupervisedModule._resolve_categorical_column_index(batch, label_name)
+        if col_idx is None or col_idx < 0 or col_idx >= int(categorical_index.shape[1]):
+            return None
+
+        node_labels = categorical_index[:, int(col_idx)]
+        if node_labels.numel() == 0:
+            return None
+        batch_index = getattr(batch, "batch", None)
+        if isinstance(batch_index, torch.Tensor):
+            batch_index = batch_index.to(device=device).long()
+            if batch_index.numel() != node_labels.numel():
+                return None
+        elif n_instances == 1:
+            batch_index = torch.zeros(node_labels.numel(), dtype=torch.long, device=device)
+        else:
+            return None
+
+        n_classes = int(node_labels.max().item()) + 1
+        if n_classes <= 0:
+            return None
+        composition = torch.zeros((n_instances, n_classes), dtype=torch.float32, device=device)
+        for inst_idx in range(n_instances):
+            mask = batch_index == inst_idx
+            labels = node_labels[mask]
+            if labels.numel() == 0:
+                continue
+            counts = torch.bincount(labels, minlength=n_classes).float()
+            total = counts.sum()
+            if total > 0:
+                counts = counts / total
+            composition[inst_idx, :] = counts
+        return composition
+
+    @staticmethod
+    def _compute_instance_centroids(
+        batch: Any,
+        *,
+        n_instances: int,
+        device: torch.device,
+    ) -> Optional[torch.Tensor]:
+        positions = getattr(batch, "pos", None)
+        if not isinstance(positions, torch.Tensor) or positions.ndim != 2:
+            return None
+        if positions.numel() == 0:
+            return None
+        positions = positions.to(device=device, dtype=torch.float32)
+        if positions.shape[1] < 2:
+            return None
+
+        batch_index = getattr(batch, "batch", None)
+        if isinstance(batch_index, torch.Tensor):
+            batch_index = batch_index.to(device=device).long()
+            if batch_index.numel() != positions.shape[0]:
+                return None
+        elif n_instances == 1:
+            batch_index = torch.zeros(positions.shape[0], dtype=torch.long, device=device)
+        else:
+            return None
+
+        centroids = torch.zeros((n_instances, 2), dtype=torch.float32, device=device)
+        for inst_idx in range(n_instances):
+            mask = batch_index == inst_idx
+            if not torch.any(mask):
+                continue
+            centroids[inst_idx, :] = positions[mask][:, :2].mean(dim=0)
+        return centroids
+
     def _build_predict_group_metadata(
         self,
         batch,
@@ -260,12 +363,42 @@ class SupervisedModule(L.LightningModule):
         )
         instance_logits_chunks: list[torch.Tensor] = []
         instance_patch_ids: list[str] = []
+        instance_bag_ids: list[str] = []
         instance_region_ids: list[Optional[str]] = []
         instance_sample_ids: list[Optional[str]] = []
         instance_attention_logits_chunks: list[torch.Tensor] = []
+        instance_embedding_chunks: list[torch.Tensor] = []
+        instance_graph_chunks: list[Any] = []
+        composition_by_instance = (
+            self._compute_instance_composition(
+                batch,
+                n_instances=n_instances,
+                label_name=str(getattr(self, "_predict_composition_label", "cell_type")),
+                device=patch_logits.device,
+            )
+            if bool(getattr(self, "_predict_emit_instance_composition", False))
+            else None
+        )
+        centroids_by_instance = (
+            self._compute_instance_centroids(
+                batch,
+                n_instances=n_instances,
+                device=patch_logits.device,
+            )
+            if bool(getattr(self, "_predict_emit_instance_centroids", False))
+            else None
+        )
+        instance_composition_chunks: list[torch.Tensor] = []
+        instance_centroid_chunks: list[torch.Tensor] = []
         compute_attention_logits = (
             include_instance_payload and self.use_attention and self.attention is not None
         )
+        subgraph_data_list = None
+        if hasattr(batch, "to_data_list"):
+            try:
+                subgraph_data_list = batch.to_data_list()
+            except Exception:
+                subgraph_data_list = None
 
         for bag_id, indices in zip(ordered_bag_ids, bag_indices):
             if not indices:
@@ -273,11 +406,21 @@ class SupervisedModule(L.LightningModule):
             idx = torch.tensor(indices, dtype=torch.long, device=patch_logits.device)
             sub_logits = patch_logits.index_select(0, idx)
             instance_logits_chunks.append(sub_logits)
+            instance_embedding_chunks.append(graph_emb.index_select(0, idx))
             instance_patch_ids.extend(
                 [patch_ids[i] if patch_ids[i] is not None else str(bag_id) for i in indices]
             )
+            instance_bag_ids.extend([str(bag_id)] * len(indices))
             instance_region_ids.extend([region_ids[i] for i in indices])
             instance_sample_ids.extend([sample_ids[i] for i in indices])
+            if isinstance(subgraph_data_list, list):
+                for i in indices:
+                    if 0 <= int(i) < len(subgraph_data_list):
+                        instance_graph_chunks.append(subgraph_data_list[int(i)])
+            if composition_by_instance is not None:
+                instance_composition_chunks.append(composition_by_instance.index_select(0, idx))
+            if centroids_by_instance is not None:
+                instance_centroid_chunks.append(centroids_by_instance.index_select(0, idx))
             if compute_attention_logits:
                 sub_emb = graph_emb.index_select(0, idx)
                 attn_logits, _ = self.attention(sub_emb)
@@ -289,14 +432,37 @@ class SupervisedModule(L.LightningModule):
             else torch.empty((0, patch_logits.shape[-1]), device=patch_logits.device)
         )
         metadata["instance_patch_ids"] = instance_patch_ids
+        metadata["instance_bag_ids"] = instance_bag_ids
         metadata["instance_region_ids"] = instance_region_ids
         metadata["instance_sample_ids"] = instance_sample_ids
+        metadata["instance_embeddings"] = (
+            torch.cat(instance_embedding_chunks, dim=0)
+            if instance_embedding_chunks
+            else torch.empty((0, graph_emb.shape[-1]), device=graph_emb.device)
+        )
+        if composition_by_instance is not None:
+            metadata["instance_composition"] = (
+                torch.cat(instance_composition_chunks, dim=0)
+                if instance_composition_chunks
+                else torch.empty(
+                    (0, composition_by_instance.shape[-1]),
+                    device=composition_by_instance.device,
+                )
+            )
+        if centroids_by_instance is not None:
+            metadata["instance_centroids"] = (
+                torch.cat(instance_centroid_chunks, dim=0)
+                if instance_centroid_chunks
+                else torch.empty((0, 2), device=patch_logits.device)
+            )
         if compute_attention_logits:
             metadata["instance_attention_logits"] = (
                 torch.cat(instance_attention_logits_chunks, dim=0)
                 if instance_attention_logits_chunks
                 else torch.empty((0, 1), device=patch_logits.device)
             )
+        if instance_graph_chunks:
+            metadata["instance_graphs"] = instance_graph_chunks
         return metadata
 
     def _build_predict_embedding_payload(
@@ -821,8 +987,17 @@ class SupervisedModule(L.LightningModule):
         if emit_instance_payload:
             result["instance_logits"] = metadata["instance_logits"].detach()
             result["instance_patch_ids"] = metadata["instance_patch_ids"]
+            result["instance_bag_ids"] = metadata["instance_bag_ids"]
             result["instance_region_ids"] = metadata["instance_region_ids"]
             result["instance_sample_ids"] = metadata["instance_sample_ids"]
+            if "instance_graphs" in metadata:
+                result["instance_graphs"] = metadata["instance_graphs"]
+            if bool(getattr(self, "_predict_emit_instance_embeddings", False)):
+                result["instance_embeddings"] = metadata["instance_embeddings"].detach()
+                if "instance_composition" in metadata:
+                    result["instance_composition"] = metadata["instance_composition"].detach()
+                if "instance_centroids" in metadata:
+                    result["instance_centroids"] = metadata["instance_centroids"].detach()
         if self.use_attention:
             result["bag_attention"] = out["bag_attention"]
             if emit_instance_payload:

@@ -187,6 +187,11 @@ class SpatialOmicsPreprocessor:
         metadata_path = processed_dir / "metadata.json"
 
         if index_path.exists() and not self.precompute_config.force:
+            _validate_existing_coord_scale(
+                index_path=index_path,
+                metadata_path=metadata_path,
+                expected_coord_scale_um=float(self.precompute_config.coord_scale_um),
+            )
             return index_path
 
         manifest_rows = self._load_manifest(
@@ -247,6 +252,10 @@ class SpatialOmicsPreprocessor:
             "label_maps": label_maps,
             "graph_label_maps": graph_label_maps,
             "reducer_state": reducer_state,
+            "preprocessing": {
+                "coord_scale_um": float(self.precompute_config.coord_scale_um),
+                "coord_unit": "um",
+            },
             "categorical_features": {
                 "include_labels": list(self.categorical_feature_config.include_labels),
             },
@@ -291,7 +300,11 @@ class SpatialOmicsPreprocessor:
             )
 
             table = _apply_coord_scale(table, self.precompute_config.coord_scale_um)
-            table, polygons = self._apply_polygons(table, polygons_path)
+            table, polygons = self._apply_polygons(
+                table,
+                polygons_path,
+                coord_scale_um=float(self.precompute_config.coord_scale_um),
+            )
             patch_indices = self._compute_patch_indices(table, polygons)
             prepared.append(
                 PreparedSample(
@@ -402,9 +415,14 @@ class SpatialOmicsPreprocessor:
         return reducer_state, reducer
 
     def _apply_polygons(
-        self, table: SpatialOmicsTable, polygons_path: Optional[str]
+        self,
+        table: SpatialOmicsTable,
+        polygons_path: Optional[str],
+        *,
+        coord_scale_um: float,
     ) -> tuple[SpatialOmicsTable, Optional[Sequence[object]]]:
         polygons = load_polygons_from_path(polygons_path) if polygons_path else None
+        polygons = _apply_coord_scale_to_polygons(polygons, coord_scale_um)
         if polygons:
             union_idx = filter_coords_by_union(table.coords, polygons)
             table = _subset_table(table, union_idx)
@@ -699,6 +717,8 @@ class SpatialOmicsPreprocessor:
             "num_samples": len({entry["sample_id"] for entry in entries}),
             "molecular_feature_dim": molecular_dim,
             "molecular_feature_names": molecular_feature_names,
+            "coord_scale_um": float(self.precompute_config.coord_scale_um),
+            "coord_unit": "um",
             "categorical_labels": list(self.categorical_feature_config.include_labels),
             "categorical_cardinalities": categorical_cardinalities,
             "label_maps": label_maps,
@@ -728,6 +748,74 @@ def _apply_coord_scale(
         sample_id=table.sample_id,
         region_id=table.region_id,
     )
+
+
+def _apply_coord_scale_to_polygons(
+    polygons: Optional[Sequence[object]], coord_scale_um: float
+) -> Optional[List[object]]:
+    if not polygons:
+        return polygons
+    if coord_scale_um == 1.0:
+        return list(polygons)
+    from shapely import affinity
+
+    return [
+        affinity.scale(poly, xfact=coord_scale_um, yfact=coord_scale_um, origin=(0.0, 0.0))
+        for poly in polygons
+    ]
+
+
+def _read_coord_scale_from_payload(payload: object) -> Optional[float]:
+    if not isinstance(payload, dict):
+        return None
+    preprocessing = payload.get("preprocessing")
+    if isinstance(preprocessing, dict):
+        value = preprocessing.get("coord_scale_um")
+        if value is not None:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return None
+    value = payload.get("coord_scale_um")
+    if value is not None:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _validate_existing_coord_scale(
+    *,
+    index_path: Path,
+    metadata_path: Path,
+    expected_coord_scale_um: float,
+) -> None:
+    stored_scale = None
+    try:
+        stored_scale = _read_coord_scale_from_payload(json.loads(index_path.read_text()))
+    except Exception:
+        stored_scale = None
+    if stored_scale is None and metadata_path.exists():
+        try:
+            stored_scale = _read_coord_scale_from_payload(json.loads(metadata_path.read_text()))
+        except Exception:
+            stored_scale = None
+    if stored_scale is None:
+        warnings.warn(
+            "Existing processed artifacts do not store coord_scale_um metadata. "
+            "Cannot verify unit consistency for cache reuse; consider force_precompute=true.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return
+    if not np.isclose(float(stored_scale), float(expected_coord_scale_um)):
+        raise ValueError(
+            "Existing processed artifacts were built with "
+            f"coord_scale_um={stored_scale}, but current config has "
+            f"coord_scale_um={expected_coord_scale_um}. "
+            "Set data.force_precompute=true or use a new data.processed_dir."
+        )
 
 
 def _subset_table(table: SpatialOmicsTable, indices: np.ndarray) -> SpatialOmicsTable:

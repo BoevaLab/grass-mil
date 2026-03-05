@@ -1,0 +1,15 @@
+enabled: true
+method: hdbscan
+cluster_on_pca: true
+pca_components: 10
+params:
+  min_cluster_size: 100
+  min_samples: 1
+  cluster_selection_method: eom
+  cluster_selection_epsilon: 0.0
+  alpha: 1.0
+  algorithm: auto
+  leaf_size: 40
+  allow_single_cluster: false
+  n_jobs: null
+  metric: cosine

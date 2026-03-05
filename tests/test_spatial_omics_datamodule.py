@@ -809,3 +809,202 @@ def test_loocv_train_only_reducer_allows_fresh_processed_dir_without_force(
     monkeypatch.setattr(dm, "_build_preprocessor", lambda: _StubPreprocessor())
     dm.prepare_data()
     assert calls["precompute"] == 1
+
+
+def _write_minimal_csv_and_manifest(
+    *,
+    raw_dir: Path,
+    coords: np.ndarray,
+    polygon_path: Path | None = None,
+) -> Path:
+    csv_path = raw_dir / "sample.csv"
+    np.savetxt(
+        csv_path,
+        np.column_stack([np.arange(coords.shape[0]), coords[:, 0], coords[:, 1]]),
+        delimiter=",",
+        fmt="%s",
+        header="cell_id,x,y",
+        comments="",
+    )
+    manifest_path = raw_dir / "manifest.csv"
+    polygons_field = str(polygon_path) if polygon_path is not None else ""
+    manifest_path.write_text(
+        "sample_id,input_path,input_type,region_id,polygons_path\n"
+        f"sample_1,{csv_path},csv,region_1,{polygons_field}\n"
+    )
+    return manifest_path
+
+
+def _build_minimal_datamodule(
+    *,
+    data_dir: Path,
+    manifest_path: Path,
+    processed_dir: Path,
+    coord_scale_um: float,
+    force_precompute: bool,
+    edge_features: list[str],
+):
+    from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
+
+    return SpatialOmicsDataModule(
+        data_dir=str(data_dir),
+        raw_manifest_path=str(manifest_path),
+        processed_dir=str(processed_dir),
+        coord_scale_um=coord_scale_um,
+        sample_unit="full",
+        batch_size=1,
+        num_workers=0,
+        pin_memory=False,
+        reducer_scope="sample",
+        keep_raw_molecular=False,
+        force_precompute=force_precompute,
+        min_cells=1,
+        use_molecular_features=False,
+        categorical_features={"include_labels": []},
+        split={"train_val_test_split": [1.0, 0.0, 0.0], "split_by": "patch"},
+        csv={
+            "sep": ",",
+            "coord_columns": ["x", "y"],
+            "cell_id_column": "cell_id",
+            "categorical_label_columns": [],
+            "molecular_columns": None,
+        },
+        h5ad={
+            "coord_columns": ["x", "y"],
+            "cell_id_column": None,
+            "categorical_label_columns": [],
+            "molecular_layer": None,
+        },
+        sce={
+            "assay_name": None,
+            "coord_source": "colData",
+            "coord_key": None,
+            "coord_columns": ["x", "y"],
+            "cell_id_column": None,
+            "categorical_label_columns": [],
+            "transpose_assay": True,
+        },
+        graph_builder={"name": "delaunay", "kwargs": {"edge_features": edge_features}},
+        feature_reducer={"name": "identity", "kwargs": {}},
+        tiling={"tile_size_um": 50.0, "stride_um": 50.0, "min_cells": 1},
+        manifest={
+            "sample_id": "sample_id",
+            "input_path": "input_path",
+            "input_type": "input_type",
+            "region_id": "region_id",
+            "polygons_path": "polygons_path",
+        },
+        graph_labels=None,
+        transforms=[],
+    )
+
+
+def test_coord_scale_um_scales_positions_and_distances(tmp_path: Path) -> None:
+    pytest.importorskip("torch_geometric")
+    pytest.importorskip("scipy")
+
+    data_dir = tmp_path / "data"
+    raw_dir = data_dir / "raw"
+    raw_dir.mkdir(parents=True)
+
+    coords = np.array([[0.0, 0.0], [3.0, 4.0]])
+    manifest_path = _write_minimal_csv_and_manifest(raw_dir=raw_dir, coords=coords)
+
+    dm = _build_minimal_datamodule(
+        data_dir=data_dir,
+        manifest_path=manifest_path,
+        processed_dir=data_dir / "processed",
+        coord_scale_um=2.0,
+        force_precompute=True,
+        edge_features=["distance"],
+    )
+    dm.prepare_data()
+    dm.setup()
+    data = dm.train_dataloader().dataset[0]
+
+    assert np.allclose(data.pos.detach().cpu().numpy(), np.array([[0.0, 0.0], [6.0, 8.0]]))
+    assert list(getattr(data, "edge_attr_names", [])) == ["distance"]
+    assert np.allclose(data.edge_attr.detach().cpu().numpy(), np.full((2, 1), 10.0))
+
+
+def test_coord_scale_um_scales_polygons_with_coordinates(tmp_path: Path) -> None:
+    pytest.importorskip("torch_geometric")
+    pytest.importorskip("scipy")
+
+    data_dir = tmp_path / "data"
+    raw_dir = data_dir / "raw"
+    raw_dir.mkdir(parents=True)
+
+    coords = np.array([[1.0, 1.0], [2.0, 2.0]])
+    polygon_path = raw_dir / "polygons.wkt"
+    _write_polygon_wkt(
+        polygon_path,
+        np.array([[0, 0], [0, 3], [3, 3], [3, 0], [0, 0]], dtype=float),
+    )
+    manifest_path = _write_minimal_csv_and_manifest(
+        raw_dir=raw_dir,
+        coords=coords,
+        polygon_path=polygon_path,
+    )
+
+    dm = _build_minimal_datamodule(
+        data_dir=data_dir,
+        manifest_path=manifest_path,
+        processed_dir=data_dir / "processed",
+        coord_scale_um=2.0,
+        force_precompute=True,
+        edge_features=["distance"],
+    )
+    dm.prepare_data()
+    dm.setup()
+    data = dm.train_dataloader().dataset[0]
+
+    assert int(data.num_nodes) == 2
+
+
+def test_precompute_reuse_rejects_coord_scale_um_mismatch(tmp_path: Path) -> None:
+    pytest.importorskip("torch_geometric")
+    pytest.importorskip("scipy")
+
+    data_dir = tmp_path / "data"
+    raw_dir = data_dir / "raw"
+    raw_dir.mkdir(parents=True)
+    processed_dir = data_dir / "processed"
+
+    coords = np.array([[0.0, 0.0], [3.0, 4.0]])
+    manifest_path = _write_minimal_csv_and_manifest(raw_dir=raw_dir, coords=coords)
+
+    dm_first = _build_minimal_datamodule(
+        data_dir=data_dir,
+        manifest_path=manifest_path,
+        processed_dir=processed_dir,
+        coord_scale_um=1.0,
+        force_precompute=True,
+        edge_features=["distance"],
+    )
+    dm_first.prepare_data()
+    first_index = json.loads((processed_dir / "processed_index.json").read_text())
+    assert float(first_index["preprocessing"]["coord_scale_um"]) == 1.0
+
+    dm_second = _build_minimal_datamodule(
+        data_dir=data_dir,
+        manifest_path=manifest_path,
+        processed_dir=processed_dir,
+        coord_scale_um=2.0,
+        force_precompute=False,
+        edge_features=["distance"],
+    )
+    with pytest.raises(ValueError, match="coord_scale_um=1.0"):
+        dm_second.prepare_data()
+
+    dm_third = _build_minimal_datamodule(
+        data_dir=data_dir,
+        manifest_path=manifest_path,
+        processed_dir=processed_dir,
+        coord_scale_um=2.0,
+        force_precompute=True,
+        edge_features=["distance"],
+    )
+    dm_third.prepare_data()
+    third_index = json.loads((processed_dir / "processed_index.json").read_text())
+    assert float(third_index["preprocessing"]["coord_scale_um"]) == 2.0

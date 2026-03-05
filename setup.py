@@ -13,6 +13,7 @@ setup(
             "train_command = src.train:main",
             "eval_command = src.eval:main",
             "loocv_command = src.loocv:main",
+            "interpretability_report_command = src.interpretability.report_cli:main",
         ]
     },
 )

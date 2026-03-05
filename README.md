@@ -16,8 +16,26 @@ Core architecture:
 
 - Data pipeline: `src/data/` + `configs/data/`
 - Model/runtime pipeline: `src/models/` + `configs/model/` + `configs/task/`
+- Interpretability pipeline: `src/interpretability/` + `configs/interpretability/`
 - Entrypoints: `src/train.py`, `src/eval.py`
 - Configuration system: `configs/` (Hydra groups)
+
+## Interpretability
+
+`grass-mil` includes a first-class interpretability suite:
+
+- parameterized dimensionality reduction (`pca`, `umap`, `tsne`)
+- parameterized clustering (`kmeans`, `agglomerative`, `hdbscan`, `spectral`, `optics`, `dbscan`)
+- core (composition-based) and tier-2 (spatial) analyses via a plugin registry
+- report generation to interactive Plotly HTML and static PDF (Playwright)
+
+Quick run:
+
+```bash
+python src/interpretability/report_cli.py \
+  data.instance_table=/absolute/path/to/instance_table.csv \
+  data.spatial_table=/absolute/path/to/spatial_table.csv
+```
 
 ## Start Here
 
@@ -70,6 +88,8 @@ python src/eval.py \
 - Full tracked-file map: [`docs/repository_map.md`](docs/repository_map.md)
 - End-to-end workflows (new data, SSL pretrain->finetune, model adjustments, inference): [`docs/workflows_train_infer.md`](docs/workflows_train_infer.md)
 - Inference utility suite (prediction artifacts, metrics, embeddings): [`docs/inference_utility_suite.md`](docs/inference_utility_suite.md)
+- Interpretability suite architecture and usage: [`docs/interpretability_suite.md`](docs/interpretability_suite.md)
+- Interpretability extension guide (plugins/new analyses): [`docs/interpretability_extension_guide.md`](docs/interpretability_extension_guide.md)
 - Exhaustive hyperparameter reference for repo configs: [`docs/hyperparameter_reference.md`](docs/hyperparameter_reference.md)
 - Capability modes and operational options: [`docs/capabilities_and_modes.md`](docs/capabilities_and_modes.md)
 - Existing model contracts: [`docs/model_component_contracts.md`](docs/model_component_contracts.md)

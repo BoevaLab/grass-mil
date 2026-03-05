@@ -2,6 +2,11 @@
 
 This guide provides flow-through instructions for all major `grass-mil` workflows.
 
+Interpretability workflows are documented in:
+
+- `docs/interpretability_suite.md`
+- `docs/interpretability_extension_guide.md`
+
 ## 0) Environment And Dependency Prerequisites
 
 From `/Users/lovrorabuzin/Projects/grass-mil_unification/grass-mil`:
@@ -55,6 +60,14 @@ Path resolution behavior:
 ### Step 2: Configure Input-Specific Data Parsing
 
 All options below live under `data.*` in Hydra.
+
+Spatial unit expectation:
+
+- Normalize spatial coordinates to micrometers during preprocessing.
+- `data.coord_scale_um` is the preprocessing conversion factor to micrometers.
+- `data.coord_scale_um=1.0` means input coordinates are already in micrometers.
+- This ensures downstream `spatial_table.distance` values are in micrometers and compatible with interpretability defaults (including filtration thresholds).
+- If `data.coord_scale_um` changes, regenerate processed artifacts (`data.force_precompute=true` or use a new `data.processed_dir`).
 
 #### CSV/TSV inputs
 
