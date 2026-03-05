@@ -22,6 +22,12 @@ def run_clustering(
     random_state: Optional[int] = 42,
     **params: Any,
 ) -> ClusteringResult:
+    """Run a clustering backend with estimator kwargs forwarded from `params`.
+
+    Notes:
+    - `n_clusters` and `random_state` are accepted as common convenience args.
+    - Any additional `params` are passed directly to the selected estimator constructor.
+    """
     method_key = str(method).strip().lower()
     if method_key == "kmeans":
         if n_clusters is None:

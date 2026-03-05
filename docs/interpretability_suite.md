@@ -329,6 +329,18 @@ python src/interpretability/report_cli.py \
   clustering.params.min_samples=10
 ```
 
+Tune HDBSCAN selection behavior explicitly:
+
+```bash
+python src/interpretability/report_cli.py \
+  data.instance_table=/abs/path/instance_table.csv \
+  clustering=hdbscan \
+  clustering.params.min_cluster_size=100 \
+  clustering.params.min_samples=5 \
+  clustering.params.cluster_selection_method=leaf \
+  clustering.params.cluster_selection_epsilon=0.0
+```
+
 Enable/disable report outputs:
 
 ```bash
@@ -368,10 +380,15 @@ Important knobs:
 Notebook-aligned defaults:
 
 - `reduction=umap` with `n_neighbors=50`, `min_dist=0.1`, `random_state=null`
-- `clustering=hdbscan` with `min_cluster_size=100`
+- `clustering=hdbscan` with `min_cluster_size=100`, `min_samples=1`, `cluster_selection_method=eom`
 - `clustering.cluster_on_pca=true`, `clustering.pca_components=10`
 - effect: clustering runs on PCA(10) while report scatter uses UMAP output
 - note: PCA components are capped to `min(n_samples, n_features)` on small datasets
+
+Parameter contract:
+
+- `clustering.params.*` is forwarded directly to the underlying sklearn clustering estimator.
+- No method-specific parameter filtering is applied beyond common `n_clusters`/`random_state` handling.
 
 ## 11) Environment Prerequisites
 

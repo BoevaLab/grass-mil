@@ -3,4 +3,8 @@ method: dbscan
 params:
   eps: 0.5
   min_samples: 5
-  metric: euclidean
+  metric: cosine
+  algorithm: auto
+  leaf_size: 30
+  p: null
+  n_jobs: null

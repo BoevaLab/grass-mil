@@ -63,3 +63,39 @@ def test_cluster_biomarker_requires_composition_columns() -> None:
     labels = np.array([0, 1])
     with pytest.raises(ValueError, match="No composition columns found"):
         cluster_biomarker_summary(table, labels, cell_type_column="cell_type")
+
+
+def test_hdbscan_clustering_forwards_selection_and_density_knobs(monkeypatch) -> None:
+    class _FakeHDBSCAN:
+        def __init__(self, **kwargs):
+            self.kwargs = dict(kwargs)
+
+        def fit_predict(self, x: np.ndarray) -> np.ndarray:
+            return np.zeros((x.shape[0],), dtype=int)
+
+    import sklearn.cluster as sklearn_cluster
+
+    monkeypatch.setattr(sklearn_cluster, "HDBSCAN", _FakeHDBSCAN, raising=False)
+    x = np.array([[0.0, 0.1], [0.2, 0.3], [0.4, 0.5]], dtype=float)
+    out = run_clustering(
+        "hdbscan",
+        x,
+        min_cluster_size=42,
+        min_samples=11,
+        cluster_selection_method="leaf",
+        cluster_selection_epsilon=0.15,
+        alpha=1.2,
+        metric="manhattan",
+        allow_single_cluster=True,
+        n_jobs=3,
+    )
+    assert out.labels.shape[0] == x.shape[0]
+    assert out.method == "hdbscan"
+    assert out.fitted_object.kwargs["min_cluster_size"] == 42
+    assert out.fitted_object.kwargs["min_samples"] == 11
+    assert out.fitted_object.kwargs["cluster_selection_method"] == "leaf"
+    assert out.fitted_object.kwargs["cluster_selection_epsilon"] == pytest.approx(0.15)
+    assert out.fitted_object.kwargs["alpha"] == pytest.approx(1.2)
+    assert out.fitted_object.kwargs["metric"] == "manhattan"
+    assert out.fitted_object.kwargs["allow_single_cluster"] is True
+    assert out.fitted_object.kwargs["n_jobs"] == 3
