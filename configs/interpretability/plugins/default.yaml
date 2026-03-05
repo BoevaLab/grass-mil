@@ -15,6 +15,14 @@ params:
     # n_perms=0 uses analytical expected/std (runtime warning emitted).
     # Set n_perms>0 for Squidpy-style permutation expected/std + p-values.
     n_perms: 0
+  diff_neighborhood_enrichment:
+    label_column: cluster_label
+    condition_column: condition
+    permutation_group_column: sample_id
+    # One of: zscore, obs-exp, log2fc.
+    enrichment_mode: zscore
+    # n_perms=0 computes pairwise differentials without permutation p-values.
+    n_perms: 0
   filtration_curves:
     # Distances and thresholds are interpreted in micrometers.
     threshold_start: 0.0

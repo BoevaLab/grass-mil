@@ -16,7 +16,10 @@ from src.interpretability.core.biomarkers import (
 from src.interpretability.plugins.base import InterpretabilityPlugin, PluginContext
 from src.interpretability.plugins.registry import PluginRegistry, create_plugin_registry
 from src.interpretability.tier2.filtration import compute_filtration_curves
-from src.interpretability.tier2.neighborhood import run_neighborhood_enrichment
+from src.interpretability.tier2.neighborhood import (
+    run_diff_neighborhood_enrichment,
+    run_neighborhood_enrichment,
+)
 
 
 def _resolve_filtration_thresholds(params: Dict[str, Any]) -> np.ndarray:
@@ -154,6 +157,63 @@ class NeighborhoodEnrichmentPlugin(InterpretabilityPlugin):
 
 
 @dataclass
+class DiffNeighborhoodEnrichmentPlugin(InterpretabilityPlugin):
+    name: str = "diff_neighborhood_enrichment"
+
+    def required_inputs(self) -> List[str]:
+        return ["spatial_table", "cluster_labels"]
+
+    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
+        if dataset.spatial_table is None:
+            raise ValueError("Spatial table is required for differential neighborhood enrichment.")
+        table = dataset.instance_table.copy()
+        table["cluster_label"] = np.asarray(context.state["cluster_labels"])
+        condition_column = str(
+            params.get("condition_column", dataset.condition_column or "condition")
+        )
+        pairwise = run_diff_neighborhood_enrichment(
+            table,
+            dataset.spatial_table,
+            label_column=str(params.get("label_column", "cluster_label")),
+            condition_column=condition_column,
+            permutation_group_column=str(params.get("permutation_group_column", "sample_id")),
+            id_column=str(params.get("id_column", dataset.id_column)),
+            n_perms=int(params.get("n_perms", 0)),
+            random_state=int(params.get("random_state", 42)),
+            undirected=bool(params.get("undirected", False)),
+            enrichment_mode=str(params.get("enrichment_mode", "zscore")),
+        )
+        payload = {
+            "enrichment_by_pair": {pair: out.enrichment for pair, out in pairwise.items()},
+            "observed_by_pair": {pair: out.observed for pair, out in pairwise.items()},
+            "expected_by_pair": {pair: out.expected for pair, out in pairwise.items()},
+            "pvalues_by_pair": {
+                pair: out.pvalues for pair, out in pairwise.items() if out.pvalues is not None
+            },
+        }
+        sections: List[ReportSection] = []
+        for pair, out in pairwise.items():
+            section_tables = {
+                "enrichment": out.enrichment,
+                "observed": out.observed,
+                "expected": out.expected,
+            }
+            if out.pvalues is not None:
+                section_tables["pvalues"] = out.pvalues
+            sections.append(
+                ReportSection(
+                    title=f"Differential Neighborhood Enrichment ({pair})",
+                    description=(
+                        "Pairwise condition differential neighborhood enrichment "
+                        "(left condition minus right condition)."
+                    ),
+                    tables=section_tables,
+                )
+            )
+        return PluginResult(name=self.name, payload=payload, sections=sections)
+
+
+@dataclass
 class FiltrationCurvesPlugin(InterpretabilityPlugin):
     name: str = "filtration_curves"
 
@@ -191,6 +251,7 @@ def register_builtin_plugins(registry: PluginRegistry) -> None:
     registry.register(ClusterProfilesPlugin())
     registry.register(AttentionAttributionPlugin())
     registry.register(NeighborhoodEnrichmentPlugin())
+    registry.register(DiffNeighborhoodEnrichmentPlugin())
     registry.register(FiltrationCurvesPlugin())
 
 

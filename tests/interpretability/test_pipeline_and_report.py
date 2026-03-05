@@ -26,6 +26,8 @@ def _write_minimal_tables(tmp_path: Path) -> tuple[Path, Path]:
             "comp_B": [0.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0],
             "score": [0.1, 0.2, 0.8, 0.7, 0.2, 0.9, 0.5, 0.3],
             "attention": [0.2, 0.3, 0.2, 0.3, 0.1, 0.5, 0.2, 0.2],
+            "sample_id": ["sx"] * 4 + ["sy"] * 4,
+            "condition": ["X"] * 4 + ["Y"] * 4,
             "inst_emb_0": [0.0, 0.1, 0.2, 0.3, 1.0, 1.1, 1.2, 1.3],
             "inst_emb_1": [0.0, 0.2, 0.1, 0.3, 1.0, 1.2, 1.1, 1.3],
         }
@@ -131,6 +133,55 @@ def test_report_render_tolerates_snapshot_export_failure_when_pdf_disabled(
     assert out["html_path"] is not None
     assert out["pdf_path"] is None
     assert out["snapshot_paths"] == {}
+
+
+def test_pipeline_and_report_render_with_diff_neighborhood_plugin(
+    monkeypatch, tmp_path: Path
+) -> None:
+    instance_path, spatial_path = _write_minimal_tables(tmp_path)
+    dataset = load_interpretability_dataset(
+        instance_table_path=instance_path,
+        spatial_table_path=spatial_path,
+        id_column="instance_id",
+        bag_id_column="bag_id",
+        cell_type_column="cell_type",
+        condition_column="condition",
+    )
+    cfg = {
+        "reduction": {"enabled": True, "method": "pca", "params": {"n_components": 2}},
+        "clustering": {
+            "enabled": True,
+            "method": "agglomerative",
+            "params": {"n_clusters": 2, "linkage": "ward"},
+        },
+        "plugins": {
+            "enabled": ["diff_neighborhood_enrichment"],
+            "params": {
+                "diff_neighborhood_enrichment": {
+                    "condition_column": "condition",
+                    "permutation_group_column": "sample_id",
+                    "n_perms": 0,
+                    "undirected": True,
+                }
+            },
+        },
+    }
+    bundle = run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
+    assert "diff_neighborhood_enrichment" in bundle.plugin_results
+    figs = dict(bundle_figures(bundle))
+    assert "diff_neighborhood_enrichment_X_Y" in figs
+
+    monkeypatch.setattr(
+        "src.interpretability.reporting.render.export_plotly_snapshots",
+        lambda figures, output_dir, scale=2.0: {},  # type: ignore[lambda-assign]
+    )
+    out = render_interpretability_report(
+        bundle,
+        output_dir=tmp_path / "report_diff",
+        html_enabled=True,
+        pdf_enabled=False,
+    )
+    assert out["html_path"] is not None
 
 
 def test_pipeline_fails_fast_when_plugin_required_inputs_missing_cluster_labels(
@@ -239,6 +290,7 @@ def test_report_cli_smoke(
             "cluster_profiles",
             "attention_attribution",
             "neighborhood_enrichment",
+            "diff_neighborhood_enrichment",
             "filtration_curves",
         ]
         cfg_interpret.clustering.method = "agglomerative"

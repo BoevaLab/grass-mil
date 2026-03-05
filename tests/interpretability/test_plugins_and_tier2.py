@@ -25,6 +25,8 @@ def _sample_dataset() -> InterpretabilityDataset:
             "comp_B": [0.0, 0.0, 1.0, 0.0, 1.0, 1.0],
             "score": [0.3, 0.4, 0.9, 0.1, 0.8, 0.7],
             "attention": [0.2, 0.5, 0.3, 0.1, 0.2, 0.7],
+            "sample_id": ["sx", "sx", "sx", "sy", "sy", "sy"],
+            "condition": ["X", "X", "X", "Y", "Y", "Y"],
             "inst_emb_0": [0.0, 0.1, 0.2, 1.0, 1.1, 1.2],
             "inst_emb_1": [0.0, 0.2, 0.1, 1.0, 1.2, 1.1],
         }
@@ -55,6 +57,28 @@ def test_plugin_registry_and_builtin_execution() -> None:
     out = plugin.run(ds, PluginContext(state={"cluster_labels": labels}))
     assert out.name == "cluster_profiles"
     assert "composition" in out.payload
+
+
+def test_builtin_diff_neighborhood_plugin_execution() -> None:
+    registry = create_builtin_registry()
+    ds = _sample_dataset()
+    labels = np.array([0, 0, 1, 1, 1, 0])
+    plugin = registry.get("diff_neighborhood_enrichment")
+    out = plugin.run(
+        ds,
+        PluginContext(state={"cluster_labels": labels}),
+        condition_column="condition",
+        permutation_group_column="sample_id",
+        n_perms=0,
+        undirected=True,
+    )
+    assert out.name == "diff_neighborhood_enrichment"
+    assert "enrichment_by_pair" in out.payload
+    assert "X_Y" in out.payload["enrichment_by_pair"]
+    assert any(
+        section.title.startswith("Differential Neighborhood Enrichment")
+        for section in out.sections
+    )
 
 
 def test_plugin_registry_instances_are_isolated() -> None:

@@ -252,6 +252,7 @@ Built-in plugins:
 - `cluster_profiles`
 - `attention_attribution`
 - `neighborhood_enrichment`
+- `diff_neighborhood_enrichment`
 - `filtration_curves`
 
 `filtration_curves` default threshold grid:
@@ -334,7 +335,7 @@ With spatial plugins:
 python src/interpretability/report_cli.py \
   data.instance_table=/abs/path/instance_table.csv \
   data.spatial_table=/abs/path/spatial_table.csv \
-  plugins.enabled="[cluster_profiles,attention_attribution,neighborhood_enrichment,filtration_curves]"
+  plugins.enabled="[cluster_profiles,attention_attribution,neighborhood_enrichment,diff_neighborhood_enrichment,filtration_curves]"
 ```
 
 Override algorithms:

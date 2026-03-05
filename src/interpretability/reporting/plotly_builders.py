@@ -105,6 +105,28 @@ def build_plugin_figures(bundle: ReportBundle) -> Dict[str, go.Figure]:
             )
             fig.update_layout(title=f"{name} Enrichment", template="plotly_white")
             figures[name] = fig
+        elif "enrichment_by_pair" in result.payload and isinstance(
+            result.payload["enrichment_by_pair"], dict
+        ):
+            for pair, enr in result.payload["enrichment_by_pair"].items():
+                if not isinstance(enr, pd.DataFrame):
+                    continue
+                fig = go.Figure(
+                    data=[
+                        go.Heatmap(
+                            z=enr.to_numpy(),
+                            x=[str(c) for c in enr.columns],
+                            y=[str(i) for i in enr.index],
+                            colorscale="RdBu",
+                            zmid=0.0,
+                        )
+                    ]
+                )
+                fig.update_layout(
+                    title=f"{name} Enrichment ({pair})",
+                    template="plotly_white",
+                )
+                figures[f"{name}_{pair}"] = fig
     return figures
 
 
