@@ -267,7 +267,9 @@ Workflow:
 
 1. Load embedding matrix from `instance_table`.
 2. Run configured reduction.
-3. Run configured clustering.
+3. Run configured clustering:
+- `cluster_on_pca=true`: cluster on PCA projection used for clustering.
+- `cluster_on_pca=false`: cluster on raw embedding columns.
 4. Build core cluster summaries.
 5. Execute enabled plugins in order.
 6. Persist canonical artifacts:

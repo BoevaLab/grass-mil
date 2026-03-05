@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, open_dict
 
+from src.interpretability.contracts import ClusteringResult
 from src.interpretability.core.data import load_interpretability_dataset
 from src.interpretability.pipeline import run_interpretability_pipeline
 from src.interpretability.report_cli import run_report
@@ -172,6 +174,45 @@ def test_pipeline_fails_fast_when_plugin_required_inputs_missing_spatial_table(
     }
     with pytest.raises(ValueError, match="missing required inputs: spatial_table"):
         run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
+
+
+def test_pipeline_clusters_on_raw_embeddings_when_cluster_on_pca_disabled(
+    monkeypatch, tmp_path: Path
+) -> None:
+    instance_path, _ = _write_minimal_tables(tmp_path)
+    dataset = load_interpretability_dataset(
+        instance_table_path=instance_path,
+        id_column="instance_id",
+        bag_id_column="bag_id",
+        cell_type_column="cell_type",
+    )
+    expected_raw = dataset.instance_table[["inst_emb_0", "inst_emb_1"]].to_numpy(dtype=float)
+    captured: dict[str, np.ndarray] = {}
+
+    def _capture_run_clustering(method, x, **params):  # type: ignore[no-untyped-def]
+        captured["x"] = np.asarray(x)
+        return ClusteringResult(
+            method=str(method),
+            labels=np.zeros((int(x.shape[0]),), dtype=int),
+            params=dict(params),
+            fitted_object=None,
+        )
+
+    monkeypatch.setattr("src.interpretability.pipeline.run_clustering", _capture_run_clustering)
+    cfg = {
+        "reduction": {"enabled": True, "method": "pca", "params": {"n_components": 1}},
+        "clustering": {
+            "enabled": True,
+            "method": "kmeans",
+            "cluster_on_pca": False,
+            "params": {"n_clusters": 2, "random_state": 42},
+        },
+        "plugins": {"enabled": [], "params": {}},
+    }
+    run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
+    assert "x" in captured
+    assert captured["x"].shape == expected_raw.shape
+    assert np.allclose(captured["x"], expected_raw)
 
 
 def test_report_cli_smoke(

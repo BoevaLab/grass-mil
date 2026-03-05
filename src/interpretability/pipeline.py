@@ -131,7 +131,10 @@ def run_interpretability_pipeline(
     if clustering_enabled:
         method = str(clustering_cfg.get("method", "kmeans"))
         params = dict(clustering_cfg.get("params", {}))
-        clustering_input = reduced
+        # Contract: when cluster_on_pca is disabled, cluster on raw embeddings.
+        # Reduction remains available for visualization/reporting, but does not
+        # change the clustering feature space.
+        clustering_input = emb_set.matrix
         if cluster_on_pca:
             if combo_pca_result is None:
                 combo_pca_result = run_reduction(
