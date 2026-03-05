@@ -144,8 +144,10 @@ No kNN graph is reconstructed during interpretability export.
 
 Unit contract:
 
-- Preprocessed graph distances are expected to be in micrometers.
+- Preprocessing converts coordinates/distances to micrometers using `data.coord_scale_um`.
+- `data.coord_scale_um=1.0` means input coordinates are already in micrometers.
 - Exported `distance` values are consumed as micrometers by interpretability tier-2 analyses.
+- If `data.coord_scale_um` changes, regenerate processed artifacts before running prediction/export.
 
 ## Legacy Parity Mapping
 

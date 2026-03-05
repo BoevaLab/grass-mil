@@ -70,7 +70,7 @@ python src/train.py key.path=value
 | `data.batch_size` | `1` | int | `>=1` | loader batching | `python src/train.py data.batch_size=4` |
 | `data.num_workers` | `0` | int | `>=0` | dataloader workers | `python src/train.py data.num_workers=8` |
 | `data.pin_memory` | `False` | bool | `true/false` | dataloader | `python src/train.py data.pin_memory=true` |
-| `data.coord_scale_um` | `1.0` | float | `>0` | preprocessing | `python src/train.py data.coord_scale_um=0.5` |
+| `data.coord_scale_um` | `1.0` | float | `>0` | preprocessing (`1.0` means input coords already in `um`) | `python src/train.py data.coord_scale_um=0.5` |
 | `data.sample_unit` | `tile` | str | `tile`/`full` | patch generation | `python src/train.py data.sample_unit=full` |
 | `data.reducer_scope` | `sample` | str | `sample`/`dataset` | reducer fitting | `python src/train.py data.reducer_scope=dataset` |
 | `data.keep_raw_molecular` | `false` | bool | `true/false` | precompute outputs | `python src/train.py data.keep_raw_molecular=true` |
@@ -100,6 +100,7 @@ python src/train.py key.path=value
 Notes:
 
 - When LOOCV is disabled, behavior is identical to current non-LOOCV splitting.
+- `data.coord_scale_um` is applied at preprocessing time; if changed, processed artifacts must be regenerated (`data.force_precompute=true` or a fresh `data.processed_dir`).
 - Split labels are persisted at precompute time in `processed_index.json`.
   Changing `data.split.*` requires regenerating processed artifacts
   (`data.force_precompute=true` or a new `data.processed_dir`).

@@ -125,8 +125,10 @@ Required columns for current tier-2 methods:
 
 Unit contract:
 
-- During preprocessing, spatial coordinates/distances must be normalized to micrometers (`um`).
+- During preprocessing, spatial coordinates are converted to micrometers (`um`) via `data.coord_scale_um`.
+- `data.coord_scale_um=1.0` means input coordinates are already in `um`.
 - `spatial_table.distance` is treated as micrometers by tier-2 analyses.
+- If `data.coord_scale_um` changes, regenerate processed artifacts (`data.force_precompute=true` or a new `data.processed_dir`) before export/report.
 
 ## 4) Python API
 
