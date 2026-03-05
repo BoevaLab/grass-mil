@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List
 
 import numpy as np
+import pandas as pd
 
 from src.interpretability.contracts import (
     PluginResult,
@@ -20,6 +21,7 @@ from src.interpretability.tier2.neighborhood import (
     run_diff_neighborhood_enrichment,
     run_neighborhood_enrichment,
 )
+from src.interpretability.tier2.tissue_graph import prepare_tissue_graph_view
 
 
 def _resolve_filtration_thresholds(params: Dict[str, Any]) -> np.ndarray:
@@ -247,12 +249,87 @@ class FiltrationCurvesPlugin(InterpretabilityPlugin):
         return PluginResult(name=self.name, payload=payload, sections=sections)
 
 
+@dataclass
+class TissueGraphPlugin(InterpretabilityPlugin):
+    name: str = "tissue_graph"
+
+    def required_inputs(self) -> List[str]:
+        return ["spatial_table", "cluster_labels"]
+
+    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
+        if dataset.spatial_table is None:
+            raise ValueError("Spatial table is required for tissue graph plugin.")
+        sample_value = params.get("sample_value")
+        if sample_value is None or str(sample_value).strip() == "":
+            raise ValueError("tissue_graph plugin requires a non-empty sample_value parameter.")
+
+        table = dataset.instance_table.copy()
+        table["cluster_label"] = np.asarray(context.state["cluster_labels"])
+        sample_column = str(params.get("sample_column", "sample_id"))
+        id_column = str(params.get("id_column", dataset.id_column))
+        x_column = str(params.get("x_column", "center_x"))
+        y_column = str(params.get("y_column", "center_y"))
+        label_column = str(params.get("label_column", "cluster_label"))
+
+        view = prepare_tissue_graph_view(
+            table,
+            dataset.spatial_table,
+            sample_column=sample_column,
+            sample_value=sample_value,
+            id_column=id_column,
+            x_column=x_column,
+            y_column=y_column,
+            label_column=label_column,
+            coerce_ids_to_str=True,
+            include_edge_distances=True,
+        )
+        meta = dict(view.metadata)
+        cluster_counts = meta.get("cluster_counts", {})
+        section_summary = pd.DataFrame(
+            [
+                {
+                    "sample_column": meta.get("sample_column"),
+                    "sample_value": meta.get("sample_value"),
+                    "node_count": meta.get("node_count"),
+                    "edge_count": meta.get("edge_count"),
+                    "cluster_count": len(cluster_counts)
+                    if isinstance(cluster_counts, dict)
+                    else 0,
+                }
+            ]
+        )
+        style = {
+            "show_edges": bool(params.get("show_edges", True)),
+            "node_size": float(params.get("node_size", 5.0)),
+            "edge_width": float(params.get("edge_width", 0.5)),
+            "edge_opacity": float(params.get("edge_opacity", 0.25)),
+            "colorscale": str(params.get("colorscale", "Viridis")),
+            "reverse_y": bool(params.get("reverse_y", True)),
+            "title_prefix": str(params.get("title_prefix", "Tissue Graph")),
+        }
+        payload = {
+            "tissue_graph_view": view,
+            "tissue_graph_meta": meta,
+            "tissue_graph_style": style,
+        }
+        sections = [
+            ReportSection(
+                title=f"Tissue Graph ({sample_column}={sample_value})",
+                description="Single tissue/sample graph with cluster-colored cells.",
+                tables={"summary": section_summary},
+                metadata=meta,
+            )
+        ]
+        return PluginResult(name=self.name, payload=payload, sections=sections)
+
+
 def register_builtin_plugins(registry: PluginRegistry) -> None:
     registry.register(ClusterProfilesPlugin())
     registry.register(AttentionAttributionPlugin())
     registry.register(NeighborhoodEnrichmentPlugin())
     registry.register(DiffNeighborhoodEnrichmentPlugin())
     registry.register(FiltrationCurvesPlugin())
+    registry.register(TissueGraphPlugin())
 
 
 def create_builtin_registry() -> PluginRegistry:

@@ -142,6 +142,8 @@ Public exports:
 - `run_neighborhood_enrichment(...)`
 - `run_diff_neighborhood_enrichment(...)`
 - `compute_filtration_curves(...)`
+- `prepare_tissue_graph_view(...)`
+- `build_tissue_graph_figure(...)`
 - `fit_cluster_transfer_from_report_bundle(...)`
 - `apply_cluster_transfer(...)`
 - `save_cluster_transfer_bundle(...)`
@@ -155,6 +157,8 @@ Import path:
 from src.interpretability import (
     run_reduction,
     run_clustering,
+    prepare_tissue_graph_view,
+    build_tissue_graph_figure,
     fit_cluster_transfer_from_report_bundle,
     apply_cluster_transfer,
     run_interpretability_pipeline,
@@ -262,11 +266,20 @@ Built-in plugins:
 - `neighborhood_enrichment`
 - `diff_neighborhood_enrichment`
 - `filtration_curves`
+- `tissue_graph`
 
 `filtration_curves` default threshold grid:
 
 - notebook-parity default is `np.linspace(0.0, 55.0, 500)`
 - thresholds are interpreted in micrometers
+
+`tissue_graph` behavior:
+
+- disabled by default in `plugins.enabled`
+- requires explicit `sample_value` selection (no auto-pick)
+- requires `center_x` and `center_y` coordinates in `instance_table`
+- colors nodes by pipeline `cluster_labels` context
+- uses `spatial_table` edges filtered to selected sample nodes
 
 ## 7) Pipeline Orchestration
 
@@ -348,6 +361,28 @@ query_table = pd.read_csv("/abs/query_instance_table.csv")
 transferred = apply_cluster_transfer(loaded, query_table)
 ```
 
+Notebook helper example for single tissue graph:
+
+```python
+from src.interpretability.tier2.tissue_graph import (
+    build_tissue_graph_figure,
+    prepare_tissue_graph_view,
+)
+
+view = prepare_tissue_graph_view(
+    node_table=instance_with_clusters_df,
+    spatial_table=spatial_table_df,
+    sample_column="sample_id",
+    sample_value="sx",
+    id_column="instance_id",
+    x_column="center_x",
+    y_column="center_y",
+    label_column="cluster_label",
+)
+fig = build_tissue_graph_figure(view, show_edges=True)
+fig.show()
+```
+
 ## 9) Reporting System
 
 `render_interpretability_report(...)` generates:
@@ -404,6 +439,17 @@ python src/interpretability/report_cli.py \
   data.instance_table=/abs/path/instance_table.csv \
   data.spatial_table=/abs/path/spatial_table.csv \
   plugins.enabled="[cluster_profiles,attention_attribution,neighborhood_enrichment,diff_neighborhood_enrichment,filtration_curves]"
+```
+
+Render a single selected tissue graph colored by cluster labels:
+
+```bash
+python src/interpretability/report_cli.py \
+  data.instance_table=/abs/path/instance_table.csv \
+  data.spatial_table=/abs/path/spatial_table.csv \
+  plugins.enabled="[tissue_graph]" \
+  plugins.params.tissue_graph.sample_column=sample_id \
+  plugins.params.tissue_graph.sample_value=sx
 ```
 
 Override algorithms:

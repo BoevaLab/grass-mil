@@ -7,6 +7,18 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from src.interpretability.contracts import ReportBundle
+from src.interpretability.tier2.tissue_graph import TissueGraphView, build_tissue_graph_figure
+
+
+def _safe_slug(value: object) -> str:
+    text = str(value).strip().lower()
+    if not text:
+        return "unknown"
+    out = []
+    for char in text:
+        out.append(char if char.isalnum() else "_")
+    slug = "".join(out).strip("_")
+    return slug or "unknown"
 
 
 def build_reduction_scatter(bundle: ReportBundle) -> go.Figure:
@@ -127,6 +139,25 @@ def build_plugin_figures(bundle: ReportBundle) -> Dict[str, go.Figure]:
                     template="plotly_white",
                 )
                 figures[f"{name}_{pair}"] = fig
+        elif "tissue_graph_view" in result.payload and isinstance(
+            result.payload["tissue_graph_view"], TissueGraphView
+        ):
+            view = result.payload["tissue_graph_view"]
+            style = result.payload.get("tissue_graph_style", {})
+            fig = build_tissue_graph_figure(
+                view,
+                show_edges=bool(style.get("show_edges", True)),
+                node_size=float(style.get("node_size", 5.0)),
+                edge_width=float(style.get("edge_width", 0.5)),
+                edge_opacity=float(style.get("edge_opacity", 0.25)),
+                colorscale=str(style.get("colorscale", "Viridis")),
+                reverse_y=bool(style.get("reverse_y", True)),
+                title_prefix=str(style.get("title_prefix", "Tissue Graph")),
+            )
+            meta = result.payload.get("tissue_graph_meta", {})
+            sample_column = _safe_slug(meta.get("sample_column", "sample"))
+            sample_value = _safe_slug(meta.get("sample_value", "unknown"))
+            figures[f"tissue_graph_{sample_column}_{sample_value}"] = fig
     return figures
 
 

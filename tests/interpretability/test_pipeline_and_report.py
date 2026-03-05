@@ -28,6 +28,8 @@ def _write_minimal_tables(tmp_path: Path) -> tuple[Path, Path]:
             "attention": [0.2, 0.3, 0.2, 0.3, 0.1, 0.5, 0.2, 0.2],
             "sample_id": ["sx"] * 4 + ["sy"] * 4,
             "condition": ["X"] * 4 + ["Y"] * 4,
+            "center_x": [0.0, 0.1, 0.2, 0.3, 1.0, 1.1, 1.2, 1.3],
+            "center_y": [0.0, 0.2, 0.1, 0.3, 1.0, 1.2, 1.1, 1.3],
             "inst_emb_0": [0.0, 0.1, 0.2, 0.3, 1.0, 1.1, 1.2, 1.3],
             "inst_emb_1": [0.0, 0.2, 0.1, 0.3, 1.0, 1.2, 1.1, 1.3],
         }
@@ -178,6 +180,51 @@ def test_pipeline_and_report_render_with_diff_neighborhood_plugin(
     out = render_interpretability_report(
         bundle,
         output_dir=tmp_path / "report_diff",
+        html_enabled=True,
+        pdf_enabled=False,
+    )
+    assert out["html_path"] is not None
+
+
+def test_pipeline_and_report_render_with_tissue_graph_plugin(monkeypatch, tmp_path: Path) -> None:
+    instance_path, spatial_path = _write_minimal_tables(tmp_path)
+    dataset = load_interpretability_dataset(
+        instance_table_path=instance_path,
+        spatial_table_path=spatial_path,
+        id_column="instance_id",
+        bag_id_column="bag_id",
+        cell_type_column="cell_type",
+    )
+    cfg = {
+        "reduction": {"enabled": True, "method": "pca", "params": {"n_components": 2}},
+        "clustering": {
+            "enabled": True,
+            "method": "agglomerative",
+            "params": {"n_clusters": 2, "linkage": "ward"},
+        },
+        "plugins": {
+            "enabled": ["tissue_graph"],
+            "params": {
+                "tissue_graph": {
+                    "sample_column": "sample_id",
+                    "sample_value": "sx",
+                    "id_column": "instance_id",
+                }
+            },
+        },
+    }
+    bundle = run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
+    assert "tissue_graph" in bundle.plugin_results
+    figs = dict(bundle_figures(bundle))
+    assert "tissue_graph_sample_id_sx" in figs
+
+    monkeypatch.setattr(
+        "src.interpretability.reporting.render.export_plotly_snapshots",
+        lambda figures, output_dir, scale=2.0: {},  # type: ignore[lambda-assign]
+    )
+    out = render_interpretability_report(
+        bundle,
+        output_dir=tmp_path / "report_tissue_graph",
         html_enabled=True,
         pdf_enabled=False,
     )

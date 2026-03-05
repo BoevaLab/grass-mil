@@ -28,3 +28,14 @@ params:
     threshold_start: 0.0
     threshold_stop: 55.0
     threshold_count: 500
+  tissue_graph:
+    sample_column: sample_id
+    sample_value: null
+    id_column: instance_id
+    x_column: center_x
+    y_column: center_y
+    show_edges: true
+    node_size: 5.0
+    edge_width: 0.5
+    edge_opacity: 0.25
+    reverse_y: true

@@ -27,6 +27,8 @@ def _sample_dataset() -> InterpretabilityDataset:
             "attention": [0.2, 0.5, 0.3, 0.1, 0.2, 0.7],
             "sample_id": ["sx", "sx", "sx", "sy", "sy", "sy"],
             "condition": ["X", "X", "X", "Y", "Y", "Y"],
+            "center_x": [0.0, 0.1, 0.2, 1.0, 1.1, 1.2],
+            "center_y": [0.0, 0.2, 0.1, 1.0, 1.2, 1.1],
             "inst_emb_0": [0.0, 0.1, 0.2, 1.0, 1.1, 1.2],
             "inst_emb_1": [0.0, 0.2, 0.1, 1.0, 1.2, 1.1],
         }
@@ -51,12 +53,69 @@ def _sample_dataset() -> InterpretabilityDataset:
 def test_plugin_registry_and_builtin_execution() -> None:
     registry = create_builtin_registry()
     assert "cluster_profiles" in registry.list()
+    assert "tissue_graph" in registry.list()
     ds = _sample_dataset()
     labels = np.array([0, 0, 1, 1, 1, 0])
     plugin = registry.get("cluster_profiles")
     out = plugin.run(ds, PluginContext(state={"cluster_labels": labels}))
     assert out.name == "cluster_profiles"
     assert "composition" in out.payload
+
+
+def test_builtin_tissue_graph_plugin_execution() -> None:
+    registry = create_builtin_registry()
+    ds = _sample_dataset()
+    labels = np.array([0, 0, 1, 1, 1, 0])
+    plugin = registry.get("tissue_graph")
+    out = plugin.run(
+        ds,
+        PluginContext(state={"cluster_labels": labels}),
+        sample_column="sample_id",
+        sample_value="sx",
+        id_column="instance_id",
+    )
+    assert out.name == "tissue_graph"
+    assert "tissue_graph_view" in out.payload
+    assert "tissue_graph_meta" in out.payload
+    view = out.payload["tissue_graph_view"]
+    assert view.metadata["sample_value"] == "sx"
+    assert len(out.sections) == 1
+
+
+def test_builtin_tissue_graph_plugin_requires_sample_value() -> None:
+    registry = create_builtin_registry()
+    ds = _sample_dataset()
+    labels = np.array([0, 0, 1, 1, 1, 0])
+    plugin = registry.get("tissue_graph")
+    with pytest.raises(ValueError, match="requires a non-empty sample_value"):
+        plugin.run(
+            ds,
+            PluginContext(state={"cluster_labels": labels}),
+            sample_column="sample_id",
+            id_column="instance_id",
+        )
+
+
+def test_builtin_tissue_graph_plugin_fails_when_coords_missing() -> None:
+    registry = create_builtin_registry()
+    ds = _sample_dataset()
+    missing_coords_ds = InterpretabilityDataset(
+        instance_table=ds.instance_table.drop(columns=["center_x", "center_y"]),
+        spatial_table=ds.spatial_table,
+        id_column=ds.id_column,
+        bag_id_column=ds.bag_id_column,
+        cell_type_column=ds.cell_type_column,
+    )
+    labels = np.array([0, 0, 1, 1, 1, 0])
+    plugin = registry.get("tissue_graph")
+    with pytest.raises(ValueError, match="missing required columns"):
+        plugin.run(
+            missing_coords_ds,
+            PluginContext(state={"cluster_labels": labels}),
+            sample_column="sample_id",
+            sample_value="sx",
+            id_column="instance_id",
+        )
 
 
 def test_builtin_diff_neighborhood_plugin_execution() -> None:
