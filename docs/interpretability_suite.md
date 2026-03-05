@@ -222,6 +222,9 @@ Plugin protocol (`InterpretabilityPlugin`):
 - `required_inputs()`
 - `run(dataset, context, **params) -> PluginResult`
 
+`required_inputs()` is enforced by the pipeline before plugin execution; missing inputs
+fail fast with a `ValueError` naming the plugin and missing keys.
+
 `PluginResult` includes:
 
 - `payload`: machine-readable outputs

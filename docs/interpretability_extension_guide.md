@@ -106,6 +106,10 @@ class SpatialEntropyPlugin(InterpretabilityPlugin):
         )
 ```
 
+`required_inputs()` entries are checked by `run_interpretability_pipeline(...)` before
+`run(...)` is called. If any required input is missing from dataset fields/context state,
+the pipeline raises `ValueError` immediately.
+
 ## 4) Register The Plugin
 
 Register in `register_builtin_plugins()`:

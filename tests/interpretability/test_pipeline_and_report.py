@@ -131,6 +131,49 @@ def test_report_render_tolerates_snapshot_export_failure_when_pdf_disabled(
     assert out["snapshot_paths"] == {}
 
 
+def test_pipeline_fails_fast_when_plugin_required_inputs_missing_cluster_labels(
+    tmp_path: Path,
+) -> None:
+    instance_path, spatial_path = _write_minimal_tables(tmp_path)
+    dataset = load_interpretability_dataset(
+        instance_table_path=instance_path,
+        spatial_table_path=spatial_path,
+        id_column="instance_id",
+        bag_id_column="bag_id",
+        cell_type_column="cell_type",
+    )
+    cfg = {
+        "reduction": {"enabled": True, "method": "pca", "params": {"n_components": 2}},
+        "clustering": {"enabled": False},
+        "plugins": {"enabled": ["cluster_profiles"], "params": {}},
+    }
+    with pytest.raises(ValueError, match="missing required inputs: cluster_labels"):
+        run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
+
+
+def test_pipeline_fails_fast_when_plugin_required_inputs_missing_spatial_table(
+    tmp_path: Path,
+) -> None:
+    instance_path, _ = _write_minimal_tables(tmp_path)
+    dataset = load_interpretability_dataset(
+        instance_table_path=instance_path,
+        id_column="instance_id",
+        bag_id_column="bag_id",
+        cell_type_column="cell_type",
+    )
+    cfg = {
+        "reduction": {"enabled": True, "method": "pca", "params": {"n_components": 2}},
+        "clustering": {
+            "enabled": True,
+            "method": "agglomerative",
+            "params": {"n_clusters": 2, "linkage": "ward"},
+        },
+        "plugins": {"enabled": ["neighborhood_enrichment"], "params": {}},
+    }
+    with pytest.raises(ValueError, match="missing required inputs: spatial_table"):
+        run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
+
+
 def test_report_cli_smoke(
     monkeypatch,
     cfg_interpret: DictConfig,

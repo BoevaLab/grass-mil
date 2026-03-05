@@ -22,6 +22,41 @@ from src.interpretability.plugins.builtin import register_builtin_plugins
 from src.interpretability.plugins.registry import get_plugin
 
 
+def _is_plugin_input_available(
+    dataset: InterpretabilityDataset,
+    context: PluginContext,
+    input_name: str,
+) -> bool:
+    key = str(input_name).strip()
+    if not key:
+        return False
+    if key in context.state:
+        return context.state[key] is not None
+    if hasattr(dataset, key):
+        return getattr(dataset, key) is not None
+    return False
+
+
+def _validate_plugin_required_inputs(
+    plugin_name: str,
+    required_inputs: list[str],
+    dataset: InterpretabilityDataset,
+    context: PluginContext,
+) -> None:
+    required = [str(name).strip() for name in required_inputs if str(name).strip()]
+    missing = [
+        name
+        for name in required
+        if not _is_plugin_input_available(dataset=dataset, context=context, input_name=name)
+    ]
+    if missing:
+        missing_text = ", ".join(sorted(set(missing)))
+        raise ValueError(
+            f"Plugin {plugin_name!r} is missing required inputs: {missing_text}. "
+            "Provide these inputs in dataset fields or plugin context state."
+        )
+
+
 def _write_table(df: pd.DataFrame, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.suffix.lower() == ".parquet":
@@ -119,7 +154,7 @@ def run_interpretability_pipeline(
         state={
             "reduction": reduction_result,
             "clustering": clustering_result,
-            "cluster_labels": labels if labels is not None else np.array([], dtype=int),
+            "cluster_labels": labels,
         }
     )
     plugin_results: Dict[str, PluginResult] = {}
@@ -129,6 +164,12 @@ def run_interpretability_pipeline(
 
     for plugin_name in enabled_plugins:
         plugin = get_plugin(str(plugin_name))
+        _validate_plugin_required_inputs(
+            plugin_name=str(plugin_name),
+            required_inputs=list(plugin.required_inputs()),
+            dataset=dataset,
+            context=context,
+        )
         result = plugin.run(dataset, context, **dict(plugin_params.get(plugin_name, {})))
         plugin_results[str(plugin_name)] = result
 
