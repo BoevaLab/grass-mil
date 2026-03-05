@@ -12,7 +12,4 @@ require_composition: true
 
 spatial:
   enabled: false
-  x_column: center_x
-  y_column: center_y
-  n_neighbors: 8
   undirected: true

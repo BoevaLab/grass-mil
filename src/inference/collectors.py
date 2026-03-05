@@ -111,6 +111,7 @@ def collect_inference_payload(
     instance_embedding_chunks: List[torch.Tensor] = []
     instance_composition_chunks: List[torch.Tensor] = []
     instance_centroid_chunks: List[torch.Tensor] = []
+    instance_graphs: List[Any] = []
     expect_targets: Optional[bool] = None
 
     bag_emb_sums: Dict[str, torch.Tensor] = {}
@@ -279,6 +280,18 @@ def collect_inference_payload(
                         f"{chunk_instance_centroids.shape[0]}."
                     )
                 instance_centroid_chunks.append(chunk_instance_centroids)
+            chunk_instance_graphs = chunk.get("instance_graphs")
+            if chunk_instance_graphs is not None:
+                try:
+                    chunk_instance_graphs = list(chunk_instance_graphs)
+                except TypeError as exc:
+                    raise TypeError("predict_step instance_graphs must be iterable.") from exc
+                if len(chunk_instance_graphs) != int(chunk_instance_logits.shape[0]):
+                    raise ValueError(
+                        "Mismatch between instance_logits and instance_graphs rows: "
+                        f"{chunk_instance_logits.shape[0]} vs {len(chunk_instance_graphs)}."
+                    )
+                instance_graphs.extend(chunk_instance_graphs)
 
         if include_embeddings:
             missing_embed_fields = [
@@ -419,6 +432,11 @@ def collect_inference_payload(
                 "Mismatch between collected instance_logits and instance_centroids rows: "
                 f"{instance_logits.shape[0]} vs {instance_centroids.shape[0]}."
             )
+        if instance_graphs and len(instance_graphs) != int(instance_logits.shape[0]):
+            raise ValueError(
+                "Mismatch between collected instance_logits and instance_graphs rows: "
+                f"{instance_logits.shape[0]} vs {len(instance_graphs)}."
+            )
     if include_instance_embeddings and instance_logits is not None and instance_embeddings is None:
         raise ValueError(
             "Interpretability export requested instance embeddings, but none were collected."
@@ -440,6 +458,7 @@ def collect_inference_payload(
         instance_embeddings=instance_embeddings,
         instance_composition=instance_composition,
         instance_centroids=instance_centroids,
+        instance_graphs=instance_graphs if instance_graphs else None,
     )
 
     embedding_payload: Optional[EmbeddingPayload] = None

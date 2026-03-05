@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 import torch
+from types import SimpleNamespace
 
 from src.inference.collectors import collect_inference_payload
 
@@ -199,6 +200,10 @@ def test_collect_inference_payload_collects_instance_export_fields() -> None:
             "instance_embeddings": torch.tensor([[0.11, 0.12], [0.21, 0.22]]),
             "instance_composition": torch.tensor([[1.0, 0.0], [0.2, 0.8]]),
             "instance_centroids": torch.tensor([[10.0, 11.0], [12.0, 13.0]]),
+            "instance_graphs": [
+                SimpleNamespace(name="g0"),
+                SimpleNamespace(name="g1"),
+            ],
         }
     ]
     trainer = _FakeTrainer(outputs)
@@ -217,6 +222,8 @@ def test_collect_inference_payload_collects_instance_export_fields() -> None:
     assert payload.instance_composition.shape == (2, 2)
     assert payload.instance_centroids is not None
     assert payload.instance_centroids.shape == (2, 2)
+    assert payload.instance_graphs is not None
+    assert len(payload.instance_graphs) == 2
 
 
 def test_collect_inference_payload_requires_instance_embeddings_when_enabled() -> None:
@@ -242,3 +249,45 @@ def test_collect_inference_payload_requires_instance_embeddings_when_enabled() -
             ckpt_path=None,
             include_instance_embeddings=True,
         )
+
+
+def test_collect_inference_payload_collects_instance_graphs_across_chunks() -> None:
+    outputs = [
+        {
+            "bag_ids": ["region_1"],
+            "bag_logits": torch.tensor([[1.0]]),
+            "row_region_ids": ["region_1"],
+            "row_sample_ids": ["sample_a"],
+            "instance_logits": torch.tensor([[1.5], [2.5]]),
+            "instance_patch_ids": ["patch_0", "patch_1"],
+            "instance_bag_ids": ["sample_a::region_1", "sample_a::region_1"],
+            "instance_region_ids": ["region_1", "region_1"],
+            "instance_sample_ids": ["sample_a", "sample_a"],
+            "instance_embeddings": torch.tensor([[0.1, 0.2], [0.3, 0.4]]),
+            "instance_graphs": [SimpleNamespace(name="g0"), SimpleNamespace(name="g1")],
+        },
+        {
+            "bag_ids": ["region_1"],
+            "bag_logits": torch.tensor([[1.0]]),
+            "row_region_ids": ["region_1"],
+            "row_sample_ids": ["sample_a"],
+            "instance_logits": torch.tensor([[3.5]]),
+            "instance_patch_ids": ["patch_2"],
+            "instance_bag_ids": ["sample_a::region_1"],
+            "instance_region_ids": ["region_1"],
+            "instance_sample_ids": ["sample_a"],
+            "instance_embeddings": torch.tensor([[0.5, 0.6]]),
+            "instance_graphs": [SimpleNamespace(name="g2")],
+        },
+    ]
+    trainer = _FakeTrainer(outputs)
+    collected = collect_inference_payload(
+        trainer=trainer,  # type: ignore[arg-type]
+        model=None,  # type: ignore[arg-type]
+        datamodule=None,  # type: ignore[arg-type]
+        ckpt_path=None,
+        include_instance_embeddings=True,
+    )
+    payload = collected.prediction_payload
+    assert payload.instance_graphs is not None
+    assert [graph.name for graph in payload.instance_graphs] == ["g0", "g1", "g2"]

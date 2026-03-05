@@ -25,6 +25,7 @@ class BatchPredictionPayload:
     instance_embeddings: Optional[torch.Tensor] = None
     instance_composition: Optional[torch.Tensor] = None
     instance_centroids: Optional[torch.Tensor] = None
+    instance_graphs: Optional[List[Any]] = None
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,7 @@ class UnifiedPredictPayload:
     instance_embeddings: Optional[torch.Tensor] = None
     instance_composition: Optional[torch.Tensor] = None
     instance_centroids: Optional[torch.Tensor] = None
+    instance_graphs: Optional[List[Any]] = None
     embedding_bag_ids: Optional[List[str]] = None
     graph_embeddings: Optional[torch.Tensor] = None
     embedding_bag_counts: Optional[List[float]] = None

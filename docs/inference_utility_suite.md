@@ -134,12 +134,14 @@ Columns:
 - `target_id`
 - `distance`
 
-Edges are kNN edges computed within each `bag_id` using exported instance centroids.
+Edges are taken from original subgraph/root connectivity by reading `instance_graphs`
+stored alongside prediction payloads.
+No kNN graph is reconstructed during interpretability export.
 
 Unit contract:
 
-- Preprocessed coordinates (`center_x`, `center_y`) are expected to be in micrometers.
-- Exported `distance` values are therefore expected in micrometers and are consumed as such by interpretability tier-2 analyses.
+- Preprocessed graph distances are expected to be in micrometers.
+- Exported `distance` values are consumed as micrometers by interpretability tier-2 analyses.
 
 ## Legacy Parity Mapping
 

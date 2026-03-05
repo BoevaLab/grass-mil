@@ -172,6 +172,7 @@ def _as_batch_payload(payload: Any) -> BatchPredictionPayload:
         instance_embeddings=getattr(payload, "instance_embeddings", None),
         instance_composition=getattr(payload, "instance_composition", None),
         instance_centroids=getattr(payload, "instance_centroids", None),
+        instance_graphs=getattr(payload, "instance_graphs", None),
     )
 
 
@@ -429,11 +430,8 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         if bool(spatial_cfg.get("enabled", False)):
             spatial_frame = build_spatial_table(
                 instance_frame,
+                raw_pred_payload,
                 id_column=str((interpret_cfg or {}).get("id_column", "instance_id")),
-                bag_id_column=str((interpret_cfg or {}).get("bag_id_column", "bag_id")),
-                x_column=str(spatial_cfg.get("x_column", "center_x")),
-                y_column=str(spatial_cfg.get("y_column", "center_y")),
-                n_neighbors=int(spatial_cfg.get("n_neighbors", 8)),
                 undirected=bool(spatial_cfg.get("undirected", True)),
             )
             spatial_path = output_dir / str(

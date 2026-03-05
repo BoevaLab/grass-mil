@@ -564,6 +564,32 @@ def _ensure_edge_index(batch: Batch) -> Batch:
     return batch
 
 
+def _resolve_batch_root_node_ids(batch: Batch) -> Optional[torch.Tensor]:
+    root_n_id = getattr(batch, "root_n_id", None)
+    if not isinstance(root_n_id, torch.Tensor):
+        return None
+    roots = root_n_id.detach().cpu().long().view(-1)
+    if roots.numel() == 0:
+        return roots
+
+    roots_abs = roots
+    if hasattr(batch, "ptr") and isinstance(batch.ptr, torch.Tensor):
+        ptr = batch.ptr.detach().cpu().long().view(-1)
+        if ptr.numel() == roots.numel() + 1:
+            counts = ptr[1:] - ptr[:-1]
+            if bool(torch.all((roots >= 0) & (roots < counts))):
+                roots_abs = ptr[:-1] + roots
+            elif bool(torch.all((roots >= ptr[:-1]) & (roots < ptr[1:]))):
+                roots_abs = roots
+
+    n_id = getattr(batch, "n_id", None)
+    if isinstance(n_id, torch.Tensor):
+        n_id = n_id.detach().cpu().long().view(-1)
+        if n_id.numel() > 0 and bool(torch.all((roots_abs >= 0) & (roots_abs < n_id.numel()))):
+            return n_id.index_select(0, roots_abs)
+    return roots_abs
+
+
 def _normalize_shadow_batch(batch: Batch, source_data: Optional[Data] = None) -> Batch:
     batch = _ensure_edge_index(batch)
     num_subgraphs = int(len(batch.ptr) - 1) if hasattr(batch, "ptr") else 1
@@ -581,6 +607,12 @@ def _normalize_shadow_batch(batch: Batch, source_data: Optional[Data] = None) ->
                 key,
                 _expand_graph_level_value(getattr(source_data, key), num_subgraphs),
             )
+    root_node_ids = _resolve_batch_root_node_ids(batch)
+    if isinstance(root_node_ids, torch.Tensor):
+        batch.root_n_id = root_node_ids
+        batch.root_n_id_is_global = torch.ones(
+            int(root_node_ids.numel()), dtype=torch.bool
+        )
     return batch
 
 
@@ -676,6 +708,7 @@ class _ShaDowKHopSamplerWithTransform(torch.utils.data.DataLoader):
 
         batch = Batch(batch=torch.ops.torch_sparse.ptr2ind(ptr, n_id.numel()), ptr=ptr)
         batch.root_n_id = root_n_id
+        batch.n_id = n_id
 
         if self.is_sparse_tensor:
             batch.adj_t = adj_t
@@ -716,6 +749,7 @@ class _ShaDowKHopSamplerWithTransform(torch.utils.data.DataLoader):
             "batch",
             "ptr",
             "root_n_id",
+            "n_id",
             "adj_t",
             "num_nodes",
         }
@@ -730,12 +764,19 @@ class _ShaDowKHopSamplerWithTransform(torch.utils.data.DataLoader):
                 relabel_nodes=True,
                 num_nodes=int(batch.x.size(0)),
             )
+            root_n_id = batch.root_n_id[i : i + 1]
+            if root_n_id.numel() == 1:
+                root_value = int(root_n_id.item())
+                if node_start <= root_value < node_end:
+                    root_n_id = root_n_id - node_start
             sub_data = Data(
                 x=batch.x[node_ids],
                 edge_index=sub_edge_index,
                 edge_attr=sub_edge_attr,
-                root_n_id=batch.root_n_id[i : i + 1],
+                root_n_id=root_n_id,
             )
+            if hasattr(batch, "n_id") and isinstance(batch.n_id, torch.Tensor):
+                sub_data.n_id = batch.n_id[node_ids]
             for key, val in batch:
                 if key in skip_keys:
                     continue

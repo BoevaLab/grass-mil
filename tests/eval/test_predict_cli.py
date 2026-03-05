@@ -659,6 +659,22 @@ def test_predict_can_export_interpretability_tables(monkeypatch, tmp_path: Path)
                 instance_embeddings=torch.tensor([[0.11, 0.12], [0.21, 0.22]]),
                 instance_composition=torch.tensor([[1.0, 0.0], [0.0, 1.0]]),
                 instance_centroids=torch.tensor([[0.0, 0.0], [1.0, 0.0]]),
+                instance_graphs=[
+                    SimpleNamespace(
+                        root_n_id=torch.tensor([0], dtype=torch.long),
+                        n_id=torch.tensor([100, 101], dtype=torch.long),
+                        edge_index=torch.tensor([[0], [1]], dtype=torch.long),
+                        edge_attr=torch.tensor([[1.0]], dtype=torch.float32),
+                        edge_attr_names=["distance"],
+                    ),
+                    SimpleNamespace(
+                        root_n_id=torch.tensor([0], dtype=torch.long),
+                        n_id=torch.tensor([101, 100], dtype=torch.long),
+                        edge_index=torch.tensor([[0], [1]], dtype=torch.long),
+                        edge_attr=torch.tensor([[1.0]], dtype=torch.float32),
+                        edge_attr_names=["distance"],
+                    ),
+                ],
             ),
             embedding_payload=None,
         )
@@ -716,9 +732,6 @@ def test_predict_can_export_interpretability_tables(monkeypatch, tmp_path: Path)
                 "require_composition": True,
                 "spatial": {
                     "enabled": True,
-                    "x_column": "center_x",
-                    "y_column": "center_y",
-                    "n_neighbors": 1,
                     "undirected": True,
                 },
             },

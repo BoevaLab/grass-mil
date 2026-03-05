@@ -368,6 +368,7 @@ class SupervisedModule(L.LightningModule):
         instance_sample_ids: list[Optional[str]] = []
         instance_attention_logits_chunks: list[torch.Tensor] = []
         instance_embedding_chunks: list[torch.Tensor] = []
+        instance_graph_chunks: list[Any] = []
         composition_by_instance = (
             self._compute_instance_composition(
                 batch,
@@ -392,6 +393,12 @@ class SupervisedModule(L.LightningModule):
         compute_attention_logits = (
             include_instance_payload and self.use_attention and self.attention is not None
         )
+        subgraph_data_list = None
+        if hasattr(batch, "to_data_list"):
+            try:
+                subgraph_data_list = batch.to_data_list()
+            except Exception:
+                subgraph_data_list = None
 
         for bag_id, indices in zip(ordered_bag_ids, bag_indices):
             if not indices:
@@ -406,6 +413,10 @@ class SupervisedModule(L.LightningModule):
             instance_bag_ids.extend([str(bag_id)] * len(indices))
             instance_region_ids.extend([region_ids[i] for i in indices])
             instance_sample_ids.extend([sample_ids[i] for i in indices])
+            if isinstance(subgraph_data_list, list):
+                for i in indices:
+                    if 0 <= int(i) < len(subgraph_data_list):
+                        instance_graph_chunks.append(subgraph_data_list[int(i)])
             if composition_by_instance is not None:
                 instance_composition_chunks.append(composition_by_instance.index_select(0, idx))
             if centroids_by_instance is not None:
@@ -450,6 +461,8 @@ class SupervisedModule(L.LightningModule):
                 if instance_attention_logits_chunks
                 else torch.empty((0, 1), device=patch_logits.device)
             )
+        if instance_graph_chunks:
+            metadata["instance_graphs"] = instance_graph_chunks
         return metadata
 
     def _build_predict_embedding_payload(
@@ -977,6 +990,8 @@ class SupervisedModule(L.LightningModule):
             result["instance_bag_ids"] = metadata["instance_bag_ids"]
             result["instance_region_ids"] = metadata["instance_region_ids"]
             result["instance_sample_ids"] = metadata["instance_sample_ids"]
+            if "instance_graphs" in metadata:
+                result["instance_graphs"] = metadata["instance_graphs"]
             if bool(getattr(self, "_predict_emit_instance_embeddings", False)):
                 result["instance_embeddings"] = metadata["instance_embeddings"].detach()
                 if "instance_composition" in metadata:

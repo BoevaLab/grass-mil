@@ -238,40 +238,80 @@ def build_instance_table(
 
 def build_spatial_table(
     instance_table: pd.DataFrame,
+    payload: BatchPredictionPayload,
     *,
     id_column: str = "instance_id",
-    bag_id_column: str = "bag_id",
-    x_column: str = "center_x",
-    y_column: str = "center_y",
-    n_neighbors: int = 8,
     undirected: bool = True,
 ) -> pd.DataFrame:
-    required = {id_column, bag_id_column, x_column, y_column}
-    missing = required - set(instance_table.columns)
-    if missing:
+    if id_column not in instance_table.columns:
+        raise ValueError(f"Cannot build spatial table, missing required column '{id_column}'.")
+
+    instance_graphs = payload.instance_graphs
+    if instance_graphs is None:
         raise ValueError(
-            f"Cannot build spatial table, missing required columns: {sorted(missing)}."
+            "Cannot build spatial table: predict payload is missing "
+            "instance_graphs. Spatial edges must come from original subgraph connectivity."
         )
-    if int(n_neighbors) < 1:
-        raise ValueError("n_neighbors must be >= 1.")
+    if len(instance_graphs) != len(instance_table):
+        raise ValueError(
+            "Mismatch between instance table rows and payload.instance_graphs: "
+            f"{len(instance_table)} vs {len(instance_graphs)}."
+        )
+
+    instance_ids = instance_table[id_column].astype(str).tolist()
+    bag_ids = (
+        [str(v) for v in instance_table["bag_id"].tolist()]
+        if "bag_id" in instance_table
+        else ["" for _ in instance_ids]
+    )
+    roots: List[int] = []
+    for graph in instance_graphs:
+        roots.append(_resolve_instance_root_node_id(graph))
+
+    root_to_instance: Dict[tuple[str, int], int] = {}
+    for idx, (bag_id, root_id) in enumerate(zip(bag_ids, roots)):
+        root_to_instance[(bag_id, int(root_id))] = int(idx)
 
     edge_rows: List[tuple[str, str, float]] = []
-    for _, group in instance_table.groupby(bag_id_column, dropna=False):
-        local = group[[id_column, x_column, y_column]].copy()
-        local[id_column] = local[id_column].astype(str)
-        local = local.replace([np.inf, -np.inf], np.nan).dropna(subset=[x_column, y_column])
-        if len(local) < 2:
+    for src_idx, graph in enumerate(instance_graphs):
+        src_bag = bag_ids[src_idx]
+        src_root = roots[src_idx]
+        edge_index = getattr(graph, "edge_index", None)
+        if (
+            not isinstance(edge_index, torch.Tensor)
+            or edge_index.ndim != 2
+            or edge_index.shape[0] != 2
+        ):
             continue
-        ids = local[id_column].tolist()
-        coords = local[[x_column, y_column]].to_numpy(dtype=np.float64)
-        k = min(int(n_neighbors), len(ids) - 1)
-        dist = np.sqrt(((coords[:, None, :] - coords[None, :, :]) ** 2).sum(axis=2))
-        np.fill_diagonal(dist, np.inf)
-        for idx in range(len(ids)):
-            nbr_idx = np.argpartition(dist[idx], kth=k - 1)[:k]
-            nbr_idx = nbr_idx[np.argsort(dist[idx, nbr_idx])]
-            for nbr in nbr_idx.tolist():
-                edge_rows.append((ids[idx], ids[nbr], float(dist[idx, nbr])))
+        n_id = getattr(graph, "n_id", None)
+        if not isinstance(n_id, torch.Tensor):
+            continue
+        n_id = n_id.detach().cpu().long().view(-1)
+        if n_id.numel() == 0:
+            continue
+        src = edge_index[0].detach().cpu().long().view(-1)
+        dst = edge_index[1].detach().cpu().long().view(-1)
+        if src.numel() != dst.numel():
+            continue
+
+        distance_values = _resolve_graph_edge_distances(graph, int(src.numel()))
+        for edge_pos, (local_src, local_dst) in enumerate(zip(src.tolist(), dst.tolist())):
+            if local_src < 0 or local_src >= int(n_id.numel()):
+                continue
+            if int(n_id[local_src].item()) != int(src_root):
+                continue
+            if local_dst < 0 or local_dst >= int(n_id.numel()):
+                continue
+            dst_root_global = int(n_id[local_dst].item())
+            dst_idx = root_to_instance.get((src_bag, dst_root_global))
+            if dst_idx is None:
+                continue
+            distance = (
+                float(distance_values[edge_pos].item())
+                if distance_values is not None and edge_pos < int(distance_values.numel())
+                else float("nan")
+            )
+            edge_rows.append((instance_ids[src_idx], instance_ids[dst_idx], distance))
 
     if undirected:
         symmetric_rows = [(dst, src, d) for src, dst, d in edge_rows]
@@ -287,3 +327,47 @@ def build_spatial_table(
         .reset_index(drop=True)
     )
     return edge_df
+
+
+def _resolve_instance_root_node_id(graph: object) -> int:
+    root_n_id = getattr(graph, "root_n_id", None)
+    if not isinstance(root_n_id, torch.Tensor) or root_n_id.numel() == 0:
+        raise ValueError(
+            "Each instance graph must include non-empty root_n_id tensor for spatial export."
+        )
+    root_local = int(root_n_id.detach().cpu().view(-1)[0].item())
+    root_is_global = getattr(graph, "root_n_id_is_global", None)
+    if isinstance(root_is_global, torch.Tensor) and root_is_global.numel() > 0:
+        if bool(root_is_global.detach().cpu().view(-1)[0].item()):
+            return root_local
+    elif isinstance(root_is_global, bool) and root_is_global:
+        return root_local
+    n_id = getattr(graph, "n_id", None)
+    if isinstance(n_id, torch.Tensor):
+        n_id = n_id.detach().cpu().long().view(-1)
+        if 0 <= root_local < int(n_id.numel()):
+            return int(n_id[root_local].item())
+    return root_local
+
+
+def _resolve_graph_edge_distances(graph: object, n_edges: int) -> Optional[torch.Tensor]:
+    edge_attr = getattr(graph, "edge_attr", None)
+    if not isinstance(edge_attr, torch.Tensor):
+        return None
+    edge_attr = edge_attr.detach().cpu()
+    if int(edge_attr.shape[0]) != int(n_edges):
+        return None
+    if edge_attr.ndim == 1:
+        return edge_attr.float().view(-1)
+    if edge_attr.ndim != 2 or int(edge_attr.shape[1]) == 0:
+        return None
+    dist_col = 0
+    names = getattr(graph, "edge_attr_names", None)
+    if isinstance(names, (list, tuple)):
+        for idx, name in enumerate(names):
+            if str(name) == "distance":
+                dist_col = int(idx)
+                break
+    if dist_col >= int(edge_attr.shape[1]):
+        return None
+    return edge_attr[:, dist_col].float().view(-1)

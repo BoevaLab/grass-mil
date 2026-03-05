@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -35,7 +36,7 @@ def test_build_instance_table_adds_uniform_attention_and_unique_ids() -> None:
     assert "comp_0" in frame.columns
 
 
-def test_build_spatial_table_constructs_knn_edges_within_bag() -> None:
+def test_build_spatial_table_uses_payload_connectivity_edges() -> None:
     payload = BatchPredictionPayload(
         bag_ids=["b0"],
         bag_logits=torch.tensor([[1.0]]),
@@ -48,11 +49,52 @@ def test_build_spatial_table_constructs_knn_edges_within_bag() -> None:
         instance_sample_ids=["s0", "s0", "s0"],
         instance_embeddings=torch.tensor([[0.1, 0.2], [0.3, 0.4], [0.5, 0.6]]),
         instance_composition=torch.tensor([[1.0, 0.0], [0.5, 0.5], [0.0, 1.0]]),
-        instance_centroids=torch.tensor([[0.0, 0.0], [1.0, 0.0], [3.0, 0.0]]),
+        instance_graphs=[
+            SimpleNamespace(
+                root_n_id=torch.tensor([0], dtype=torch.long),
+                n_id=torch.tensor([100, 101], dtype=torch.long),
+                edge_index=torch.tensor([[0], [1]], dtype=torch.long),
+                edge_attr=torch.tensor([[1.0]], dtype=torch.float32),
+                edge_attr_names=["distance"],
+            ),
+            SimpleNamespace(
+                root_n_id=torch.tensor([0], dtype=torch.long),
+                n_id=torch.tensor([101, 100, 102], dtype=torch.long),
+                edge_index=torch.tensor([[0, 0], [1, 2]], dtype=torch.long),
+                edge_attr=torch.tensor([[1.0], [2.0]], dtype=torch.float32),
+                edge_attr_names=["distance"],
+            ),
+            SimpleNamespace(
+                root_n_id=torch.tensor([0], dtype=torch.long),
+                n_id=torch.tensor([102, 101], dtype=torch.long),
+                edge_index=torch.tensor([[0], [1]], dtype=torch.long),
+                edge_attr=torch.tensor([[2.0]], dtype=torch.float32),
+                edge_attr_names=["distance"],
+            ),
+        ],
     )
     instance_frame = build_instance_table(payload, require_composition=True)
-    spatial = build_spatial_table(instance_frame, n_neighbors=1, undirected=True)
+    spatial = build_spatial_table(instance_frame, payload, undirected=True)
     assert set(spatial.columns) == {"source_id", "target_id", "distance"}
     # Undirected expansion guarantees reverse edges.
     assert ("p0", "p1") in set(zip(spatial["source_id"], spatial["target_id"]))
     assert ("p1", "p0") in set(zip(spatial["source_id"], spatial["target_id"]))
+
+
+def test_build_spatial_table_requires_payload_connectivity() -> None:
+    payload = BatchPredictionPayload(
+        bag_ids=["b0"],
+        bag_logits=torch.tensor([[1.0]]),
+        bag_targets=None,
+        bag_attention=None,
+        instance_logits=torch.tensor([[0.2], [0.5]]),
+        instance_patch_ids=["p0", "p1"],
+        instance_bag_ids=["b0", "b0"],
+        instance_region_ids=["r0", "r0"],
+        instance_sample_ids=["s0", "s0"],
+        instance_embeddings=torch.tensor([[0.1, 0.2], [0.3, 0.4]]),
+        instance_composition=torch.tensor([[1.0, 0.0], [0.5, 0.5]]),
+    )
+    instance_frame = build_instance_table(payload, require_composition=True)
+    with pytest.raises(ValueError, match="missing instance_graphs"):
+        build_spatial_table(instance_frame, payload)
