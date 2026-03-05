@@ -108,6 +108,35 @@ def _uniform_attention(groups: Sequence[str]) -> np.ndarray:
     return attention
 
 
+def _resolve_scores(
+    logits: torch.Tensor,
+    *,
+    score_mode: str,
+    score_logit_index: int,
+) -> List[float]:
+    if logits.ndim != 2 or int(logits.shape[1]) < 1:
+        raise ValueError("instance_logits must be a 2D tensor with >=1 column for score export.")
+    score_idx = int(score_logit_index)
+    if score_idx < 0 or score_idx >= int(logits.shape[1]):
+        raise ValueError(
+            "score_logit_index is out of bounds for instance_logits: "
+            f"index={score_idx}, width={int(logits.shape[1])}."
+        )
+
+    mode = str(score_mode).strip().lower()
+    if mode in {"sigmoid", "sigmoid_logit", "probability"}:
+        return torch.sigmoid(logits[:, score_idx]).tolist()
+    if mode in {"identity", "raw", "logit"}:
+        return logits[:, score_idx].tolist()
+    if mode in {"softmax", "class_probability"}:
+        probs = torch.softmax(logits, dim=1)
+        return probs[:, score_idx].tolist()
+    raise ValueError(
+        "Unsupported score_mode for interpretability export. "
+        "Expected one of: 'sigmoid', 'identity', 'softmax'."
+    )
+
+
 def resolve_composition_column_names(
     datamodule: Any,
     *,
@@ -147,6 +176,8 @@ def build_instance_table(
     id_column: str = "instance_id",
     bag_id_column: str = "bag_id",
     score_column: str = "score",
+    score_mode: str = "sigmoid",
+    score_logit_index: int = 0,
     attention_column: str = "attention",
 ) -> pd.DataFrame:
     logits = _tensor_to_2d_cpu(payload.instance_logits)
@@ -186,8 +217,11 @@ def build_instance_table(
         "patch_id": patch_ids,
         "region_id": region_ids,
         "sample_id": sample_ids,
-        # Notebook parity: interpretability score is sigmoid-transformed first logit.
-        score_column: torch.sigmoid(logits[:, 0]).tolist(),
+        score_column: _resolve_scores(
+            logits,
+            score_mode=score_mode,
+            score_logit_index=score_logit_index,
+        ),
     }
     for col in range(int(logits.shape[1])):
         data[f"logit_{col}"] = logits[:, col].tolist()

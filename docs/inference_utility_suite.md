@@ -121,7 +121,11 @@ Notes:
 
 - `attention` is normalized within each bag.
 - when attention logits are unavailable, `attention` defaults to uniform within bag.
-- `score` is exported as `sigmoid(logit_0)` for notebook parity.
+- `score` export is configurable via `interpretability.score_mode` and
+  `interpretability.score_logit_index`:
+  - `score_mode=sigmoid` (default): `sigmoid(logit[index])`
+  - `score_mode=identity`: raw `logit[index]` (for hazard/log-risk style outputs)
+  - `score_mode=softmax`: class probability `softmax(logits)[index]`
 - by default, missing composition metadata raises (`interpretability.require_composition=true`).
 
 ### `spatial_table.csv` (optional)

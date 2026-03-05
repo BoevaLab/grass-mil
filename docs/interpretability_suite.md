@@ -93,7 +93,12 @@ Common optional columns:
 
 `score` convention:
 
-- exported inference tables use `score = sigmoid(logit_0)` to match notebook-era interpretability calculations.
+- exported inference tables use configurable score projection from `instance_logits`:
+  - `score_mode=sigmoid` (default): `score = sigmoid(logit[score_logit_index])`
+  - `score_mode=identity`: `score = logit[score_logit_index]`
+  - `score_mode=softmax`: `score = softmax(logits)[score_logit_index]`
+- defaults (`sigmoid`, index `0`) keep notebook-era binary classification parity.
+- for survival/hazard-style interpretation, prefer `score_mode=identity`.
 
 Note: `cluster_profiles` and `attention_attribution` require `comp_*` columns.
 There is no fallback to one-hot `cell_type` composition.

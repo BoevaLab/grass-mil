@@ -418,6 +418,8 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             id_column=str((interpret_cfg or {}).get("id_column", "instance_id")),
             bag_id_column=str((interpret_cfg or {}).get("bag_id_column", "bag_id")),
             score_column=str((interpret_cfg or {}).get("score_column", "score")),
+            score_mode=str((interpret_cfg or {}).get("score_mode", "sigmoid")),
+            score_logit_index=int((interpret_cfg or {}).get("score_logit_index", 0)),
             attention_column=str((interpret_cfg or {}).get("attention_column", "attention")),
         )
         instance_path = output_dir / str(
