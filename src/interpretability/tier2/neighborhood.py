@@ -88,6 +88,36 @@ def _zscore_enrichment(
     return z.replace([np.inf, -np.inf], np.nan).fillna(0.0)
 
 
+def _resolve_enrichment_mode(mode: str) -> str:
+    key = str(mode).strip().lower()
+    if key in {"zscore", "z"}:
+        return "zscore"
+    if key in {"obs-exp", "obs_minus_exp", "difference", "diff"}:
+        return "obs-exp"
+    if key in {"log2fc", "log2_fold_change", "log2"}:
+        return "log2fc"
+    raise ValueError(
+        "Unsupported enrichment_mode. Expected one of: " "'zscore', 'obs-exp', 'log2fc'."
+    )
+
+
+def _compute_enrichment(
+    observed: pd.DataFrame,
+    expected: pd.DataFrame,
+    std: pd.DataFrame,
+    *,
+    enrichment_mode: str,
+) -> pd.DataFrame:
+    mode = _resolve_enrichment_mode(enrichment_mode)
+    if mode == "zscore":
+        return _zscore_enrichment(observed, expected, std)
+    if mode == "obs-exp":
+        return observed - expected
+    ratio = observed.clip(lower=1e-12) / expected.clip(lower=1e-12)
+    out = np.log2(ratio)
+    return out.replace([np.inf, -np.inf], np.nan).fillna(0.0)
+
+
 def _perm_counts(
     edge_stub: pd.DataFrame,
     node_ids: np.ndarray,
@@ -176,8 +206,9 @@ def run_neighborhood_enrichment(
     undirected: bool = False,
     categories: Optional[list[str]] = None,
     warn_analytical: bool = True,
+    enrichment_mode: str = "zscore",
 ) -> NeighborhoodEnrichmentResult:
-    """Compute unweighted neighborhood enrichment with Squidpy-style z-scores.
+    """Compute unweighted neighborhood enrichment with configurable enrichment score.
 
     Behavior:
     - Edge `weight` is ignored. Observed values are raw edge counts by label pair.
@@ -213,7 +244,12 @@ def run_neighborhood_enrichment(
     observed = _observed_matrix(edges, category_list)
     n_edges = int(edges.shape[0])
     expected, std = _analytical_expected_and_std(n_edges, node_labels, category_list)
-    enrichment = _zscore_enrichment(observed, expected, std)
+    enrichment = _compute_enrichment(
+        observed,
+        expected,
+        std,
+        enrichment_mode=enrichment_mode,
+    )
 
     pvalues: Optional[pd.DataFrame] = None
     if perms > 0:
@@ -232,7 +268,12 @@ def run_neighborhood_enrichment(
         perm_std = perm_counts.std(axis=0, ddof=0)
         expected = pd.DataFrame(perm_mean, index=category_list, columns=category_list)
         std = pd.DataFrame(perm_std, index=category_list, columns=category_list)
-        enrichment = _zscore_enrichment(observed, expected, std)
+        enrichment = _compute_enrichment(
+            observed,
+            expected,
+            std,
+            enrichment_mode=enrichment_mode,
+        )
         pvalues = _two_sided_empirical_pvalues(observed, perm_counts)
 
     return NeighborhoodEnrichmentResult(
@@ -255,10 +296,13 @@ def run_diff_neighborhood_enrichment(
     random_state: int = 42,
     undirected: bool = False,
     warn_analytical: bool = True,
+    enrichment_mode: str = "zscore",
 ) -> dict[str, NeighborhoodEnrichmentResult]:
     """Compute pairwise differential neighborhood enrichment between conditions.
 
-    Differential enrichment is `zscore(condition_a) - zscore(condition_b)`.
+    Differential enrichment is
+    `metric(condition_a) - metric(condition_b)` where metric is controlled by
+    `enrichment_mode`.
     Per-condition enrichments are computed in analytical mode for stability/speed; when
     `n_perms > 0`, differential p-values are estimated by permuting condition labels at the
     library/sample group level (`permutation_group_column`), consistent with the notebook.
@@ -288,6 +332,7 @@ def run_diff_neighborhood_enrichment(
             undirected=undirected,
             categories=category_list,
             warn_analytical=False,
+            enrichment_mode=enrichment_mode,
         )
 
     cond_keys = sorted(per_condition.keys())
@@ -330,6 +375,7 @@ def run_diff_neighborhood_enrichment(
                     undirected=undirected,
                     categories=category_list,
                     warn_analytical=False,
+                    enrichment_mode=enrichment_mode,
                 )
                 right_perm_res = run_neighborhood_enrichment(
                     perm_right,
@@ -341,6 +387,7 @@ def run_diff_neighborhood_enrichment(
                     undirected=undirected,
                     categories=category_list,
                     warn_analytical=False,
+                    enrichment_mode=enrichment_mode,
                 )
                 perm_scores[i] = (left_perm_res.enrichment - right_perm_res.enrichment).values
             obs = diff_enrichment.values

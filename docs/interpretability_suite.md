@@ -150,9 +150,13 @@ from src.interpretability import (
 
 - Uses unweighted edge counts (edge `weight` is ignored).
 - `undirected=true` mirrors each edge (`u->v` and `v->u`).
+- `enrichment_mode` controls the returned enrichment matrix:
+  - `zscore`: `(observed - expected) / std`
+  - `obs-exp`: `observed - expected`
+  - `log2fc`: `log2(observed / expected)` with epsilon clipping for stability
 - `n_perms > 0`:
   - expected and std are estimated from label permutations
-  - enrichment is z-score `(observed - expected) / std`
+  - enrichment uses the selected `enrichment_mode`
   - p-values are two-sided empirical permutation p-values
 - `n_perms = 0`:
   - uses analytical expected/std approximation
@@ -160,7 +164,8 @@ from src.interpretability import (
 
 `run_diff_neighborhood_enrichment(...)`:
 
-- Computes pairwise condition differences: `zscore(cond_a) - zscore(cond_b)`.
+- Computes pairwise condition differences:
+  `metric(cond_a) - metric(cond_b)` where `metric` is selected by `enrichment_mode`.
 - Per-condition baselines are analytical.
 - If `n_perms > 0`, only the differential p-values are permutation-based.
 - Differential permutations are performed at the library/sample level via `permutation_group_column` (defaults to `sample_id`), matching notebook behavior.

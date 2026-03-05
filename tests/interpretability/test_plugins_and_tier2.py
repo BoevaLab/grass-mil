@@ -200,6 +200,79 @@ def test_neighborhood_ignores_weight_semantics() -> None:
     assert out.observed.loc["A", "B"] == 2.0
 
 
+def test_neighborhood_enrichment_mode_is_tunable() -> None:
+    node_table = pd.DataFrame(
+        {
+            "instance_id": ["n0", "n1"],
+            "cluster_label": ["A", "B"],
+        }
+    )
+    spatial_table = pd.DataFrame(
+        {
+            "source_id": ["n0"],
+            "target_id": ["n1"],
+        }
+    )
+    zscore = run_neighborhood_enrichment(
+        node_table,
+        spatial_table,
+        label_column="cluster_label",
+        id_column="instance_id",
+        n_perms=0,
+        undirected=False,
+        warn_analytical=False,
+        enrichment_mode="zscore",
+    )
+    difference = run_neighborhood_enrichment(
+        node_table,
+        spatial_table,
+        label_column="cluster_label",
+        id_column="instance_id",
+        n_perms=0,
+        undirected=False,
+        warn_analytical=False,
+        enrichment_mode="obs-exp",
+    )
+    log2fc = run_neighborhood_enrichment(
+        node_table,
+        spatial_table,
+        label_column="cluster_label",
+        id_column="instance_id",
+        n_perms=0,
+        undirected=False,
+        warn_analytical=False,
+        enrichment_mode="log2fc",
+    )
+    assert zscore.enrichment.loc["A", "B"] == pytest.approx(1.7320508075688774)
+    assert difference.enrichment.loc["A", "B"] == pytest.approx(0.75)
+    assert log2fc.enrichment.loc["A", "B"] == pytest.approx(2.0)
+
+
+def test_neighborhood_enrichment_mode_rejects_unknown_values() -> None:
+    node_table = pd.DataFrame(
+        {
+            "instance_id": ["n0", "n1"],
+            "cluster_label": ["A", "B"],
+        }
+    )
+    spatial_table = pd.DataFrame(
+        {
+            "source_id": ["n0"],
+            "target_id": ["n1"],
+        }
+    )
+    with pytest.raises(ValueError, match="Unsupported enrichment_mode"):
+        run_neighborhood_enrichment(
+            node_table,
+            spatial_table,
+            label_column="cluster_label",
+            id_column="instance_id",
+            n_perms=0,
+            warn_analytical=False,
+            enrichment_mode="unknown_mode",
+        )
+
+
 def test_diff_neighborhood_returns_pairwise_differences_with_pvalues() -> None:
     node_table = pd.DataFrame(
         {
@@ -232,6 +305,46 @@ def test_diff_neighborhood_returns_pairwise_differences_with_pvalues() -> None:
     assert diff.enrichment.shape == (2, 2)
     assert diff.pvalues is not None
     assert diff.pvalues.shape == (2, 2)
+
+
+def test_diff_neighborhood_respects_enrichment_mode() -> None:
+    node_table = pd.DataFrame(
+        {
+            "instance_id": ["x0", "x1", "y0", "y1"],
+            "cluster_label": ["A", "B", "A", "B"],
+            "condition": ["X", "X", "Y", "Y"],
+        }
+    )
+    spatial_table = pd.DataFrame(
+        {
+            "source_id": ["x0", "y1"],
+            "target_id": ["x1", "y0"],
+        }
+    )
+    zscore_out = run_diff_neighborhood_enrichment(
+        node_table,
+        spatial_table,
+        label_column="cluster_label",
+        condition_column="condition",
+        id_column="instance_id",
+        n_perms=0,
+        undirected=False,
+        warn_analytical=False,
+        enrichment_mode="zscore",
+    )
+    diff_out = run_diff_neighborhood_enrichment(
+        node_table,
+        spatial_table,
+        label_column="cluster_label",
+        condition_column="condition",
+        id_column="instance_id",
+        n_perms=0,
+        undirected=False,
+        warn_analytical=False,
+        enrichment_mode="obs-exp",
+    )
+    assert zscore_out["X_Y"].enrichment.loc["A", "B"] == pytest.approx(2.309401076758503)
+    assert diff_out["X_Y"].enrichment.loc["A", "B"] == pytest.approx(1.0)
 
 
 def test_diff_neighborhood_requires_permutation_group_column_for_permutation_mode() -> None:
