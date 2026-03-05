@@ -142,6 +142,10 @@ Public exports:
 - `run_neighborhood_enrichment(...)`
 - `run_diff_neighborhood_enrichment(...)`
 - `compute_filtration_curves(...)`
+- `fit_cluster_transfer_from_report_bundle(...)`
+- `apply_cluster_transfer(...)`
+- `save_cluster_transfer_bundle(...)`
+- `load_cluster_transfer_bundle(...)`
 - `run_interpretability_pipeline(...)`
 - `render_interpretability_report(...)`
 
@@ -151,6 +155,8 @@ Import path:
 from src.interpretability import (
     run_reduction,
     run_clustering,
+    fit_cluster_transfer_from_report_bundle,
+    apply_cluster_transfer,
     run_interpretability_pipeline,
     render_interpretability_report,
 )
@@ -282,7 +288,67 @@ Workflow:
 - `artifacts/pipeline_summary.json`
 7. Return `ReportBundle`.
 
-## 8) Reporting System
+`ReportBundle` includes `cluster_feature_reduction`:
+
+- populated with clustering PCA result when `cluster_on_pca=true`
+- `None` when clustering runs on raw embeddings
+
+## 8) Cluster Transfer Workflow (Library API)
+
+Notebook-parity cluster transfer is available as a library workflow:
+
+1. Fit transfer bundle on a source interpretability run (cluster labels + clustering feature space).
+2. Persist bundle (`.joblib`) for deterministic reuse.
+3. Apply bundle to a query `instance_table` to obtain transferred labels.
+
+Design notes:
+
+- Uses kNN over the exact clustering feature space used in the source run.
+- If source clustering used PCA (`cluster_on_pca=true`), transfer uses that same PCA projector.
+- HDBSCAN noise label `-1` is retained as a transferable class.
+- This replaces fragile notebook assumptions like `clusterer._embedding_`.
+
+Example:
+
+```python
+from pathlib import Path
+
+import pandas as pd
+
+from src.interpretability.core.data import load_interpretability_dataset
+from src.interpretability.core.transfer import (
+    apply_cluster_transfer,
+    fit_cluster_transfer_from_report_bundle,
+    load_cluster_transfer_bundle,
+    save_cluster_transfer_bundle,
+)
+from src.interpretability.pipeline import run_interpretability_pipeline
+
+dataset = load_interpretability_dataset(instance_table_path=Path("/abs/source_instance_table.csv"))
+bundle = run_interpretability_pipeline(
+    dataset,
+    {
+        "reduction": {"enabled": True, "method": "pca", "params": {"n_components": 2}},
+        "clustering": {
+            "enabled": True,
+            "method": "hdbscan",
+            "cluster_on_pca": True,
+            "pca_components": 10,
+            "params": {"min_cluster_size": 100, "min_samples": 1},
+        },
+        "plugins": {"enabled": [], "params": {}},
+    },
+    artifacts_dir=Path("/abs/source_artifacts"),
+)
+transfer = fit_cluster_transfer_from_report_bundle(dataset, bundle, n_neighbors=15)
+save_cluster_transfer_bundle(transfer, "/abs/cluster_transfer_bundle.joblib")
+
+loaded = load_cluster_transfer_bundle("/abs/cluster_transfer_bundle.joblib")
+query_table = pd.read_csv("/abs/query_instance_table.csv")
+transferred = apply_cluster_transfer(loaded, query_table)
+```
+
+## 9) Reporting System
 
 `render_interpretability_report(...)` generates:
 
@@ -308,7 +374,7 @@ Engine:
 
 - Playwright Chromium print-to-PDF.
 
-## 9) CLI Usage
+## 10) CLI Usage
 
 Generate interpretability-ready tables directly from inference:
 
@@ -372,7 +438,7 @@ python src/interpretability/report_cli.py \
   report.html.enabled=true
 ```
 
-## 10) Config Groups
+## 11) Config Groups
 
 Main config:
 
@@ -413,7 +479,7 @@ Parameter contract:
 - `clustering.params.*` is forwarded directly to the underlying sklearn clustering estimator.
 - No method-specific parameter filtering is applied beyond common `n_clusters`/`random_state` handling.
 
-## 11) Environment Prerequisites
+## 12) Environment Prerequisites
 
 From project root:
 
@@ -438,7 +504,7 @@ If snapshot export fails, check:
 1. `kaleido` package installed.
 2. Plotly-kaleido compatibility in your environment.
 
-## 12) Typical Operational Flow
+## 13) Typical Operational Flow
 
 1. Generate/prepare normalized instance/spatial tables.
 2. Run report CLI with selected reduction/clustering presets.
@@ -446,7 +512,7 @@ If snapshot export fails, check:
 4. Share `report.pdf` for static dissemination.
 5. Consume `artifacts/*.csv` and JSON for downstream analysis scripts.
 
-## 13) Troubleshooting
+## 14) Troubleshooting
 
 ### "No embedding columns found"
 
@@ -489,7 +555,7 @@ Fix:
 
 - `pip install kaleido`
 
-## 14) Relationship To Other Docs
+## 15) Relationship To Other Docs
 
 - prediction/inference payload generation: `docs/inference_utility_suite.md`
 - training/eval workflows: `docs/workflows_train_infer.md`

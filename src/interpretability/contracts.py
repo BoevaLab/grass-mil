@@ -85,9 +85,21 @@ class PluginResult:
 
 
 @dataclass(frozen=True)
+class ClusterTransferBundle:
+    embedding_columns: List[str]
+    id_column: str
+    cluster_on_pca: bool
+    pca_model: Any = None
+    knn_model: Any = None
+    label_values: np.ndarray = field(default_factory=lambda: np.asarray([]))
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class ReportBundle:
     dataset: InterpretabilityDataset
     reduction: Optional[ReductionResult]
+    cluster_feature_reduction: Optional[ReductionResult]
     clustering: Optional[ClusteringResult]
     cluster_summary: Optional[ClusterSummary]
     plugin_results: Dict[str, PluginResult]

@@ -5,6 +5,12 @@ from src.interpretability.core.biomarkers import (
 )
 from src.interpretability.core.clustering import run_clustering
 from src.interpretability.core.reduction import run_reduction
+from src.interpretability.core.transfer import (
+    apply_cluster_transfer,
+    fit_cluster_transfer_from_report_bundle,
+    load_cluster_transfer_bundle,
+    save_cluster_transfer_bundle,
+)
 from src.interpretability.pipeline import run_interpretability_pipeline
 from src.interpretability.reporting.render import render_interpretability_report
 from src.interpretability.tier2.filtration import compute_filtration_curves
@@ -22,6 +28,10 @@ __all__ = [
     "run_neighborhood_enrichment",
     "run_diff_neighborhood_enrichment",
     "compute_filtration_curves",
+    "fit_cluster_transfer_from_report_bundle",
+    "apply_cluster_transfer",
+    "save_cluster_transfer_bundle",
+    "load_cluster_transfer_bundle",
     "run_interpretability_pipeline",
     "render_interpretability_report",
 ]

@@ -214,6 +214,7 @@ def run_interpretability_pipeline(
     return ReportBundle(
         dataset=dataset,
         reduction=reduction_result,
+        cluster_feature_reduction=combo_pca_result if cluster_on_pca else None,
         clustering=clustering_result,
         cluster_summary=cluster_summary,
         plugin_results=plugin_results,

@@ -260,10 +260,38 @@ def test_pipeline_clusters_on_raw_embeddings_when_cluster_on_pca_disabled(
         },
         "plugins": {"enabled": [], "params": {}},
     }
-    run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
+    bundle = run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
     assert "x" in captured
     assert captured["x"].shape == expected_raw.shape
     assert np.allclose(captured["x"], expected_raw)
+    assert bundle.cluster_feature_reduction is None
+
+
+def test_pipeline_exposes_cluster_feature_reduction_when_cluster_on_pca_enabled(
+    tmp_path: Path,
+) -> None:
+    instance_path, _ = _write_minimal_tables(tmp_path)
+    dataset = load_interpretability_dataset(
+        instance_table_path=instance_path,
+        id_column="instance_id",
+        bag_id_column="bag_id",
+        cell_type_column="cell_type",
+    )
+    cfg = {
+        "reduction": {"enabled": True, "method": "pca", "params": {"n_components": 2}},
+        "clustering": {
+            "enabled": True,
+            "method": "agglomerative",
+            "cluster_on_pca": True,
+            "pca_components": 1,
+            "params": {"n_clusters": 2, "linkage": "ward"},
+        },
+        "plugins": {"enabled": [], "params": {}},
+    }
+    bundle = run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
+    assert bundle.cluster_feature_reduction is not None
+    assert bundle.cluster_feature_reduction.method == "pca"
+    assert bundle.cluster_feature_reduction.embedding.shape[1] == 1
 
 
 def test_report_cli_smoke(
