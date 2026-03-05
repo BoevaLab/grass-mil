@@ -98,7 +98,7 @@ def run_interpretability_pipeline(
         int(cluster_pca_components_raw) if cluster_pca_components_raw is not None else None
     )
     effective_cluster_pca_components = cluster_pca_components
-    if cluster_on_pca:
+    if clustering_enabled and cluster_on_pca:
         if cluster_pca_components is None:
             raise ValueError("clustering.cluster_on_pca=true requires clustering.pca_components.")
         max_pca_components = int(min(emb_set.matrix.shape[0], emb_set.matrix.shape[1]))
