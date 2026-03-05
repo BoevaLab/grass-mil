@@ -616,6 +616,33 @@ def _normalize_shadow_batch(batch: Batch, source_data: Optional[Data] = None) ->
     return batch
 
 
+def _is_schema_name_key(key: str) -> bool:
+    return str(key).endswith("_names")
+
+
+def _select_sequence_value_for_subgraph(
+    *,
+    key: str,
+    value: list[Any] | tuple[Any, ...],
+    subgraph_index: int,
+    num_subgraphs: int,
+) -> list[Any] | tuple[Any, ...]:
+    if _is_schema_name_key(key):
+        if (
+            len(value) == num_subgraphs
+            and len(value) > subgraph_index
+            and isinstance(value[subgraph_index], (list, tuple))
+        ):
+            item = value[subgraph_index]
+            return list(item) if isinstance(value, list) else tuple(item)
+        return list(value) if isinstance(value, list) else tuple(value)
+
+    if len(value) == num_subgraphs and len(value) > subgraph_index:
+        item = value[subgraph_index]
+        return [item] if isinstance(value, list) else (item,)
+    return value
+
+
 _SAMPLER_REGISTRY: Dict[str, Callable[..., BaseSamplerStrategy]] = {
     "identity": IdentityBatchStrategy,
     "shadow_native": ShadowNativeStrategy,
@@ -793,15 +820,27 @@ class _ShaDowKHopSamplerWithTransform(torch.utils.data.DataLoader):
                     else:
                         setattr(sub_data, key, val)
                 elif isinstance(val, list):
-                    if len(val) == num_subgraphs and len(val) > i:
-                        setattr(sub_data, key, [val[i]])
-                    else:
-                        setattr(sub_data, key, val)
+                    setattr(
+                        sub_data,
+                        key,
+                        _select_sequence_value_for_subgraph(
+                            key=key,
+                            value=val,
+                            subgraph_index=i,
+                            num_subgraphs=num_subgraphs,
+                        ),
+                    )
                 elif isinstance(val, tuple):
-                    if len(val) == num_subgraphs and len(val) > i:
-                        setattr(sub_data, key, (val[i],))
-                    else:
-                        setattr(sub_data, key, val)
+                    setattr(
+                        sub_data,
+                        key,
+                        _select_sequence_value_for_subgraph(
+                            key=key,
+                            value=val,
+                            subgraph_index=i,
+                            num_subgraphs=num_subgraphs,
+                        ),
+                    )
                 else:
                     setattr(sub_data, key, val)
             processed.append(self.transform(sub_data))

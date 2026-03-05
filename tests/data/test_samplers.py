@@ -47,6 +47,47 @@ def _attach_cell_type_metadata(data, labels):
     return data
 
 
+def test_sequence_assignment_preserves_schema_name_lists_without_nesting():
+    from src.data.components.samplers import _select_sequence_value_for_subgraph
+
+    # Typical Batch collation of list metadata from 2 subgraphs.
+    value = [["edge_type", "distance"], ["edge_type", "distance"]]
+    out = _select_sequence_value_for_subgraph(
+        key="edge_attr_names",
+        value=value,
+        subgraph_index=0,
+        num_subgraphs=2,
+    )
+    assert out == ["edge_type", "distance"]
+
+
+def test_sequence_assignment_does_not_slice_flat_schema_name_lists_by_length():
+    from src.data.components.samplers import _select_sequence_value_for_subgraph
+
+    # Coincidental length match with num_subgraphs should not imply per-subgraph slicing.
+    value = ["edge_type", "distance"]
+    out = _select_sequence_value_for_subgraph(
+        key="edge_attr_names",
+        value=value,
+        subgraph_index=0,
+        num_subgraphs=2,
+    )
+    assert out == ["edge_type", "distance"]
+
+
+def test_sequence_assignment_still_slices_per_subgraph_non_schema_lists():
+    from src.data.components.samplers import _select_sequence_value_for_subgraph
+
+    value = ["sample_0", "sample_1"]
+    out = _select_sequence_value_for_subgraph(
+        key="sample_id",
+        value=value,
+        subgraph_index=1,
+        num_subgraphs=2,
+    )
+    assert out == ["sample_1"]
+
+
 def test_identity_sampler_strategy():
     pytest.importorskip("torch_geometric")
     from src.data.components.samplers import get_sampler_strategy
