@@ -75,6 +75,58 @@ def test_plugin_registry_instances_are_isolated() -> None:
     assert "dummy" not in right.list()
 
 
+def test_plugin_registry_rejects_duplicate_names_by_default() -> None:
+    class _PluginA:
+        name = "duplicate"
+
+        def required_inputs(self) -> list[str]:
+            return []
+
+        def run(self, dataset, context: PluginContext, **params):  # type: ignore[no-untyped-def]
+            raise NotImplementedError
+
+    class _PluginB:
+        name = "duplicate"
+
+        def required_inputs(self) -> list[str]:
+            return []
+
+        def run(self, dataset, context: PluginContext, **params):  # type: ignore[no-untyped-def]
+            raise NotImplementedError
+
+    registry = create_plugin_registry()
+    registry.register(_PluginA())
+    with pytest.raises(ValueError, match="already registered"):
+        registry.register(_PluginB())
+
+
+def test_plugin_registry_allows_explicit_replace_for_duplicate_names() -> None:
+    class _PluginA:
+        name = "duplicate"
+
+        def required_inputs(self) -> list[str]:
+            return []
+
+        def run(self, dataset, context: PluginContext, **params):  # type: ignore[no-untyped-def]
+            raise NotImplementedError
+
+    class _PluginB:
+        name = "duplicate"
+
+        def required_inputs(self) -> list[str]:
+            return []
+
+        def run(self, dataset, context: PluginContext, **params):  # type: ignore[no-untyped-def]
+            raise NotImplementedError
+
+    registry = create_plugin_registry()
+    first = _PluginA()
+    second = _PluginB()
+    registry.register(first)
+    registry.register(second, replace=True)
+    assert registry.get("duplicate") is second
+
+
 def test_tier2_neighborhood_and_filtration() -> None:
     ds = _sample_dataset()
     labels = np.array([0, 0, 1, 1, 1, 0])

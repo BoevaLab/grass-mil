@@ -12,15 +12,23 @@ class PluginRegistry:
             for plugin in plugins:
                 self.register(plugin)
 
-    def register(self, plugin: InterpretabilityPlugin) -> None:
+    def register(self, plugin: InterpretabilityPlugin, *, replace: bool = False) -> None:
         name = str(plugin.name).strip()
         if not name:
             raise ValueError("Plugin name must be non-empty.")
+        existing = self._plugins.get(name)
+        if existing is not None and not replace:
+            raise ValueError(
+                f"Plugin {name!r} is already registered. "
+                "Use replace=True to intentionally overwrite it."
+            )
         self._plugins[name] = plugin
 
-    def register_many(self, plugins: Iterable[InterpretabilityPlugin]) -> None:
+    def register_many(
+        self, plugins: Iterable[InterpretabilityPlugin], *, replace: bool = False
+    ) -> None:
         for plugin in plugins:
-            self.register(plugin)
+            self.register(plugin, replace=replace)
 
     def get(self, name: str) -> InterpretabilityPlugin:
         key = str(name).strip()

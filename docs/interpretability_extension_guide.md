@@ -122,6 +122,10 @@ def register_builtin_plugins(registry: PluginRegistry) -> None:
 The pipeline builds a fresh per-run registry (`create_builtin_registry()`), so plugin
 registration is instance-scoped and not process-global.
 
+Duplicate plugin names are rejected by default. If you intentionally want to
+replace a previously registered plugin implementation, use
+`registry.register(plugin, replace=True)`.
+
 ## 5) Add Config Wiring
 
 Update:
