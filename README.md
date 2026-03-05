@@ -67,6 +67,9 @@ Optional:
 - `region_id`
 - `polygons_path`
 
+For the full onboarding checklist and dataset schema details, see
+[`docs/dataset_preparation.md`](docs/dataset_preparation.md).
+
 ### 3) Run Default Supervised Pipeline
 
 ```bash
@@ -86,6 +89,7 @@ python src/eval.py \
 ## Documentation Index
 
 - Full tracked-file map: [`docs/repository_map.md`](docs/repository_map.md)
+- Dataset onboarding and preparation checklist: [`docs/dataset_preparation.md`](docs/dataset_preparation.md)
 - End-to-end workflows (new data, SSL pretrain->finetune, model adjustments, inference): [`docs/workflows_train_infer.md`](docs/workflows_train_infer.md)
 - Inference utility suite (prediction artifacts, metrics, embeddings): [`docs/inference_utility_suite.md`](docs/inference_utility_suite.md)
 - Interpretability suite architecture and usage: [`docs/interpretability_suite.md`](docs/interpretability_suite.md)
