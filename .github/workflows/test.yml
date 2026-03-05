@@ -43,6 +43,7 @@ jobs:
               "pytorch_lightning",
               "omegaconf",
               "hydra",
+              "plotly",
               "torch_geometric",
           ]
           for name in checks:

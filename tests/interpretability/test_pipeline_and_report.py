@@ -12,6 +12,9 @@ from src.interpretability.contracts import ClusteringResult
 from src.interpretability.core.data import load_interpretability_dataset
 from src.interpretability.pipeline import run_interpretability_pipeline
 from src.interpretability.report_cli import run_report
+
+pytest.importorskip("plotly.graph_objects")
+
 from src.interpretability.reporting.plotly_builders import bundle_figures
 from src.interpretability.reporting.render import render_interpretability_report
 

@@ -1,13 +1,26 @@
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import TYPE_CHECKING, Dict, List
 
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 
 from src.interpretability.contracts import ReportBundle
 from src.interpretability.tier2.tissue_graph import TissueGraphView, build_tissue_graph_figure
+
+if TYPE_CHECKING:
+    import plotly.graph_objects as go
+
+
+def _require_plotly():
+    try:
+        import plotly.graph_objects as go
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "plotly is required for interpretability plotting. "
+            "Install it with: pip install plotly"
+        ) from exc
+    return go
 
 
 def _safe_slug(value: object) -> str:
@@ -21,7 +34,8 @@ def _safe_slug(value: object) -> str:
     return slug or "unknown"
 
 
-def build_reduction_scatter(bundle: ReportBundle) -> go.Figure:
+def build_reduction_scatter(bundle: ReportBundle) -> "go.Figure":
+    go = _require_plotly()
     if bundle.reduction is None:
         raise ValueError("Reduction result is missing.")
     emb = np.asarray(bundle.reduction.embedding)
@@ -52,7 +66,8 @@ def build_reduction_scatter(bundle: ReportBundle) -> go.Figure:
     return fig
 
 
-def build_cluster_enrichment_heatmap(bundle: ReportBundle) -> go.Figure:
+def build_cluster_enrichment_heatmap(bundle: ReportBundle) -> "go.Figure":
+    go = _require_plotly()
     if bundle.cluster_summary is None:
         raise ValueError("Cluster summary is missing.")
     enr = bundle.cluster_summary.enrichment
@@ -76,7 +91,8 @@ def build_cluster_enrichment_heatmap(bundle: ReportBundle) -> go.Figure:
     return fig
 
 
-def build_plugin_figures(bundle: ReportBundle) -> Dict[str, go.Figure]:
+def build_plugin_figures(bundle: ReportBundle) -> Dict[str, "go.Figure"]:
+    go = _require_plotly()
     figures: Dict[str, go.Figure] = {}
     for name, result in bundle.plugin_results.items():
         if "curves" in result.payload and "thresholds" in result.payload:
@@ -161,7 +177,7 @@ def build_plugin_figures(bundle: ReportBundle) -> Dict[str, go.Figure]:
     return figures
 
 
-def bundle_figures(bundle: ReportBundle) -> List[tuple[str, go.Figure]]:
+def bundle_figures(bundle: ReportBundle) -> List[tuple[str, "go.Figure"]]:
     figures: List[tuple[str, go.Figure]] = []
     if bundle.reduction is not None:
         figures.append(("reduction_scatter", build_reduction_scatter(bundle)))

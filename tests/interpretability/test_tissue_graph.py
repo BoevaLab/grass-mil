@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import pandas as pd
-import plotly.graph_objects as go
 import pytest
 
 from src.interpretability.tier2.tissue_graph import (
     build_tissue_graph_figure,
     prepare_tissue_graph_view,
 )
+
+go = pytest.importorskip("plotly.graph_objects")
 
 
 def _sample_tables() -> tuple[pd.DataFrame, pd.DataFrame]:

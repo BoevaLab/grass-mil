@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
+
+if TYPE_CHECKING:
+    import plotly.graph_objects as go
 
 
 @dataclass(frozen=True)
@@ -116,7 +118,15 @@ def build_tissue_graph_figure(
     colorscale: str = "Viridis",
     reverse_y: bool = True,
     title_prefix: str = "Tissue Graph",
-) -> go.Figure:
+) -> "go.Figure":
+    try:
+        import plotly.graph_objects as go
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "plotly is required to build tissue-graph figures. "
+            "Install it with: pip install plotly"
+        ) from exc
+
     nodes = view.nodes.copy()
     metadata = dict(view.metadata)
 

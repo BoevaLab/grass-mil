@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Iterable
-
-import plotly.graph_objects as go
+from typing import Any, Iterable
 
 
 def export_plotly_snapshots(
-    figures: Iterable[tuple[str, go.Figure]],
+    figures: Iterable[tuple[str, Any]],
     output_dir: Path,
     *,
     width: int = 1600,

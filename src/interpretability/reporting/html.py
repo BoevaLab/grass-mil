@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import html
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import pandas as pd
-import plotly.graph_objects as go
 
 from src.interpretability.contracts import ReportSection
 
@@ -18,7 +17,7 @@ def _render_table(title: str, table: pd.DataFrame) -> str:
 
 def render_html_report(
     sections: List[ReportSection],
-    figures: Dict[str, go.Figure],
+    figures: Dict[str, Any],
     output_path: Path,
 ) -> Path:
     output_path = Path(output_path)
