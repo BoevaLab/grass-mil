@@ -31,8 +31,8 @@ Examples:
 
 Create a module:
 
-- `src/interpretability/core/<your_method>.py`
-- or `src/interpretability/tier2/<your_method>.py`
+- `src/grass_mil/interpretability/core/<your_method>.py`
+- or `src/grass_mil/interpretability/tier2/<your_method>.py`
 
 Guidelines:
 
@@ -64,7 +64,7 @@ def compute_spatial_entropy(
 
 Add plugin class in:
 
-- `src/interpretability/plugins/builtin.py`
+- `src/grass_mil/interpretability/plugins/builtin.py`
 - or a new plugin module imported at registration time.
 
 Plugin responsibilities:
@@ -153,7 +153,7 @@ params:
 
 If table-only output is insufficient:
 
-1. Add figure builder in `src/interpretability/reporting/plotly_builders.py`.
+1. Add figure builder in `src/grass_mil/interpretability/reporting/plotly_builders.py`.
 2. Detect plugin payload and create a figure.
 3. Ensure figure naming is stable for snapshot paths.
 

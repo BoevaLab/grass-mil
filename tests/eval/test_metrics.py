@@ -4,8 +4,8 @@ import torch
 from omegaconf import OmegaConf
 from sklearn.metrics import roc_auc_score
 
-from src.inference.metrics import compute_task_metrics
-from src.inference.schemas import BatchPredictionPayload
+from grass_mil.inference.metrics import compute_task_metrics
+from grass_mil.inference.schemas import BatchPredictionPayload
 
 
 def test_compute_binary_metrics() -> None:

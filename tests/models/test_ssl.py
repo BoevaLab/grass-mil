@@ -13,7 +13,7 @@ class _TinyEncoder(nn.Module):
 
 
 def test_bgrl_forward_and_update():
-    from src.models.components.ssl import BGRL, MLPPredictor
+    from grass_mil.models.components.ssl import BGRL, MLPPredictor
 
     encoder = _TinyEncoder()
     predictor = MLPPredictor(input_size=8, output_size=8, hidden_size=16)
@@ -33,8 +33,8 @@ def test_bgrl_forward_and_update():
 
 @pytest.mark.parametrize("enabled", [True, False])
 def test_ssl_optional_factory(enabled):
-    from src.models.components.backbones import EncoderConfig, GNNEncoder
-    from src.models.components.factory import build_ssl
+    from grass_mil.models.components.backbones import EncoderConfig, GNNEncoder
+    from grass_mil.models.components.factory import build_ssl
 
     encoder = GNNEncoder(EncoderConfig(input_dim=4, hidden_dim=8, out_dim=8, num_layers=1))
     ssl_model = build_ssl(
@@ -52,8 +52,8 @@ def test_ssl_optional_factory(enabled):
 
 
 def test_ssl_factory_requires_hidden_size():
-    from src.models.components.backbones import EncoderConfig, GNNEncoder
-    from src.models.components.factory import build_ssl
+    from grass_mil.models.components.backbones import EncoderConfig, GNNEncoder
+    from grass_mil.models.components.factory import build_ssl
 
     encoder = GNNEncoder(EncoderConfig(input_dim=4, hidden_dim=8, out_dim=8, num_layers=1))
     with pytest.raises(ValueError, match="ssl.predictor.hidden_size is required"):
@@ -61,8 +61,8 @@ def test_ssl_factory_requires_hidden_size():
 
 
 def test_ssl_factory_accepts_hydra_target_in_predictor_cfg():
-    from src.models.components.backbones import EncoderConfig, GNNEncoder
-    from src.models.components.factory import build_ssl
+    from grass_mil.models.components.backbones import EncoderConfig, GNNEncoder
+    from grass_mil.models.components.factory import build_ssl
 
     encoder = GNNEncoder(EncoderConfig(input_dim=4, hidden_dim=8, out_dim=8, num_layers=1))
     ssl_model = build_ssl(
@@ -71,7 +71,7 @@ def test_ssl_factory_accepts_hydra_target_in_predictor_cfg():
         {
             "method": "bgrl",
             "predictor": {
-                "_target_": "src.models.components.ssl.MLPPredictor",
+                "_target_": "grass_mil.models.components.ssl.MLPPredictor",
                 "hidden_size": 16,
             },
         },

@@ -4,12 +4,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.interpretability.core.biomarkers import (
+from grass_mil.interpretability.core.biomarkers import (
     cluster_attention_summary,
     cluster_biomarker_summary,
 )
-from src.interpretability.core.clustering import run_clustering
-from src.interpretability.core.reduction import run_reduction
+from grass_mil.interpretability.core.clustering import run_clustering
+from grass_mil.interpretability.core.reduction import run_reduction
 
 
 def test_reduction_and_clustering_deterministic() -> None:

@@ -7,7 +7,7 @@ import torch
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf, open_dict
 
-from src.train import (
+from grass_mil.train import (
     _filter_val_monitor_callbacks,
     _requires_zero_validation,
     train,

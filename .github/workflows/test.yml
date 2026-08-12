@@ -77,7 +77,40 @@ jobs:
         shell: bash -el {0}
         run: |
           pip install pytest-cov[toml]
-          pytest --cov src
+          pytest --cov grass_mil
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v3
+
+  packaging:
+    name: Install from source and run the CLI
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # A plain pip install, deliberately outside conda: this is the path a
+      # downstream user takes, and it is the one that silently rots when the
+      # package layout or the config tree moves.
+      - name: Install the package
+        run: pip install .
+
+      - name: Entrypoints resolve packaged configs from an unrelated directory
+        run: |
+          mkdir -p "${RUNNER_TEMP}/elsewhere"
+          cd "${RUNNER_TEMP}/elsewhere"
+          grass-mil-train --help
+          grass-mil-report --help
+          python -c "import grass_mil, grass_mil.configs; print(grass_mil.__file__)"
+
+      - name: Packaging contract tests
+        run: |
+          pip install pytest
+          pytest -v tests/test_packaging.py

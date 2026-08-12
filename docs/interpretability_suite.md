@@ -28,7 +28,7 @@ Key principles:
 
 Package roots:
 
-- `src/interpretability/`
+- `src/grass_mil/interpretability/`
 - `configs/interpretability/`
 - `tests/interpretability/`
 
@@ -37,34 +37,34 @@ Package roots:
 Core layers:
 
 1. Data contracts and loaders
-- `src/interpretability/contracts.py`
-- `src/interpretability/core/data.py`
+- `src/grass_mil/interpretability/contracts.py`
+- `src/grass_mil/interpretability/core/data.py`
 
 2. Core numerical analysis
-- `src/interpretability/core/reduction.py`
-- `src/interpretability/core/clustering.py`
-- `src/interpretability/core/biomarkers.py`
+- `src/grass_mil/interpretability/core/reduction.py`
+- `src/grass_mil/interpretability/core/clustering.py`
+- `src/grass_mil/interpretability/core/biomarkers.py`
 
 3. Tier-2 analyses
-- `src/interpretability/tier2/neighborhood.py`
-- `src/interpretability/tier2/filtration.py`
+- `src/grass_mil/interpretability/tier2/neighborhood.py`
+- `src/grass_mil/interpretability/tier2/filtration.py`
 
 4. Plugin orchestration
-- `src/interpretability/plugins/base.py`
-- `src/interpretability/plugins/registry.py`
-- `src/interpretability/plugins/builtin.py`
-- `src/interpretability/pipeline.py`
+- `src/grass_mil/interpretability/plugins/base.py`
+- `src/grass_mil/interpretability/plugins/registry.py`
+- `src/grass_mil/interpretability/plugins/builtin.py`
+- `src/grass_mil/interpretability/pipeline.py`
 
 5. Reporting
-- `src/interpretability/reporting/plotly_builders.py`
-- `src/interpretability/reporting/sections.py`
-- `src/interpretability/reporting/html.py`
-- `src/interpretability/reporting/snapshot.py`
-- `src/interpretability/reporting/pdf.py`
-- `src/interpretability/reporting/render.py`
+- `src/grass_mil/interpretability/reporting/plotly_builders.py`
+- `src/grass_mil/interpretability/reporting/sections.py`
+- `src/grass_mil/interpretability/reporting/html.py`
+- `src/grass_mil/interpretability/reporting/snapshot.py`
+- `src/grass_mil/interpretability/reporting/pdf.py`
+- `src/grass_mil/interpretability/reporting/render.py`
 
 6. CLI
-- `src/interpretability/report_cli.py`
+- `src/grass_mil/interpretability/report_cli.py`
 
 ## 3) Normalized Input Contracts
 
@@ -338,14 +338,14 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.interpretability.core.data import load_interpretability_dataset
-from src.interpretability.core.transfer import (
+from grass_mil.interpretability.core.data import load_interpretability_dataset
+from grass_mil.interpretability.core.transfer import (
     apply_cluster_transfer,
     fit_cluster_transfer_from_report_bundle,
     load_cluster_transfer_bundle,
     save_cluster_transfer_bundle,
 )
-from src.interpretability.pipeline import run_interpretability_pipeline
+from grass_mil.interpretability.pipeline import run_interpretability_pipeline
 
 dataset = load_interpretability_dataset(instance_table_path=Path("/abs/source_instance_table.csv"))
 bundle = run_interpretability_pipeline(
@@ -374,7 +374,7 @@ transferred = apply_cluster_transfer(loaded, query_table)
 Notebook helper example for single tissue graph:
 
 ```python
-from src.interpretability.tier2.tissue_graph import (
+from grass_mil.interpretability.tier2.tissue_graph import (
     build_tissue_graph_figure,
     prepare_tissue_graph_view,
 )
@@ -424,7 +424,7 @@ Engine:
 Generate interpretability-ready tables directly from inference:
 
 ```bash
-python src/inference/predict.py \
+grass-mil-predict \
   ckpt_path=/abs/path/model.ckpt \
   data=spatial_omics \
   interpretability.enabled=true \
@@ -438,14 +438,14 @@ This writes `instance_table.csv` (and optionally `spatial_table.csv`) into
 Entrypoint:
 
 ```bash
-python src/interpretability/report_cli.py \
+grass-mil-report \
   data.instance_table=/abs/path/instance_table.csv
 ```
 
 With spatial plugins:
 
 ```bash
-python src/interpretability/report_cli.py \
+grass-mil-report \
   data.instance_table=/abs/path/instance_table.csv \
   data.spatial_table=/abs/path/spatial_table.csv \
   plugins.enabled="[cluster_profiles,attention_attribution,neighborhood_enrichment,diff_neighborhood_enrichment,filtration_curves]"
@@ -454,7 +454,7 @@ python src/interpretability/report_cli.py \
 Render a single selected tissue graph colored by cluster labels:
 
 ```bash
-python src/interpretability/report_cli.py \
+grass-mil-report \
   data.instance_table=/abs/path/instance_table.csv \
   data.spatial_table=/abs/path/spatial_table.csv \
   plugins.enabled="[tissue_graph]" \
@@ -465,7 +465,7 @@ python src/interpretability/report_cli.py \
 Override algorithms:
 
 ```bash
-python src/interpretability/report_cli.py \
+grass-mil-report \
   data.instance_table=/abs/path/instance_table.csv \
   reduction=umap \
   clustering=dbscan \
@@ -476,7 +476,7 @@ python src/interpretability/report_cli.py \
 Tune HDBSCAN selection behavior explicitly:
 
 ```bash
-python src/interpretability/report_cli.py \
+grass-mil-report \
   data.instance_table=/abs/path/instance_table.csv \
   clustering=hdbscan \
   clustering.params.min_cluster_size=100 \
@@ -488,7 +488,7 @@ python src/interpretability/report_cli.py \
 Enable/disable report outputs:
 
 ```bash
-python src/interpretability/report_cli.py \
+grass-mil-report \
   data.instance_table=/abs/path/instance_table.csv \
   report.pdf.enabled=true \
   report.html.enabled=true

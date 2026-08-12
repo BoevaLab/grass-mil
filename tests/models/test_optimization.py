@@ -44,7 +44,7 @@ def _cosine_step_cfg():
 
 def test_supervised_mil_uses_explicit_backbone_and_attention_lrs():
     pytest.importorskip("torch_geometric")
-    from src.models.supervised_module import SupervisedModule
+    from grass_mil.models.supervised_module import SupervisedModule
 
     module = SupervisedModule(
         encoder=_encoder_cfg(),
@@ -86,7 +86,7 @@ def test_supervised_mil_uses_explicit_backbone_and_attention_lrs():
 
 def test_supervised_mean_warmup_is_opt_in():
     pytest.importorskip("torch_geometric")
-    from src.models.supervised_module import SupervisedModule
+    from grass_mil.models.supervised_module import SupervisedModule
 
     base_kwargs = dict(
         encoder=_encoder_cfg(),
@@ -130,7 +130,7 @@ def test_supervised_mean_warmup_is_opt_in():
 
 def test_bgrl_uses_warmup_then_base_scheduler():
     pytest.importorskip("torch_geometric")
-    from src.models.bgrl_module import BGRLModule
+    from grass_mil.models.bgrl_module import BGRLModule
 
     module = BGRLModule(
         encoder=_encoder_cfg(),

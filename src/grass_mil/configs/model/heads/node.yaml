@@ -1,0 +1,6 @@
+_target_: grass_mil.models.components.heads.NodePredictionHead
+input_dim: 128
+output_dim: 1
+hidden_dim: 128
+num_layers: 2
+dropout: 0.0

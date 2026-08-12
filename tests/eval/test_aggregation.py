@@ -3,8 +3,8 @@ from __future__ import annotations
 import torch
 import pytest
 
-from src.inference.aggregation import aggregate_group_logits
-from src.inference.schemas import BatchPredictionPayload
+from grass_mil.inference.aggregation import aggregate_group_logits
+from grass_mil.inference.schemas import BatchPredictionPayload
 
 
 def test_aggregate_group_logits_mean() -> None:

@@ -7,9 +7,13 @@ import pandas as pd
 import pytest
 from sklearn.neighbors import KNeighborsClassifier
 
-from src.interpretability.contracts import ClusteringResult, InterpretabilityDataset, ReportBundle
-from src.interpretability.core.reduction import run_reduction
-from src.interpretability.core.transfer import (
+from grass_mil.interpretability.contracts import (
+    ClusteringResult,
+    InterpretabilityDataset,
+    ReportBundle,
+)
+from grass_mil.interpretability.core.reduction import run_reduction
+from grass_mil.interpretability.core.transfer import (
     apply_cluster_transfer,
     fit_cluster_transfer_from_report_bundle,
     load_cluster_transfer_bundle,

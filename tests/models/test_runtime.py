@@ -3,7 +3,7 @@ import torch
 
 
 def test_remap_encoder_keys_auto_bgrl_or_identity():
-    from src.models.training.checkpoint_init import remap_encoder_keys
+    from grass_mil.models.training.checkpoint_init import remap_encoder_keys
 
     sd = {
         "online_encoder.layers.0.weight": torch.randn(4, 4),
@@ -17,13 +17,13 @@ def test_remap_encoder_keys_auto_bgrl_or_identity():
 
 
 def test_compute_supervised_loss_routes():
-    from src.models.components.losses import (
+    from grass_mil.models.components.losses import (
         CoxSGDLoss,
         WeightedBCEWithLogitsLoss,
         WeightedCrossEntropyLoss,
         WeightedMSELoss,
     )
-    from src.models.training.loss_utils import compute_supervised_loss
+    from grass_mil.models.training.loss_utils import compute_supervised_loss
 
     bce = compute_supervised_loss(
         loss_fn=WeightedBCEWithLogitsLoss(),
@@ -69,14 +69,14 @@ def test_compute_supervised_loss_routes():
 
 
 def test_validate_task_config_accepts_categorical():
-    from src.models.training.builders import validate_task_config
+    from grass_mil.models.training.builders import validate_task_config
 
     validate_task_config({"target_type": "categorical", "instance_sampling": "all"})
 
 
 def test_supervised_module_validation_logs_step_loss_not_acc():
     pytest.importorskip("lightning")
-    from src.models.supervised_module import SupervisedModule
+    from grass_mil.models.supervised_module import SupervisedModule
 
     module = SupervisedModule(
         encoder={},
@@ -107,7 +107,7 @@ def test_supervised_module_validation_logs_step_loss_not_acc():
 
 def test_supervised_module_logs_epoch_validation_accuracy_from_aggregated_regions():
     pytest.importorskip("lightning")
-    from src.models.supervised_module import SupervisedModule
+    from grass_mil.models.supervised_module import SupervisedModule
 
     module = SupervisedModule(
         encoder={},
@@ -143,7 +143,7 @@ def test_supervised_module_logs_epoch_validation_accuracy_from_aggregated_region
 
 def test_supervised_module_logs_epoch_validation_regression_metrics():
     pytest.importorskip("lightning")
-    from src.models.supervised_module import SupervisedModule
+    from grass_mil.models.supervised_module import SupervisedModule
 
     module = SupervisedModule(
         encoder={},
@@ -180,7 +180,7 @@ def test_supervised_module_logs_epoch_validation_regression_metrics():
 
 def test_supervised_module_logs_epoch_validation_survival_c_index():
     pytest.importorskip("lightning")
-    from src.models.supervised_module import SupervisedModule
+    from grass_mil.models.supervised_module import SupervisedModule
 
     module = SupervisedModule(
         encoder={},
@@ -216,8 +216,8 @@ def test_supervised_module_logs_epoch_validation_survival_c_index():
 
 def test_attention_bag_aggregation_shapes():
     import torch
-    from src.models.components.attention import AttnNetGatedProjected
-    from src.models.training.bagging import aggregate_bag_logits_attention
+    from grass_mil.models.components.attention import AttnNetGatedProjected
+    from grass_mil.models.training.bagging import aggregate_bag_logits_attention
 
     logits = torch.randn(5, 1)
     emb = torch.randn(5, 8)
@@ -238,7 +238,7 @@ def test_attention_bag_aggregation_shapes():
 
 
 def test_build_mil_aux_targets_attention_shaped():
-    from src.models.training.loss_utils import build_mil_aux_targets
+    from grass_mil.models.training.loss_utils import build_mil_aux_targets
 
     bag_targets = torch.tensor([[1.0], [0.0]])
     bag_indices = [[0, 1], [2, 3, 4]]
@@ -261,7 +261,7 @@ def test_build_mil_aux_targets_attention_shaped():
 
 
 def test_compute_aux_and_entropy_terms():
-    from src.models.training.loss_utils import (
+    from grass_mil.models.training.loss_utils import (
         compute_aux_node_loss,
         compute_entropy_regularization,
     )
@@ -287,7 +287,7 @@ def test_compute_aux_and_entropy_terms():
 def test_select_target_columns_handles_single_label_list():
     from types import SimpleNamespace
 
-    from src.models.training.bagging import select_target_columns
+    from grass_mil.models.training.bagging import select_target_columns
 
     graph_y = torch.tensor([[1.0]])
     batch = SimpleNamespace(graph_label_names=["label"])
@@ -299,7 +299,7 @@ def test_select_target_columns_handles_single_label_list():
 def test_supervised_predict_step_allows_missing_targets():
     pytest.importorskip("lightning")
     pytest.importorskip("torch_geometric")
-    from src.models.supervised_module import SupervisedModule
+    from grass_mil.models.supervised_module import SupervisedModule
 
     module = SupervisedModule(
         encoder={},
@@ -331,7 +331,7 @@ def test_supervised_predict_step_allows_missing_targets():
 def test_supervised_predict_step_can_disable_instance_payload():
     pytest.importorskip("lightning")
     pytest.importorskip("torch_geometric")
-    from src.models.supervised_module import SupervisedModule
+    from grass_mil.models.supervised_module import SupervisedModule
 
     module = SupervisedModule(
         encoder={},
@@ -394,7 +394,7 @@ def test_supervised_predict_step_can_disable_instance_payload():
 def test_supervised_predict_step_can_emit_embedding_payload():
     pytest.importorskip("lightning")
     pytest.importorskip("torch_geometric")
-    from src.models.supervised_module import SupervisedModule
+    from grass_mil.models.supervised_module import SupervisedModule
 
     module = SupervisedModule(
         encoder={},
@@ -454,7 +454,7 @@ def test_supervised_predict_step_can_emit_embedding_payload():
 def test_supervised_predict_step_omits_embedding_payload_by_default():
     pytest.importorskip("lightning")
     pytest.importorskip("torch_geometric")
-    from src.models.supervised_module import SupervisedModule
+    from grass_mil.models.supervised_module import SupervisedModule
 
     module = SupervisedModule(
         encoder={},
@@ -508,7 +508,7 @@ def test_supervised_predict_step_omits_embedding_payload_by_default():
 def test_extract_bag_ids_falls_back_per_item_when_primary_missing():
     from types import SimpleNamespace
 
-    from src.models.training.bagging import extract_bag_ids
+    from grass_mil.models.training.bagging import extract_bag_ids
 
     batch = SimpleNamespace(region_id=[None, "", "r2"], sample_id=["s0", "s1", "s2"])
     bag_ids = extract_bag_ids(batch, bag_key="region_id", bag_fallback_key="sample_id")
@@ -518,7 +518,7 @@ def test_extract_bag_ids_falls_back_per_item_when_primary_missing():
 def test_extract_bag_ids_namespaces_primary_by_fallback_for_uniqueness():
     from types import SimpleNamespace
 
-    from src.models.training.bagging import extract_bag_ids
+    from grass_mil.models.training.bagging import extract_bag_ids
 
     batch = SimpleNamespace(region_id=["r0", "r0"], sample_id=["s0", "s1"])
     bag_ids = extract_bag_ids(batch, bag_key="region_id", bag_fallback_key="sample_id")
@@ -528,7 +528,7 @@ def test_extract_bag_ids_namespaces_primary_by_fallback_for_uniqueness():
 def test_extract_bag_ids_patch_key_uses_sample_region_patch_hierarchy():
     from types import SimpleNamespace
 
-    from src.models.training.bagging import extract_bag_ids
+    from grass_mil.models.training.bagging import extract_bag_ids
 
     batch = SimpleNamespace(
         patch_id=["p0", "p1"],
@@ -542,7 +542,7 @@ def test_extract_bag_ids_patch_key_uses_sample_region_patch_hierarchy():
 def test_extract_bag_ids_patch_key_fallback_uses_sample_region_when_patch_missing():
     from types import SimpleNamespace
 
-    from src.models.training.bagging import extract_bag_ids
+    from grass_mil.models.training.bagging import extract_bag_ids
 
     batch = SimpleNamespace(
         patch_id=[None, ""],
@@ -558,7 +558,7 @@ def test_predict_group_metadata_uses_batch_patch_ids_for_instance_patch_ids():
     pytest.importorskip("torch_geometric")
     from types import SimpleNamespace
 
-    from src.models.supervised_module import SupervisedModule
+    from grass_mil.models.supervised_module import SupervisedModule
 
     module = SupervisedModule(
         encoder={},
@@ -585,7 +585,7 @@ def test_predict_group_metadata_uses_batch_patch_ids_for_instance_patch_ids():
 def test_gather_bag_targets_requires_consistent_labels_within_bag():
     from types import SimpleNamespace
 
-    from src.models.training.bagging import gather_bag_targets
+    from grass_mil.models.training.bagging import gather_bag_targets
 
     batch = SimpleNamespace(
         graph_y=torch.tensor([[0.0], [1.0], [1.0]], dtype=torch.float32),
@@ -600,7 +600,7 @@ def test_gather_bag_targets_requires_consistent_labels_within_bag():
 
 
 def test_attention_shaped_aux_targets_are_detached():
-    from src.models.training.loss_utils import build_mil_aux_targets
+    from grass_mil.models.training.loss_utils import build_mil_aux_targets
 
     bag_targets = torch.tensor([[1.0]], dtype=torch.float32)
     bag_attention = {"b0": torch.tensor([0.2, 0.8], requires_grad=True)}
@@ -618,7 +618,7 @@ def test_attention_shaped_aux_targets_are_detached():
 def test_region_buffer_flushes_in_hyperbatch_chunks():
     pytest.importorskip("lightning")
     pytest.importorskip("torch_geometric")
-    from src.models.supervised_module import SupervisedModule
+    from grass_mil.models.supervised_module import SupervisedModule
 
     module = SupervisedModule(
         encoder={},

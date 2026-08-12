@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import torch
 
-from src.inference.embeddings import embeddings_to_dataframe, node_embeddings_to_dataframe
-from src.inference.schemas import EmbeddingPayload
+from grass_mil.inference.embeddings import embeddings_to_dataframe, node_embeddings_to_dataframe
+from grass_mil.inference.schemas import EmbeddingPayload
 
 
 def test_embedding_payload_to_dataframes() -> None:

@@ -1,0 +1,16 @@
+_target_: grass_mil.models.components.backbones.EncoderConfig
+input_dim: 64
+hidden_dim: 128
+out_dim: 128
+num_layers: 3
+dropout: 0.1
+conv_type: gat
+norm: batchnorm
+jk: last
+act: relu
+pooling: mean
+set2set_steps: 3
+gat_heads: 4
+use_edge_attr: false
+edge_weight_index: 0
+edge_attr_dim: null

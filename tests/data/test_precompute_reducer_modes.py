@@ -3,11 +3,11 @@ import pytest
 
 pytest.importorskip("lightning")
 
-from src.data.components.feature_reducers import FeatureReducerConfig
-from src.data.components.graph_builders import GraphBuilderConfig
-from src.data.components.loaders import CsvConfig, H5adConfig, SceConfig
-from src.data.components.patching import TileConfig
-from src.data.components.precompute import (
+from grass_mil.data.components.feature_reducers import FeatureReducerConfig
+from grass_mil.data.components.graph_builders import GraphBuilderConfig
+from grass_mil.data.components.loaders import CsvConfig, H5adConfig, SceConfig
+from grass_mil.data.components.patching import TileConfig
+from grass_mil.data.components.precompute import (
     CategoricalFeatureConfig,
     GraphUnitSpec,
     ManifestConfig,
@@ -15,7 +15,7 @@ from src.data.components.precompute import (
     PreparedSample,
     SpatialOmicsPreprocessor,
 )
-from src.data.components.spatial_types import SpatialOmicsTable
+from grass_mil.data.components.spatial_types import SpatialOmicsTable
 
 
 def _make_preprocessor(fit_mode: str) -> SpatialOmicsPreprocessor:

@@ -4,19 +4,20 @@ import pytest
 import rootutils
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import OmegaConf, open_dict
-from src.train import train
+from grass_mil.train import train
+from tests.helpers.config_paths import CONFIGS_DIR
 
 
 def _load_model_cfg(name: str):
-    return OmegaConf.load(Path(f"configs/model/{name}.yaml"))
+    return OmegaConf.load(CONFIGS_DIR / "model" / f"{name}.yaml")
 
 
 def _load_task_cfg(name: str):
-    return OmegaConf.load(Path(f"configs/task/{name}.yaml")).task
+    return OmegaConf.load(CONFIGS_DIR / "task" / f"{name}.yaml").task
 
 
 def _make_pretrain_ckpt(path: Path) -> str:
-    from src.models.bgrl_module import BGRLModule
+    from grass_mil.models.bgrl_module import BGRLModule
 
     module = BGRLModule(
         encoder={
@@ -73,11 +74,11 @@ def test_training_regimes_fast_dev_run(
         )
         cfg_train.task = _load_task_cfg(task_name)
         cfg_train.model = _load_model_cfg(model_name)
-        cfg_train.optim = OmegaConf.load(Path("configs/optim/adamw.yaml"))
+        cfg_train.optim = OmegaConf.load(CONFIGS_DIR / "optim" / "adamw.yaml")
         scheduler_name = (
             "cosine_step.yaml" if task_name == "pretrain_bgrl" else "cosine_epoch.yaml"
         )
-        cfg_train.scheduler = OmegaConf.load(Path("configs/scheduler") / scheduler_name)
+        cfg_train.scheduler = OmegaConf.load(CONFIGS_DIR / "scheduler" / scheduler_name)
         cfg_train.model.encoder.input_dim = 8
         cfg_train.model.task = cfg_train.task
         cfg_train.model.optim = cfg_train.optim
@@ -123,7 +124,7 @@ def test_training_regimes_fast_dev_run(
 def test_runtime_shadow_path_with_real_datamodule(cfg_train):
     root = Path(rootutils.find_root(indicator=".project-root"))
     with open_dict(cfg_train):
-        cfg_train.data = OmegaConf.load(Path("configs/data/spatial_omics.yaml"))
+        cfg_train.data = OmegaConf.load(CONFIGS_DIR / "data" / "spatial_omics.yaml")
         cfg_train.data.raw_manifest_path = str(root / "data" / "dummy" / "manifest.csv")
         cfg_train.data.processed_dir = str(root / "data" / "dummy" / "processed")
         cfg_train.data.num_workers = 0
@@ -135,8 +136,8 @@ def test_runtime_shadow_path_with_real_datamodule(cfg_train):
 
         cfg_train.task = _load_task_cfg("pretrain_bgrl")
         cfg_train.model = _load_model_cfg("bgrl_module")
-        cfg_train.optim = OmegaConf.load(Path("configs/optim/adamw.yaml"))
-        cfg_train.scheduler = OmegaConf.load(Path("configs/scheduler/cosine_step.yaml"))
+        cfg_train.optim = OmegaConf.load(CONFIGS_DIR / "optim" / "adamw.yaml")
+        cfg_train.scheduler = OmegaConf.load(CONFIGS_DIR / "scheduler" / "cosine_step.yaml")
         cfg_train.model.task = cfg_train.task
         cfg_train.model.optim = cfg_train.optim
         cfg_train.model.scheduler = cfg_train.scheduler

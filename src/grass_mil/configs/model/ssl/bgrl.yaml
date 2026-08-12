@@ -1,0 +1,6 @@
+method: bgrl
+predictor:
+  _target_: grass_mil.models.components.ssl.MLPPredictor
+  input_size: 128
+  output_size: 128
+  hidden_size: 512

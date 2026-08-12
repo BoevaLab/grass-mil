@@ -63,7 +63,7 @@ def test_spatial_omics_datamodule_precompute(tmp_path: Path) -> None:
     graph_labels_path = raw_dir / "graph_labels.csv"
     graph_labels_path.write_text("region_id,outcome\nregion_1,1\n")
 
-    from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
+    from grass_mil.data.spatial_omics_datamodule import SpatialOmicsDataModule
 
     dm = SpatialOmicsDataModule(
         data_dir=str(data_dir),
@@ -197,7 +197,7 @@ def test_spatial_omics_datamodule_indices_no_molecular(tmp_path: Path) -> None:
         f"sample_1,{csv_path},csv,region_1,{polygon_path}\n"
     )
 
-    from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
+    from grass_mil.data.spatial_omics_datamodule import SpatialOmicsDataModule
 
     dm = SpatialOmicsDataModule(
         data_dir=str(data_dir),
@@ -284,7 +284,7 @@ def test_h5ad_obsm_spatial_coords(tmp_path: Path) -> None:
     p = tmp_path / "test.h5ad"
     adata.write_h5ad(p)
 
-    from src.data.components.loaders import H5adConfig, load_h5ad_table
+    from grass_mil.data.components.loaders import H5adConfig, load_h5ad_table
 
     table = load_h5ad_table(
         p,
@@ -332,7 +332,7 @@ def test_datamodule_requires_persisted_splits(tmp_path: Path) -> None:
         )
     )
 
-    from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
+    from grass_mil.data.spatial_omics_datamodule import SpatialOmicsDataModule
 
     dm = SpatialOmicsDataModule(
         data_dir=str(tmp_path),
@@ -417,7 +417,7 @@ def test_datamodule_uses_persisted_splits(tmp_path: Path) -> None:
         )
     )
 
-    from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
+    from grass_mil.data.spatial_omics_datamodule import SpatialOmicsDataModule
 
     dm = SpatialOmicsDataModule(
         data_dir=str(tmp_path),
@@ -474,7 +474,7 @@ def test_datamodule_uses_persisted_splits(tmp_path: Path) -> None:
 def _make_unit(
     table_idx: int, sample_id: str, region_id: str, patch_idx: int, split: str = "train"
 ):
-    from src.data.components.precompute import GraphUnitSpec
+    from grass_mil.data.components.precompute import GraphUnitSpec
 
     return GraphUnitSpec(
         table_idx=table_idx,
@@ -488,7 +488,7 @@ def _make_unit(
 
 
 def test_region_split_groups_all_patches_per_region() -> None:
-    from src.data.components.precompute import _assign_split_labels
+    from grass_mil.data.components.precompute import _assign_split_labels
 
     units = [
         _make_unit(0, "s0", "r0", 0),
@@ -508,7 +508,7 @@ def test_region_split_groups_all_patches_per_region() -> None:
 
 
 def test_loocv_holdout_region_is_test_only_with_region_validation() -> None:
-    from src.data.components.precompute import LoocvConfig, _assign_split_labels
+    from grass_mil.data.components.precompute import LoocvConfig, _assign_split_labels
 
     units = [
         _make_unit(0, "s0", "r0", 0),
@@ -540,7 +540,7 @@ def test_loocv_holdout_region_is_test_only_with_region_validation() -> None:
 
 
 def test_loocv_patch_validation_uses_only_train_fold_items() -> None:
-    from src.data.components.precompute import LoocvConfig, _assign_split_labels
+    from grass_mil.data.components.precompute import LoocvConfig, _assign_split_labels
 
     units = [
         _make_unit(0, "s0", "r0", 0),
@@ -574,7 +574,7 @@ def test_loocv_patch_validation_uses_only_train_fold_items() -> None:
 def test_loocv_heldout_validation_allows_zero_val_ratio() -> None:
     pytest.importorskip("lightning")
     pytest.importorskip("torch_geometric")
-    from src.data.components.precompute import LoocvConfig, _assign_split_labels
+    from grass_mil.data.components.precompute import LoocvConfig, _assign_split_labels
 
     units = [
         _make_unit(0, "s0", "r0", 0),
@@ -604,7 +604,7 @@ def test_loocv_heldout_validation_allows_zero_val_ratio() -> None:
 def test_loocv_heldout_validation_forces_one_for_nonzero_ratio() -> None:
     pytest.importorskip("lightning")
     pytest.importorskip("torch_geometric")
-    from src.data.components.precompute import LoocvConfig, _assign_split_labels
+    from grass_mil.data.components.precompute import LoocvConfig, _assign_split_labels
 
     units = [
         _make_unit(0, "s0", "r0", 0),
@@ -631,7 +631,7 @@ def test_loocv_heldout_validation_forces_one_for_nonzero_ratio() -> None:
 def test_loocv_patch_validation_allows_zero_val_ratio() -> None:
     pytest.importorskip("lightning")
     pytest.importorskip("torch_geometric")
-    from src.data.components.precompute import LoocvConfig, _assign_split_labels
+    from grass_mil.data.components.precompute import LoocvConfig, _assign_split_labels
 
     units = [
         _make_unit(0, "s0", "r0", 0),
@@ -661,7 +661,7 @@ def test_loocv_patch_validation_allows_zero_val_ratio() -> None:
 def test_loocv_patch_validation_forces_one_for_nonzero_ratio() -> None:
     pytest.importorskip("lightning")
     pytest.importorskip("torch_geometric")
-    from src.data.components.precompute import LoocvConfig, _assign_split_labels
+    from grass_mil.data.components.precompute import LoocvConfig, _assign_split_labels
 
     units = [
         _make_unit(0, "s0", "r0", 0),
@@ -686,7 +686,7 @@ def test_loocv_patch_validation_forces_one_for_nonzero_ratio() -> None:
 
 
 def test_loocv_supports_sample_fold_unit() -> None:
-    from src.data.components.precompute import LoocvConfig, _assign_split_labels
+    from grass_mil.data.components.precompute import LoocvConfig, _assign_split_labels
 
     units = [
         _make_unit(0, "s0", "r0", 0),
@@ -718,7 +718,7 @@ def _build_loocv_train_only_dm(tmp_path: Path, processed_dir: Path):
     manifest_path = tmp_path / "manifest.csv"
     manifest_path.write_text("sample_id,input_path,input_type\ns0,/tmp/fake.csv,csv\n")
 
-    from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
+    from grass_mil.data.spatial_omics_datamodule import SpatialOmicsDataModule
 
     return SpatialOmicsDataModule(
         data_dir=str(tmp_path),
@@ -844,7 +844,7 @@ def _build_minimal_datamodule(
     force_precompute: bool,
     edge_features: list[str],
 ):
-    from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
+    from grass_mil.data.spatial_omics_datamodule import SpatialOmicsDataModule
 
     return SpatialOmicsDataModule(
         data_dir=str(data_dir),

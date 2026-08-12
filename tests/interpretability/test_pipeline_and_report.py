@@ -8,15 +8,15 @@ import pytest
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, open_dict
 
-from src.interpretability.contracts import ClusteringResult
-from src.interpretability.core.data import load_interpretability_dataset
-from src.interpretability.pipeline import run_interpretability_pipeline
-from src.interpretability.report_cli import run_report
+from grass_mil.interpretability.contracts import ClusteringResult
+from grass_mil.interpretability.core.data import load_interpretability_dataset
+from grass_mil.interpretability.pipeline import run_interpretability_pipeline
+from grass_mil.interpretability.report_cli import run_report
 
 pytest.importorskip("plotly.graph_objects")
 
-from src.interpretability.reporting.plotly_builders import bundle_figures
-from src.interpretability.reporting.render import render_interpretability_report
+from grass_mil.interpretability.reporting.plotly_builders import bundle_figures
+from grass_mil.interpretability.reporting.render import render_interpretability_report
 
 
 def _write_minimal_tables(tmp_path: Path) -> tuple[Path, Path]:
@@ -80,11 +80,11 @@ def test_pipeline_and_report_render(monkeypatch, tmp_path: Path) -> None:
     assert len(figs) >= 2
 
     monkeypatch.setattr(
-        "src.interpretability.reporting.render.render_pdf_via_playwright",
+        "grass_mil.interpretability.reporting.render.render_pdf_via_playwright",
         lambda html_path, pdf_path: pdf_path,  # type: ignore[lambda-assign]
     )
     monkeypatch.setattr(
-        "src.interpretability.reporting.render.export_plotly_snapshots",
+        "grass_mil.interpretability.reporting.render.export_plotly_snapshots",
         lambda figures, output_dir, scale=2.0: {},  # type: ignore[lambda-assign]
     )
     out = render_interpretability_report(
@@ -126,7 +126,7 @@ def test_report_render_tolerates_snapshot_export_failure_when_pdf_disabled(
         raise RuntimeError("kaleido unavailable")
 
     monkeypatch.setattr(
-        "src.interpretability.reporting.render.export_plotly_snapshots",
+        "grass_mil.interpretability.reporting.render.export_plotly_snapshots",
         _raise_snapshot_error,
     )
     out = render_interpretability_report(
@@ -177,7 +177,7 @@ def test_pipeline_and_report_render_with_diff_neighborhood_plugin(
     assert "diff_neighborhood_enrichment_X_Y" in figs
 
     monkeypatch.setattr(
-        "src.interpretability.reporting.render.export_plotly_snapshots",
+        "grass_mil.interpretability.reporting.render.export_plotly_snapshots",
         lambda figures, output_dir, scale=2.0: {},  # type: ignore[lambda-assign]
     )
     out = render_interpretability_report(
@@ -222,7 +222,7 @@ def test_pipeline_and_report_render_with_tissue_graph_plugin(monkeypatch, tmp_pa
     assert "tissue_graph_sample_id_sx" in figs
 
     monkeypatch.setattr(
-        "src.interpretability.reporting.render.export_plotly_snapshots",
+        "grass_mil.interpretability.reporting.render.export_plotly_snapshots",
         lambda figures, output_dir, scale=2.0: {},  # type: ignore[lambda-assign]
     )
     out = render_interpretability_report(
@@ -299,7 +299,9 @@ def test_pipeline_clusters_on_raw_embeddings_when_cluster_on_pca_disabled(
             fitted_object=None,
         )
 
-    monkeypatch.setattr("src.interpretability.pipeline.run_clustering", _capture_run_clustering)
+    monkeypatch.setattr(
+        "grass_mil.interpretability.pipeline.run_clustering", _capture_run_clustering
+    )
     cfg = {
         "reduction": {"enabled": True, "method": "pca", "params": {"n_components": 1}},
         "clustering": {
@@ -351,11 +353,11 @@ def test_report_cli_smoke(
 ) -> None:
     instance_path, spatial_path = _write_minimal_tables(tmp_path)
     monkeypatch.setattr(
-        "src.interpretability.reporting.render.render_pdf_via_playwright",
+        "grass_mil.interpretability.reporting.render.render_pdf_via_playwright",
         lambda html_path, pdf_path: pdf_path,  # type: ignore[lambda-assign]
     )
     monkeypatch.setattr(
-        "src.interpretability.reporting.render.export_plotly_snapshots",
+        "grass_mil.interpretability.reporting.render.export_plotly_snapshots",
         lambda figures, output_dir, scale=2.0: {},  # type: ignore[lambda-assign]
     )
     with open_dict(cfg_interpret):
@@ -383,7 +385,7 @@ def test_report_cli_smoke(
 
 
 def test_pdf_renderer_raises_when_unavailable(monkeypatch, tmp_path: Path) -> None:
-    from src.interpretability.reporting.pdf import render_pdf_via_playwright
+    from grass_mil.interpretability.reporting.pdf import render_pdf_via_playwright
 
     real_import = __import__
 
@@ -401,7 +403,7 @@ def test_pdf_renderer_raises_when_unavailable(monkeypatch, tmp_path: Path) -> No
 
 
 def test_resolve_color_values_handles_numeric_and_categorical_columns() -> None:
-    from src.interpretability.reporting.plotly_builders import _resolve_color_values
+    from grass_mil.interpretability.reporting.plotly_builders import _resolve_color_values
 
     numeric_values, numeric_ticks = _resolve_color_values(pd.Series([0.5, 1.5, 2.5]))
     np.testing.assert_allclose(numeric_values, [0.5, 1.5, 2.5])

@@ -1,7 +1,7 @@
 # Inference Utility Suite
 
 This document describes the artifact-oriented inference workflow implemented in
-`src/inference/predict.py`.
+`src/grass_mil/inference/predict.py`.
 
 ## Purpose
 
@@ -16,7 +16,7 @@ The suite extends checkpoint evaluation with:
 ## CLI Entry Point
 
 ```bash
-python src/inference/predict.py \
+grass-mil-predict \
   ckpt_path=/absolute/path/to/checkpoint.ckpt \
   task=finetune_mil \
   model=supervised_module \
@@ -38,7 +38,7 @@ Sub-config groups:
 
 `aggregation.subsample_fraction` supports efficient inference-time subsampling:
 
-- when `< 1.0`, `src/inference/predict.py` injects predict-time sampler runtime
+- when `< 1.0`, `src/grass_mil/inference/predict.py` injects predict-time sampler runtime
   subsampling so fewer roots/subgraphs are forwarded through the model
 - sampling is uniform at random over candidate roots, with optional reproducibility
   via `aggregation.subsample_seed`
@@ -154,8 +154,8 @@ Unit contract:
 High-value legacy utilities from `working_version` are mapped as:
 
 - prediction collectors (`collect_predict_for_all_nodes*`) -> unified
-  `collect_inference_payload` in `src/inference/collectors.py`
-- full-graph aggregation (`full_graph_*`) -> `src/inference/aggregation.py`
-- evaluation metrics (`graph_*_evaluate_fn`) -> `src/inference/metrics.py`
-- embedding collectors -> `src/inference/collectors.py` + `src/inference/embeddings.py`
-- interpretability table bridge -> `src/inference/interpretability_export.py`
+  `collect_inference_payload` in `src/grass_mil/inference/collectors.py`
+- full-graph aggregation (`full_graph_*`) -> `src/grass_mil/inference/aggregation.py`
+- evaluation metrics (`graph_*_evaluate_fn`) -> `src/grass_mil/inference/metrics.py`
+- embedding collectors -> `src/grass_mil/inference/collectors.py` + `src/grass_mil/inference/embeddings.py`
+- interpretability table bridge -> `src/grass_mil/inference/interpretability_export.py`

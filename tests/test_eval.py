@@ -5,8 +5,8 @@ import pytest
 import torch
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, open_dict
-from src.eval import evaluate
-from src.train import train
+from grass_mil.eval import evaluate
+from grass_mil.train import train
 
 
 @pytest.mark.slow

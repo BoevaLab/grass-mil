@@ -1,15 +1,15 @@
 from pathlib import Path
 
 import pytest
-from hydra import compose, initialize
+from hydra import compose, initialize_config_module
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig, open_dict
 
-from src.loocv import _fold_slug, _resolve_selected_folds, _to_float_metrics, run_loocv
+from grass_mil.loocv import _fold_slug, _resolve_selected_folds, _to_float_metrics, run_loocv
 
 
 def _make_loocv_cfg(tmp_path: Path) -> DictConfig:
-    with initialize(version_base="1.3", config_path="../configs"):
+    with initialize_config_module(version_base="1.3", config_module="grass_mil.configs"):
         cfg = compose(config_name="loocv.yaml")
     with open_dict(cfg):
         cfg.paths.root_dir = str(tmp_path)
@@ -96,8 +96,8 @@ def test_loocv_runs_with_safe_isolation_flags(tmp_path: Path, monkeypatch) -> No
     def _fake_train(_cfg):
         return {"val/loss": 1.23}, {}
 
-    monkeypatch.setattr("src.loocv._discover_viable_fold_ids", lambda _cfg: ["s0", "s1"])
-    monkeypatch.setattr("src.loocv.train", _fake_train)
+    monkeypatch.setattr("grass_mil.loocv._discover_viable_fold_ids", lambda _cfg: ["s0", "s1"])
+    monkeypatch.setattr("grass_mil.loocv.train", _fake_train)
     summary = run_loocv(cfg)
     summary_path = Path(cfg.paths.output_dir) / "summary.json"
 
@@ -128,10 +128,10 @@ def test_loocv_uses_unique_dirs_for_colliding_sanitized_fold_ids(
         return {"val/loss": 0.5}, {}
 
     monkeypatch.setattr(
-        "src.loocv._discover_viable_fold_ids",
+        "grass_mil.loocv._discover_viable_fold_ids",
         lambda _cfg: ["sampleA::region1", "sampleA//region1"],
     )
-    monkeypatch.setattr("src.loocv.train", _fake_train)
+    monkeypatch.setattr("grass_mil.loocv.train", _fake_train)
     summary = run_loocv(cfg)
 
     assert len(summary["folds"]) == 2
@@ -148,9 +148,9 @@ def test_loocv_fails_fast_when_selected_fold_not_viable(tmp_path: Path, monkeypa
         cfg.loocv.per_fold_processed_dir = True
         cfg.loocv.force_precompute_per_fold = False
 
-    monkeypatch.setattr("src.loocv._discover_viable_fold_ids", lambda _cfg: ["s0"])
+    monkeypatch.setattr("grass_mil.loocv._discover_viable_fold_ids", lambda _cfg: ["s0"])
     monkeypatch.setattr(
-        "src.loocv.train",
+        "grass_mil.loocv.train",
         lambda _cfg: pytest.fail("train() should not be called when preflight fails"),
     )
 
@@ -176,8 +176,10 @@ def test_loocv_preflight_passes_and_runs_all_selected_folds(tmp_path: Path, monk
         call_count["n"] += 1
         return {"val/loss": 0.75}, {}
 
-    monkeypatch.setattr("src.loocv._discover_viable_fold_ids", lambda _cfg: ["s0", "s1", "s2"])
-    monkeypatch.setattr("src.loocv.train", _fake_train)
+    monkeypatch.setattr(
+        "grass_mil.loocv._discover_viable_fold_ids", lambda _cfg: ["s0", "s1", "s2"]
+    )
+    monkeypatch.setattr("grass_mil.loocv.train", _fake_train)
 
     summary = run_loocv(cfg)
 

@@ -6,8 +6,8 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from src.inference.interpretability_export import build_instance_table, build_spatial_table
-from src.inference.schemas import BatchPredictionPayload
+from grass_mil.inference.interpretability_export import build_instance_table, build_spatial_table
+from grass_mil.inference.schemas import BatchPredictionPayload
 
 
 def test_build_instance_table_adds_uniform_attention_and_unique_ids() -> None:

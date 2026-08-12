@@ -6,12 +6,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.interpretability.contracts import ClusterSummary, InterpretabilityDataset
-from src.interpretability.plugins.base import PluginContext
-from src.interpretability.plugins.builtin import create_builtin_registry
-from src.interpretability.plugins.registry import create_plugin_registry
-from src.interpretability.tier2.filtration import compute_filtration_curves
-from src.interpretability.tier2.neighborhood import (
+from grass_mil.interpretability.contracts import ClusterSummary, InterpretabilityDataset
+from grass_mil.interpretability.plugins.base import PluginContext
+from grass_mil.interpretability.plugins.builtin import create_builtin_registry
+from grass_mil.interpretability.plugins.registry import create_plugin_registry
+from grass_mil.interpretability.tier2.filtration import compute_filtration_curves
+from grass_mil.interpretability.tier2.neighborhood import (
     NeighborhoodEnrichmentResult,
     run_diff_neighborhood_enrichment,
     run_neighborhood_enrichment,
@@ -158,7 +158,7 @@ def test_cluster_profiles_reuses_context_cluster_summary(monkeypatch) -> None:
         raise AssertionError("cluster_biomarker_summary should not be recomputed")
 
     monkeypatch.setattr(
-        "src.interpretability.plugins.builtin.cluster_biomarker_summary", _should_not_run
+        "grass_mil.interpretability.plugins.builtin.cluster_biomarker_summary", _should_not_run
     )
     plugin = registry.get("cluster_profiles")
     out = plugin.run(
@@ -191,7 +191,7 @@ def test_attention_attribution_reuses_context_base_summary(monkeypatch) -> None:
     )
 
     monkeypatch.setattr(
-        "src.interpretability.plugins.builtin.cluster_attention_summary",
+        "grass_mil.interpretability.plugins.builtin.cluster_attention_summary",
         lambda *args, **kwargs: attn_summary,  # type: ignore[no-untyped-def]
     )
     plugin = registry.get("attention_attribution")
@@ -550,7 +550,7 @@ def test_diff_neighborhood_pvalues_are_centered_on_permutation_mean(monkeypatch)
         )
 
     monkeypatch.setattr(
-        "src.interpretability.tier2.neighborhood.run_neighborhood_enrichment",
+        "grass_mil.interpretability.tier2.neighborhood.run_neighborhood_enrichment",
         _fake_run_neighborhood,
     )
     node_table = pd.DataFrame(

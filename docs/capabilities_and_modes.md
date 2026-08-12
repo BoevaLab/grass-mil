@@ -115,8 +115,8 @@ Debug presets:
 Common usage:
 
 ```bash
-python src/train.py debug=fdr
-python src/train.py debug=limit
+grass-mil-train debug=fdr
+grass-mil-train debug=limit
 ```
 
 ## 9) Checkpoint Initialization And Resume Modes
@@ -131,9 +131,9 @@ python src/train.py debug=limit
 
 ## 10) Inference Modes
 
-1. CLI evaluation mode: `src/eval.py` with required `ckpt_path`.
+1. CLI evaluation mode: `src/grass_mil/eval.py` with required `ckpt_path`.
 2. Advanced prediction mode: `Trainer.predict(...)` using `SupervisedModule.predict_step`.
-3. Inference utility CLI mode: `src/inference/predict.py` for prediction export, metrics, and embeddings.
+3. Inference utility CLI mode: `src/grass_mil/inference/predict.py` for prediction export, metrics, and embeddings.
 
 Predict outputs include:
 
@@ -153,7 +153,7 @@ Metrics available through the inference utility suite:
 - regression: R2, MAE, RMSE
 - survival: concordance index (c-index)
 
-Validation (during `src/train.py`) includes:
+Validation (during `src/grass_mil/train.py`) includes:
 
 - step-level `val/loss` logging
 - epoch-end region-level aggregation of buffered validation outputs

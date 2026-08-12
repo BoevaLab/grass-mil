@@ -1,4 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "grass-mil"
+version = "0.1.0"
+description = "Geometric deep learning framework for spatial omics data"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+dependencies = [
+  "torch>=2.0",
+  "lightning>=2.0",
+  "torchmetrics>=0.11.4",
+  "torch-geometric>=2.5",
+  "hydra-core==1.3.2",
+  "hydra-colorlog==1.2.0",
+  "omegaconf",
+  "numpy",
+  "pandas",
+  "scipy>=1.11",
+  "scikit-learn",
+  "rich",
+  "rootutils",
+]
+
+[project.optional-dependencies]
+interpretability = ["plotly", "umap-learn", "jinja2"]
+report = ["kaleido", "playwright"]
+spatial-stats = ["squidpy", "scanpy", "anndata"]
+io = ["anndata", "shapely"]
+
+[project.scripts]
+grass-mil-train = "grass_mil.train:main"
+grass-mil-eval = "grass_mil.eval:main"
+grass-mil-loocv = "grass_mil.loocv:main"
+grass-mil-predict = "grass_mil.inference.predict:main"
+grass-mil-report = "grass_mil.interpretability.report_cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/grass_mil"]
+
 [tool.pytest.ini_options]
+pythonpath = ["src", "."]
 addopts = [
   "--color=yes",
   "--durations=0",

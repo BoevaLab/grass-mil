@@ -160,71 +160,73 @@ SSL preset:
 - `configs/trainer/ddp.yaml`: Multi-GPU DDP preset.
 - `configs/trainer/ddp_sim.yaml`: CPU `ddp_spawn` simulation preset.
 
-## Source Code (`src/`)
+## Source Code (`src/grass_mil/`)
 
 ### Package Marker
 
-- `src/__init__.py`: Source package marker.
+- `src/grass_mil/__init__.py`: Package marker.
+- `src/grass_mil/_paths.py`: Best-effort `PROJECT_ROOT` resolution for the CLI entrypoints.
+- `src/grass_mil/configs/`: Hydra config tree, shipped as package data.
 
 ### Entrypoints
 
-- `src/train.py`: Hydra training entrypoint (train + optional test).
-- `src/eval.py`: Hydra evaluation entrypoint (test from checkpoint).
-- `src/loocv.py`: Hydra LOOCV entrypoint with fold discovery, per-fold runs, and aggregate summaries.
+- `src/grass_mil/train.py`: Hydra training entrypoint (train + optional test).
+- `src/grass_mil/eval.py`: Hydra evaluation entrypoint (test from checkpoint).
+- `src/grass_mil/loocv.py`: Hydra LOOCV entrypoint with fold discovery, per-fold runs, and aggregate summaries.
 
-### Data Pipeline (`src/data/`)
+### Data Pipeline (`src/grass_mil/data/`)
 
-- `src/data/__init__.py`: Data package marker.
-- `src/data/spatial_omics_datamodule.py`: LightningDataModule wiring preprocessing, splitting, and loaders.
+- `src/grass_mil/data/__init__.py`: Data package marker.
+- `src/grass_mil/data/spatial_omics_datamodule.py`: LightningDataModule wiring preprocessing, splitting, and loaders.
 
 Data components:
 
-- `src/data/components/__init__.py`: Data components package marker.
-- `src/data/components/spatial_types.py`: Canonical in-memory spatial table dataclass.
-- `src/data/components/loaders.py`: CSV/H5AD/SCE loaders and polygon parsing utilities.
-- `src/data/components/patching.py`: Polygon/tile patch extraction helpers.
-- `src/data/components/graph_builders.py`: Graph builder interfaces and Delaunay implementation.
-- `src/data/components/feature_reducers.py`: Feature reducer interfaces and implementations (`identity`, `pca`).
-- `src/data/components/precompute.py`: Precompute orchestration into persisted PyG graph artifacts/indexes.
-- `src/data/components/datasets.py`: Dataset wrappers for persisted graph indices and transform application.
-- `src/data/components/samplers.py`: Batch/sampler strategies (identity, shadow_native, shadow_custom).
-- `src/data/components/transforms.py`: Transform instantiation and composition-vector transform.
+- `src/grass_mil/data/components/__init__.py`: Data components package marker.
+- `src/grass_mil/data/components/spatial_types.py`: Canonical in-memory spatial table dataclass.
+- `src/grass_mil/data/components/loaders.py`: CSV/H5AD/SCE loaders and polygon parsing utilities.
+- `src/grass_mil/data/components/patching.py`: Polygon/tile patch extraction helpers.
+- `src/grass_mil/data/components/graph_builders.py`: Graph builder interfaces and Delaunay implementation.
+- `src/grass_mil/data/components/feature_reducers.py`: Feature reducer interfaces and implementations (`identity`, `pca`).
+- `src/grass_mil/data/components/precompute.py`: Precompute orchestration into persisted PyG graph artifacts/indexes.
+- `src/grass_mil/data/components/datasets.py`: Dataset wrappers for persisted graph indices and transform application.
+- `src/grass_mil/data/components/samplers.py`: Batch/sampler strategies (identity, shadow_native, shadow_custom).
+- `src/grass_mil/data/components/transforms.py`: Transform instantiation and composition-vector transform.
 
-### Model Runtime (`src/models/`)
+### Model Runtime (`src/grass_mil/models/`)
 
-- `src/models/__init__.py`: Model package marker.
-- `src/models/supervised_module.py`: Unified supervised training module (mean + MIL behavior).
-- `src/models/bgrl_module.py`: BGRL self-supervised training module.
+- `src/grass_mil/models/__init__.py`: Model package marker.
+- `src/grass_mil/models/supervised_module.py`: Unified supervised training module (mean + MIL behavior).
+- `src/grass_mil/models/bgrl_module.py`: BGRL self-supervised training module.
 
 Model components:
 
-- `src/models/components/__init__.py`: Component package exports.
-- `src/models/components/backbones.py`: GNN encoder definitions and configuration contract.
-- `src/models/components/pooling.py`: Graph pooling wrapper.
-- `src/models/components/attention.py`: MIL attention blocks.
-- `src/models/components/heads.py`: Graph/node MLP heads.
-- `src/models/components/losses.py`: Weighted loss implementations (classification/regression/survival).
-- `src/models/components/ssl.py`: BGRL and predictor modules.
-- `src/models/components/factory.py`: Factory builders for encoder/attention/loss/head/SSL modules.
+- `src/grass_mil/models/components/__init__.py`: Component package exports.
+- `src/grass_mil/models/components/backbones.py`: GNN encoder definitions and configuration contract.
+- `src/grass_mil/models/components/pooling.py`: Graph pooling wrapper.
+- `src/grass_mil/models/components/attention.py`: MIL attention blocks.
+- `src/grass_mil/models/components/heads.py`: Graph/node MLP heads.
+- `src/grass_mil/models/components/losses.py`: Weighted loss implementations (classification/regression/survival).
+- `src/grass_mil/models/components/ssl.py`: BGRL and predictor modules.
+- `src/grass_mil/models/components/factory.py`: Factory builders for encoder/attention/loss/head/SSL modules.
 
 Training helpers:
 
-- `src/models/training/__init__.py`: Training-helper exports.
-- `src/models/training/builders.py`: Component build/inference helpers and task validation.
-- `src/models/training/bagging.py`: Bag ID resolution, instance grouping/sampling, bag aggregation logic.
-- `src/models/training/loss_utils.py`: Loss routing and MIL auxiliary/regularization utilities.
-- `src/models/training/optimization.py`: Optimizer/scheduler instantiation and warmup wrapper.
-- `src/models/training/checkpoint_init.py`: Checkpoint loading and encoder-key remapping.
-- `src/models/training/ssl_runtime.py`: SSL augmentations and momentum schedule helpers.
+- `src/grass_mil/models/training/__init__.py`: Training-helper exports.
+- `src/grass_mil/models/training/builders.py`: Component build/inference helpers and task validation.
+- `src/grass_mil/models/training/bagging.py`: Bag ID resolution, instance grouping/sampling, bag aggregation logic.
+- `src/grass_mil/models/training/loss_utils.py`: Loss routing and MIL auxiliary/regularization utilities.
+- `src/grass_mil/models/training/optimization.py`: Optimizer/scheduler instantiation and warmup wrapper.
+- `src/grass_mil/models/training/checkpoint_init.py`: Checkpoint loading and encoder-key remapping.
+- `src/grass_mil/models/training/ssl_runtime.py`: SSL augmentations and momentum schedule helpers.
 
-### Utilities (`src/utils/`)
+### Utilities (`src/grass_mil/utils/`)
 
-- `src/utils/__init__.py`: Utility export surface.
-- `src/utils/pylogger.py`: Rank-aware logger adapter.
-- `src/utils/instantiators.py`: Hydra callback/logger instantiation helpers.
-- `src/utils/logging_utils.py`: Hyperparameter logging packaging for logger backends.
-- `src/utils/rich_utils.py`: Rich config-tree and tag prompting utilities.
-- `src/utils/utils.py`: Misc execution helpers (`extras`, `task_wrapper`, metric extraction).
+- `src/grass_mil/utils/__init__.py`: Utility export surface.
+- `src/grass_mil/utils/pylogger.py`: Rank-aware logger adapter.
+- `src/grass_mil/utils/instantiators.py`: Hydra callback/logger instantiation helpers.
+- `src/grass_mil/utils/logging_utils.py`: Hyperparameter logging packaging for logger backends.
+- `src/grass_mil/utils/rich_utils.py`: Rich config-tree and tag prompting utilities.
+- `src/grass_mil/utils/utils.py`: Misc execution helpers (`extras`, `task_wrapper`, metric extraction).
 
 ## Tests (`tests/`)
 

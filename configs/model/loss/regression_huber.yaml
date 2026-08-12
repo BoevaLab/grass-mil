@@ -1,2 +1,0 @@
-_target_: src.models.components.losses.WeightedHuberLoss
-delta: 1.0

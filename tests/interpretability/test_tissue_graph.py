@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from src.interpretability.tier2.tissue_graph import (
+from grass_mil.interpretability.tier2.tissue_graph import (
     build_tissue_graph_figure,
     prepare_tissue_graph_view,
 )

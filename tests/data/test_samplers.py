@@ -48,7 +48,7 @@ def _attach_cell_type_metadata(data, labels):
 
 
 def test_sequence_assignment_preserves_schema_name_lists_without_nesting():
-    from src.data.components.samplers import _select_sequence_value_for_subgraph
+    from grass_mil.data.components.samplers import _select_sequence_value_for_subgraph
 
     # Typical Batch collation of list metadata from 2 subgraphs.
     value = [["edge_type", "distance"], ["edge_type", "distance"]]
@@ -62,7 +62,7 @@ def test_sequence_assignment_preserves_schema_name_lists_without_nesting():
 
 
 def test_sequence_assignment_does_not_slice_flat_schema_name_lists_by_length():
-    from src.data.components.samplers import _select_sequence_value_for_subgraph
+    from grass_mil.data.components.samplers import _select_sequence_value_for_subgraph
 
     # Coincidental length match with num_subgraphs should not imply per-subgraph slicing.
     value = ["edge_type", "distance"]
@@ -76,7 +76,7 @@ def test_sequence_assignment_does_not_slice_flat_schema_name_lists_by_length():
 
 
 def test_sequence_assignment_still_slices_per_subgraph_non_schema_lists():
-    from src.data.components.samplers import _select_sequence_value_for_subgraph
+    from grass_mil.data.components.samplers import _select_sequence_value_for_subgraph
 
     value = ["sample_0", "sample_1"]
     out = _select_sequence_value_for_subgraph(
@@ -90,7 +90,7 @@ def test_sequence_assignment_still_slices_per_subgraph_non_schema_lists():
 
 def test_identity_sampler_strategy():
     pytest.importorskip("torch_geometric")
-    from src.data.components.samplers import get_sampler_strategy
+    from grass_mil.data.components.samplers import get_sampler_strategy
 
     dataset = _toy_dataset()
     strategy = get_sampler_strategy({"name": "identity", "kwargs": {}})
@@ -113,7 +113,7 @@ def test_shadow_native_requires_no_post_transform():
     except Exception:
         pytest.skip("torch_sparse is not available")
 
-    from src.data.components.samplers import get_sampler_strategy
+    from grass_mil.data.components.samplers import get_sampler_strategy
 
     data = _toy_dataset(n_graphs=1)[0]
     strategy = get_sampler_strategy({"name": "shadow_native", "kwargs": {}})
@@ -134,7 +134,7 @@ def test_shadow_custom_unit_loader():
     except Exception:
         pytest.skip("torch_sparse is not available")
 
-    from src.data.components.samplers import get_sampler_strategy
+    from grass_mil.data.components.samplers import get_sampler_strategy
 
     data = _toy_dataset(n_graphs=1)[0]
     strategy = get_sampler_strategy({"name": "shadow_custom", "kwargs": {}})
@@ -152,8 +152,8 @@ def test_shadow_custom_unit_loader():
 
 def test_shadow_custom_without_torch_sparse_rejects_transform(monkeypatch):
     pytest.importorskip("torch_geometric")
-    from src.data.components import samplers as samplers_mod
-    from src.data.components.samplers import ShadowCustomStrategy
+    from grass_mil.data.components import samplers as samplers_mod
+    from grass_mil.data.components.samplers import ShadowCustomStrategy
 
     data = _toy_dataset(n_graphs=1)[0]
     monkeypatch.setattr(samplers_mod, "WITH_TORCH_SPARSE", False)
@@ -170,7 +170,7 @@ def test_shadow_custom_without_torch_sparse_rejects_transform(monkeypatch):
 
 def test_shadow_custom_runtime_dataset_loader_uses_unit_loader(monkeypatch):
     pytest.importorskip("torch_geometric")
-    from src.data.components.samplers import get_sampler_strategy
+    from grass_mil.data.components.samplers import get_sampler_strategy
 
     dataset = _toy_dataset_with_graph_attrs(n_graphs=2)
     strategy = get_sampler_strategy(
@@ -212,7 +212,7 @@ def test_shadow_runtime_normalizes_graph_level_metadata(monkeypatch):
     pytest.importorskip("torch_geometric")
     from torch_geometric.data import Batch
 
-    from src.data.components.samplers import get_sampler_strategy
+    from grass_mil.data.components.samplers import get_sampler_strategy
 
     dataset = _toy_dataset_with_graph_attrs(n_graphs=1)
     strategy = get_sampler_strategy(
@@ -251,7 +251,7 @@ def test_shadow_runtime_normalizes_graph_level_metadata(monkeypatch):
 
 def test_runtime_loader_len_matches_yielded_batches(monkeypatch):
     pytest.importorskip("torch_geometric")
-    from src.data.components.samplers import get_sampler_strategy
+    from grass_mil.data.components.samplers import get_sampler_strategy
 
     dataset = _toy_dataset_with_graph_attrs(n_graphs=2, n_nodes=6)
     strategy = get_sampler_strategy(
@@ -291,7 +291,7 @@ def test_runtime_loader_len_matches_yielded_batches(monkeypatch):
 
 
 def test_runtime_shadow_config_proportional_defaults():
-    from src.data.components.samplers import RuntimeShadowConfig
+    from grass_mil.data.components.samplers import RuntimeShadowConfig
 
     cfg = RuntimeShadowConfig.from_dict({})
     assert cfg.proportional_root_sampling is True
@@ -302,7 +302,7 @@ def test_runtime_shadow_config_proportional_defaults():
 
 def test_shadow_runtime_passes_weighted_node_idx(monkeypatch):
     pytest.importorskip("torch_geometric")
-    from src.data.components.samplers import get_sampler_strategy
+    from grass_mil.data.components.samplers import get_sampler_strategy
 
     unit = _toy_dataset_with_graph_attrs(n_graphs=1, n_nodes=6)[0]
     unit = _attach_cell_type_metadata(unit, [0, 0, 0, 0, 1, 1])
@@ -346,7 +346,7 @@ def test_shadow_runtime_passes_weighted_node_idx(monkeypatch):
 
 def test_shadow_runtime_falls_back_to_none_when_property_missing(monkeypatch):
     pytest.importorskip("torch_geometric")
-    from src.data.components.samplers import get_sampler_strategy
+    from grass_mil.data.components.samplers import get_sampler_strategy
 
     unit = _toy_dataset_with_graph_attrs(n_graphs=1, n_nodes=6)[0]
     dataset = [unit]
@@ -393,7 +393,7 @@ def test_shadow_runtime_falls_back_to_none_when_property_missing(monkeypatch):
 
 def test_shadow_runtime_can_disable_proportional_sampling(monkeypatch):
     pytest.importorskip("torch_geometric")
-    from src.data.components.samplers import get_sampler_strategy
+    from grass_mil.data.components.samplers import get_sampler_strategy
 
     unit = _toy_dataset_with_graph_attrs(n_graphs=1, n_nodes=6)[0]
     unit = _attach_cell_type_metadata(unit, [0, 0, 0, 0, 1, 1])
@@ -436,14 +436,14 @@ def test_shadow_runtime_can_disable_proportional_sampling(monkeypatch):
 
 @pytest.mark.parametrize("weight_mode", ["inverse", "sqrt_inverse", "proportional"])
 def test_shadow_runtime_accepts_weight_modes(weight_mode):
-    from src.data.components.samplers import RuntimeShadowConfig
+    from grass_mil.data.components.samplers import RuntimeShadowConfig
 
     cfg = RuntimeShadowConfig.from_dict({"weight_mode": weight_mode})
     assert cfg.weight_mode == weight_mode
 
 
 def test_runtime_shadow_config_accepts_subsample_defaults():
-    from src.data.components.samplers import RuntimeShadowConfig
+    from grass_mil.data.components.samplers import RuntimeShadowConfig
 
     cfg = RuntimeShadowConfig.from_dict({})
     assert cfg.subsample_fraction == 1.0
@@ -452,7 +452,7 @@ def test_runtime_shadow_config_accepts_subsample_defaults():
 
 @pytest.mark.parametrize("fraction", [0.0, -0.1, 1.1])
 def test_runtime_shadow_config_rejects_invalid_subsample_fraction(fraction):
-    from src.data.components.samplers import RuntimeShadowConfig
+    from grass_mil.data.components.samplers import RuntimeShadowConfig
 
     with pytest.raises(ValueError, match="subsample_fraction"):
         RuntimeShadowConfig.from_dict({"subsample_fraction": fraction})
@@ -460,7 +460,7 @@ def test_runtime_shadow_config_rejects_invalid_subsample_fraction(fraction):
 
 def test_shadow_runtime_subsamples_roots_with_seed(monkeypatch):
     pytest.importorskip("torch_geometric")
-    from src.data.components.samplers import get_sampler_strategy
+    from grass_mil.data.components.samplers import get_sampler_strategy
 
     unit = _toy_dataset_with_graph_attrs(n_graphs=1, n_nodes=10)[0]
     dataset = [unit]
@@ -509,7 +509,7 @@ def test_shadow_runtime_subsamples_roots_with_seed(monkeypatch):
 
 def test_shadow_runtime_subsampled_len_matches_yielded_batches(monkeypatch):
     pytest.importorskip("torch_geometric")
-    from src.data.components.samplers import get_sampler_strategy
+    from grass_mil.data.components.samplers import get_sampler_strategy
 
     dataset = _toy_dataset_with_graph_attrs(n_graphs=2, n_nodes=10)
     strategy = get_sampler_strategy(

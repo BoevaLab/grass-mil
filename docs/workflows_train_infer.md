@@ -82,7 +82,7 @@ Key options (`data.csv.*`):
 Example override:
 
 ```bash
-python src/train.py \
+grass-mil-train \
   data.csv.coord_columns="[x_um,y_um]" \
   data.csv.cell_id_column=cell_id \
   data.csv.categorical_label_columns="[cell_type]"
@@ -168,7 +168,7 @@ Important split persistence behavior:
 Typical fresh-data command:
 
 ```bash
-python src/train.py \
+grass-mil-train \
   task=finetune_mean \
   model=supervised_module \
   data=spatial_omics \
@@ -179,13 +179,13 @@ python src/train.py \
 
 ### Step 4b: Run LOOCV (Single Fold Or Full Loop)
 
-`src/loocv.py` reuses the train stack and runs fold-specific jobs by overriding
+`src/grass_mil/loocv.py` reuses the train stack and runs fold-specific jobs by overriding
 `data.split.loocv.*`.
 
 Single-fold by explicit fold id:
 
 ```bash
-python src/loocv.py \
+grass-mil-loocv \
   loocv.mode=single \
   data.split.loocv.enabled=true \
   data.split.loocv.fold_unit=region \
@@ -197,7 +197,7 @@ python src/loocv.py \
 Single-fold by fold index (useful for array jobs):
 
 ```bash
-python src/loocv.py \
+grass-mil-loocv \
   loocv.mode=single \
   loocv.fold_index=0 \
   data.split.loocv.enabled=true \
@@ -210,7 +210,7 @@ mode, `loocv.fold_index` takes priority and a warning is emitted.
 Full loop across all discovered folds:
 
 ```bash
-python src/loocv.py \
+grass-mil-loocv \
   loocv.mode=all \
   data.split.loocv.enabled=true \
   data.split.loocv.fold_unit=region \
@@ -233,13 +233,13 @@ Safety note:
 Default training (mean aggregation):
 
 ```bash
-python src/train.py task=finetune_mean model=supervised_module data=spatial_omics
+grass-mil-train task=finetune_mean model=supervised_module data=spatial_omics
 ```
 
 Evaluation of a selected checkpoint:
 
 ```bash
-python src/eval.py \
+grass-mil-eval \
   ckpt_path=/absolute/path/to/checkpoint.ckpt \
   task=finetune_mean \
   model=supervised_module \
@@ -265,7 +265,7 @@ Training artifacts (`paths.output_dir`):
 ### Step 1: Run SSL Pretraining (BGRL)
 
 ```bash
-python src/train.py task=pretrain_bgrl model=bgrl_module data=spatial_omics
+grass-mil-train task=pretrain_bgrl model=bgrl_module data=spatial_omics
 ```
 
 Default pretraining task includes:
@@ -286,7 +286,7 @@ If your callback tracks best metric, use best checkpoint path from training logs
 ### Step 3: Fine-Tune Using The Pretrained Encoder
 
 ```bash
-python src/train.py \
+grass-mil-train \
   task=finetune_mil \
   model=supervised_module \
   data=spatial_omics \
@@ -298,7 +298,7 @@ python src/train.py \
 Optional encoder freezing:
 
 ```bash
-python src/train.py \
+grass-mil-train \
   task=finetune_mil \
   model=supervised_module \
   model.init_from_ckpt=/absolute/path/to/pretrain.ckpt \
@@ -326,13 +326,13 @@ Common failures:
 Mean aggregation:
 
 ```bash
-python src/train.py task=finetune_mean model=supervised_module
+grass-mil-train task=finetune_mean model=supervised_module
 ```
 
 MIL attention aggregation:
 
 ```bash
-python src/train.py task=finetune_mil model=supervised_module
+grass-mil-train task=finetune_mil model=supervised_module
 ```
 
 Notes:
@@ -345,11 +345,11 @@ Notes:
 Switch backbone type:
 
 ```bash
-python src/train.py model.encoder.conv_type=gin
-python src/train.py model.encoder.conv_type=gcn
-python src/train.py model.encoder.conv_type=gat
-python src/train.py model.encoder.conv_type=graphsage
-python src/train.py model.encoder.conv_type=gine
+grass-mil-train model.encoder.conv_type=gin
+grass-mil-train model.encoder.conv_type=gcn
+grass-mil-train model.encoder.conv_type=gat
+grass-mil-train model.encoder.conv_type=graphsage
+grass-mil-train model.encoder.conv_type=gine
 ```
 
 Important constraints:
@@ -364,7 +364,7 @@ Important constraints:
 Common overrides:
 
 ```bash
-python src/train.py \
+grass-mil-train \
   model.encoder.hidden_dim=256 \
   model.encoder.out_dim=256 \
   model.encoder.num_layers=4 \
@@ -378,10 +378,10 @@ python src/train.py \
 ### D) Attention Variants
 
 ```bash
-python src/train.py task=finetune_mil \
+grass-mil-train task=finetune_mil \
   model.attention.attention_type=gated
 
-python src/train.py task=finetune_mil \
+grass-mil-train task=finetune_mil \
   model.attention.attention_type=gated_projected \
   model.attention.projection_dim=128
 ```
@@ -391,7 +391,7 @@ python src/train.py task=finetune_mil \
 Region accumulation (manual optimizer stepping over region hyperbatches):
 
 ```bash
-python src/train.py task=finetune_mil \
+grass-mil-train task=finetune_mil \
   task.region_accumulation.enabled=true \
   task.region_accumulation.hyperbatch_size=8
 ```
@@ -399,7 +399,7 @@ python src/train.py task=finetune_mil \
 Node auxiliary loss:
 
 ```bash
-python src/train.py task=finetune_mil \
+grass-mil-train task=finetune_mil \
   task.node_aux.enabled=true \
   task.node_aux.target_mode=attention_shaped_ti \
   task.node_aux.loss_mode=weighted_bce \
@@ -409,7 +409,7 @@ python src/train.py task=finetune_mil \
 Entropy regularization:
 
 ```bash
-python src/train.py task=finetune_mil \
+grass-mil-train task=finetune_mil \
   task.entropy_reg.enabled=true \
   task.entropy_reg.mode=attention \
   task.entropy_reg.weight=0.01
@@ -418,7 +418,7 @@ python src/train.py task=finetune_mil \
 Dual LR groups for MIL backbone/attention:
 
 ```bash
-python src/train.py task=finetune_mil \
+grass-mil-train task=finetune_mil \
   task.optimization.backbone_lr=1e-3 \
   task.optimization.attention_lr=4e-3
 ```
@@ -428,26 +428,26 @@ python src/train.py task=finetune_mil \
 Binary classification (default):
 
 ```bash
-python src/train.py task.target_type=binary task.loss=categorical_bce
+grass-mil-train task.target_type=binary task.loss=categorical_bce
 ```
 
 Regression:
 
 ```bash
-python src/train.py task.target_type=regression task.loss=regression_mse
-python src/train.py task.target_type=regression task.loss=regression_huber
+grass-mil-train task.target_type=regression task.loss=regression_mse
+grass-mil-train task.target_type=regression task.loss=regression_huber
 ```
 
 Survival:
 
 ```bash
-python src/train.py task.target_type=survival task.loss=survival_coxsgd
+grass-mil-train task.target_type=survival task.loss=survival_coxsgd
 ```
 
 Target column selection:
 
 ```bash
-python src/train.py task.target_columns="[outcome]"
+grass-mil-train task.target_columns="[outcome]"
 ```
 
 Target format requirements:
@@ -459,10 +459,10 @@ Target format requirements:
 
 ### A) Supported CLI Inference Path (Checkpoint Evaluation)
 
-`src/eval.py` is the official CLI inference/evaluation entrypoint.
+`src/grass_mil/eval.py` is the official CLI inference/evaluation entrypoint.
 
 ```bash
-python src/eval.py \
+grass-mil-eval \
   ckpt_path=/absolute/path/to/checkpoint.ckpt \
   task=finetune_mil \
   model=supervised_module \
@@ -473,10 +473,10 @@ This runs `trainer.test(...)` and logs test metrics.
 
 ### B) Inference Utility Suite (Prediction + Metrics + Embeddings)
 
-Use `src/inference/predict.py` for artifact-centric inference runs:
+Use `src/grass_mil/inference/predict.py` for artifact-centric inference runs:
 
 ```bash
-python src/inference/predict.py \
+grass-mil-predict \
   ckpt_path=/absolute/path/to/checkpoint.ckpt \
   task=finetune_mil \
   model=supervised_module \
@@ -578,7 +578,7 @@ sampling but validation should approximate tissue-level uniform sampling.
 Example:
 
 ```bash
-python src/train.py \
+grass-mil-train \
   data.sampler.runtime.proportional_root_sampling=true \
   data.val_sampler.name=shadow_custom \
   data.val_sampler.kwargs="{}" \
@@ -627,7 +627,7 @@ Example: keep training weighted root sampling, but validate with deterministic,
 non-proportional sampling.
 
 ```bash
-python src/train.py \
+grass-mil-train \
   data.sampler.runtime.proportional_root_sampling=true \
   data.val_sampler.name=shadow_custom \
   data.val_sampler.kwargs="{}" \
