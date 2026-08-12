@@ -1,5 +1,6 @@
 from .attention import AttnNetGated, AttnNetGatedProjected
 from .backbones import EncoderConfig, GNNEncoder
+from .embeddings import CategoricalEmbeddingConfig, NodeInputEmbedding
 from .factory import (
     build_attention,
     build_encoder,
@@ -25,7 +26,9 @@ __all__ = [
     "AttnNetGatedProjected",
     "BGRL",
     "CoxSGDLoss",
+    "CategoricalEmbeddingConfig",
     "EncoderConfig",
+    "NodeInputEmbedding",
     "GNNEncoder",
     "GraphPooling",
     "GraphPredictionHead",

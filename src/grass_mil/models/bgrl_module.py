@@ -11,6 +11,7 @@ from .training import (
     CosineWarmup,
     augment_graph,
     infer_encoder_input_dim,
+    resolve_encoder_cfg,
     instantiate_optimizer,
     instantiate_scheduler_with_warmup,
     load_state_dict_with_optional_mapping,
@@ -56,12 +57,9 @@ class BGRLModule(L.LightningModule):
     def setup(self, stage: Optional[str] = None) -> None:
         if self._built:
             return
-        encoder_cfg = dict(self.hparams.encoder)
-        if encoder_cfg.get("input_dim", 0) in (None, 0):
-            inferred = infer_encoder_input_dim(self)
-            if inferred <= 0:
-                raise ValueError("BGRLModule could not infer encoder.input_dim from datamodule.")
-            encoder_cfg["input_dim"] = inferred
+        encoder_cfg = resolve_encoder_cfg(
+            dict(self.hparams.encoder), infer_encoder_input_dim(self), module=self
+        )
         self.encoder = build_encoder(EncoderConfig(**encoder_cfg))
         self.ssl_model = build_ssl(True, self.encoder, dict(self.hparams.ssl))
         if self.ssl_model is None:
@@ -97,6 +95,7 @@ class BGRLModule(L.LightningModule):
             batch.edge_index,
             getattr(batch, "edge_attr", None),
             getattr(batch, "batch", None),
+            getattr(batch, "categorical_codes", None),
         )
 
     def _step(self, batch) -> torch.Tensor:

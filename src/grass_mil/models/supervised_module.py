@@ -183,6 +183,7 @@ class SupervisedModule(L.LightningModule):
             batch.edge_index,
             edge_attr=getattr(batch, "edge_attr", None),
             batch=getattr(batch, "batch", None),
+            categorical_codes=getattr(batch, "categorical_codes", None),
             return_graph_embedding=True,
         )
         patch_logits = self.graph_head(graph_emb)
@@ -519,6 +520,7 @@ class SupervisedModule(L.LightningModule):
             batch.edge_index,
             edge_attr=getattr(batch, "edge_attr", None),
             batch=getattr(batch, "batch", None),
+            categorical_codes=getattr(batch, "categorical_codes", None),
             return_graph_embedding=True,
         )
         bag_ids = extract_bag_ids(

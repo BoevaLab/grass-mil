@@ -9,7 +9,9 @@ from .bagging import (
 )
 from .builders import (
     build_supervised_components,
+    infer_categorical_binding,
     infer_encoder_input_dim,
+    resolve_encoder_cfg,
     validate_task_config,
 )
 from .checkpoint_init import (
@@ -41,7 +43,9 @@ __all__ = [
     "maybe_sample_indices",
     "select_target_columns",
     "build_supervised_components",
+    "infer_categorical_binding",
     "infer_encoder_input_dim",
+    "resolve_encoder_cfg",
     "validate_task_config",
     "load_state_dict_with_optional_mapping",
     "remap_encoder_keys",

@@ -40,6 +40,49 @@ def infer_encoder_input_dim(module: L.LightningModule, fallback: int = 0) -> int
     return int(x.shape[1])
 
 
+def infer_categorical_binding(
+    module: L.LightningModule, label: str
+) -> tuple[Optional[int], Optional[int]]:
+    """Resolve ``(num_embeddings, column_index)`` for a categorical node label.
+
+    The vocabulary size comes from the label map that precompute persists in
+    ``processed_index.json``, and the column index from the first sample's
+    ``categorical_slices``. Mirrors ``infer_encoder_input_dim``: best-effort,
+    returning ``None`` when the datamodule cannot be inspected, so the caller
+    can fall back to explicit config.
+    """
+    try:
+        trainer = module.trainer
+    except RuntimeError:
+        return None, None
+    if trainer is None or trainer.datamodule is None:
+        return None, None
+    datamodule = trainer.datamodule
+
+    dataset = getattr(datamodule, "dataset_train", None)
+    if dataset is None and hasattr(datamodule, "setup"):
+        datamodule.setup("fit")
+        dataset = getattr(datamodule, "dataset_train", None)
+    if dataset is None or len(dataset) == 0:
+        return None, None
+
+    # `label_maps` lives on the graph dataset; unwrap any transform wrapper.
+    inner = dataset
+    while not hasattr(inner, "label_maps") and hasattr(inner, "dataset"):
+        inner = inner.dataset
+
+    num_embeddings: Optional[int] = None
+    label_maps = getattr(inner, "label_maps", None)
+    if isinstance(label_maps, dict) and label in label_maps:
+        num_embeddings = len(label_maps[label])
+
+    column_index: Optional[int] = None
+    slices = getattr(dataset[0], "categorical_slices", None)
+    if isinstance(slices, dict) and label in slices:
+        column_index = int(slices[label])
+    return num_embeddings, column_index
+
+
 def validate_task_config(task_cfg: Dict[str, Any]) -> None:
     target_type = task_cfg.get("target_type", "binary")
     if target_type not in {"binary", "categorical", "regression", "survival"}:
@@ -55,15 +98,42 @@ def validate_task_config(task_cfg: Dict[str, Any]) -> None:
         )
 
 
-def _resolve_encoder_cfg(encoder_cfg: Dict[str, Any], inferred_input_dim: int) -> Dict[str, Any]:
+def resolve_encoder_cfg(
+    encoder_cfg: Dict[str, Any],
+    inferred_input_dim: int,
+    *,
+    module: Optional[L.LightningModule] = None,
+) -> Dict[str, Any]:
     cfg = dict(encoder_cfg)
+    categorical_cfg = cfg.get("categorical_embedding")
     if cfg.get("input_dim", 0) in (None, 0):
-        if inferred_input_dim <= 0:
+        if inferred_input_dim <= 0 and categorical_cfg is None:
             raise ValueError(
                 "Could not infer encoder input_dim from datamodule; "
                 "set model.encoder.input_dim explicitly."
             )
-        cfg["input_dim"] = inferred_input_dim
+        # A cell-type-only cohort legitimately has zero continuous features; the
+        # categorical embedding then carries the whole input representation.
+        cfg["input_dim"] = max(int(inferred_input_dim), 0)
+
+    if categorical_cfg is not None:
+        resolved = dict(categorical_cfg)
+        label = str(resolved.get("label", "cell_type"))
+        if module is not None and (
+            resolved.get("num_embeddings") is None or resolved.get("column_index") is None
+        ):
+            num_embeddings, column_index = infer_categorical_binding(module, label)
+            if resolved.get("num_embeddings") is None:
+                resolved["num_embeddings"] = num_embeddings
+            if resolved.get("column_index") is None:
+                resolved["column_index"] = column_index
+        if resolved.get("num_embeddings") is None:
+            raise ValueError(
+                f"Could not infer the vocabulary size for categorical label '{label}' from the "
+                "datamodule. Set model.encoder.categorical_embedding.num_embeddings explicitly, "
+                "or include the label in data.categorical_features.include_labels."
+            )
+        cfg["categorical_embedding"] = resolved
     return cfg
 
 
@@ -79,7 +149,7 @@ def build_supervised_components(
     ssl_cfg: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, torch.nn.Module]:
     inferred_input_dim = infer_encoder_input_dim(module)
-    resolved_encoder_cfg = _resolve_encoder_cfg(encoder_cfg, inferred_input_dim)
+    resolved_encoder_cfg = resolve_encoder_cfg(encoder_cfg, inferred_input_dim, module=module)
     encoder = build_encoder(EncoderConfig(**resolved_encoder_cfg))
     ssl_model = build_ssl(use_ssl, encoder, ssl_cfg) if use_ssl else None
     graph_head = build_graph_head(graph_head_cfg)

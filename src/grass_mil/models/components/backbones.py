@@ -7,6 +7,7 @@ from typing import Literal, Optional
 import torch
 from torch import nn
 
+from .embeddings import CategoricalEmbeddingConfig, NodeInputEmbedding
 from .pooling import GraphPooling
 
 try:
@@ -39,6 +40,11 @@ class EncoderConfig:
     use_edge_attr: bool = False
     edge_weight_index: int = 0
     edge_attr_dim: Optional[int] = None
+    # Selects a single scalar column of `edge_attr` (the edge length) for
+    # edge-aware message passing. When set, the conv sees only that column and
+    # `edge_attr_dim` is 1. Leave unset to pass the whole edge_attr vector.
+    edge_feature_index: Optional[int] = None
+    categorical_embedding: Optional[dict] = None
 
 
 def _get_activation(name: str) -> nn.Module:
@@ -73,10 +79,10 @@ class GNNEncoder(nn.Module):
         self.act = _get_activation(cfg.act)
         self.dropout = nn.Dropout(cfg.dropout)
 
-        self.input_proj = (
-            nn.Identity()
-            if cfg.input_dim == cfg.hidden_dim
-            else nn.Linear(cfg.input_dim, cfg.hidden_dim)
+        self.input_proj = NodeInputEmbedding(
+            input_dim=cfg.input_dim,
+            hidden_dim=cfg.hidden_dim,
+            categorical=CategoricalEmbeddingConfig.from_dict(cfg.categorical_embedding),
         )
 
         self.layers = nn.ModuleList([self._build_conv_layer() for _ in range(cfg.num_layers)])
@@ -143,6 +149,22 @@ class GNNEncoder(nn.Module):
     def _validate_edge_attr_config(self) -> None:
         if self.cfg.conv_type == "gine" and self.cfg.edge_attr_dim is None:
             raise ValueError("conv_type='gine' requires edge_attr_dim to be set in EncoderConfig.")
+        if self.cfg.edge_feature_index is not None:
+            if self.cfg.edge_feature_index < 0:
+                raise ValueError(
+                    f"edge_feature_index must be >= 0, got {self.cfg.edge_feature_index}."
+                )
+            if self.cfg.conv_type != "gine":
+                raise ValueError(
+                    "edge_feature_index selects a scalar edge feature for GINE message "
+                    f"passing, but conv_type='{self.cfg.conv_type}'. Use conv_type='gine', "
+                    "or 'gcn' with edge_weight_index for scalar edge weights."
+                )
+            if self.cfg.edge_attr_dim != 1:
+                raise ValueError(
+                    "edge_feature_index selects exactly one edge column, so edge_attr_dim "
+                    f"must be 1; got {self.cfg.edge_attr_dim}."
+                )
         if self.cfg.use_edge_attr and not self._supports_edge_attr():
             warnings.warn(
                 f"use_edge_attr=True is ignored for conv_type='{self.cfg.conv_type}'. "
@@ -176,8 +198,28 @@ class GNNEncoder(nn.Module):
         if self.cfg.conv_type == "gine":
             if edge_attr is None:
                 raise ValueError("conv_type='gine' requires edge_attr in forward inputs.")
-            return layer(x, edge_index, edge_attr)
+            return layer(x, edge_index, self._select_edge_features(edge_attr))
         return layer(x, edge_index)
+
+    def _select_edge_features(self, edge_attr: torch.Tensor) -> torch.Tensor:
+        """Narrow ``edge_attr`` to the configured scalar column.
+
+        The production encoder conditions message passing on the edge *length*
+        alone, so only that column reaches the convolution. Without
+        ``edge_feature_index`` the whole edge-attribute vector is passed
+        through unchanged.
+        """
+        index = self.cfg.edge_feature_index
+        if index is None:
+            return edge_attr
+        if edge_attr.dim() != 2:
+            raise ValueError("edge_attr must have shape [num_edges, num_edge_features].")
+        if index < 0 or index >= edge_attr.size(1):
+            raise ValueError(
+                f"edge_feature_index={index} is out of range for edge_attr with "
+                f"{edge_attr.size(1)} column(s)."
+            )
+        return edge_attr[:, index : index + 1].float()
 
     def _apply_jk(self, states: list[torch.Tensor]) -> torch.Tensor:
         mode = self.cfg.jk
@@ -197,9 +239,10 @@ class GNNEncoder(nn.Module):
         edge_index: torch.Tensor,
         edge_attr: Optional[torch.Tensor] = None,
         batch: Optional[torch.Tensor] = None,
+        categorical_codes: Optional[torch.Tensor] = None,
         return_graph_embedding: bool = False,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-        h = self.input_proj(x)
+        h = self.input_proj(x, categorical_codes)
         states = [h]
         for idx, layer in enumerate(self.layers):
             h = self._apply_conv(layer, h, edge_index, edge_attr)

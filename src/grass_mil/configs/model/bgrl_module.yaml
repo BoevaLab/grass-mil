@@ -17,6 +17,12 @@ encoder:
   use_edge_attr: false
   edge_weight_index: 0
   edge_attr_dim: null
+  # Selects a single scalar edge column (the edge length) for GINE message
+  # passing; null passes the whole edge_attr vector through.
+  edge_feature_index: null
+  # Learned embedding of a categorical node label, summed with the projection
+  # of the continuous features. null disables it (features come from `x` only).
+  categorical_embedding: null
 
 ssl:
   method: bgrl
