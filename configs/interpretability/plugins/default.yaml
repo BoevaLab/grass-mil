@@ -28,6 +28,18 @@ params:
     threshold_start: 0.0
     threshold_stop: 55.0
     threshold_count: 500
+  per_cluster_cell_type_enrichment:
+    cell_type_column: cell_type
+    cluster_column: cluster_label
+    # Clusters with fewer than 2 instances, and HDBSCAN noise (-1) when
+    # skip_noise is true, are omitted.
+    skip_noise: true
+    # One of: zscore, obs-exp, log2fc.
+    enrichment_mode: obs-exp
+    # n_perms=0 uses analytical expected/std (runtime warning emitted).
+    n_perms: 0
+    random_state: 42
+    undirected: false
   tissue_graph:
     sample_column: sample_id
     sample_value: null

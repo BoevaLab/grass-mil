@@ -398,3 +398,46 @@ def test_pdf_renderer_raises_when_unavailable(monkeypatch, tmp_path: Path) -> No
             html_path=tmp_path / "foo.html",
             pdf_path=tmp_path / "foo.pdf",
         )
+
+
+def test_resolve_color_values_handles_numeric_and_categorical_columns() -> None:
+    from src.interpretability.reporting.plotly_builders import _resolve_color_values
+
+    numeric_values, numeric_ticks = _resolve_color_values(pd.Series([0.5, 1.5, 2.5]))
+    np.testing.assert_allclose(numeric_values, [0.5, 1.5, 2.5])
+    assert numeric_ticks == {}
+
+    # A string column (``condition`` routinely is one) must be factorized rather
+    # than raising, with the original labels preserved as colorbar ticks.
+    cat_values, cat_ticks = _resolve_color_values(pd.Series(["X", "X", "Y"]))
+    np.testing.assert_allclose(cat_values, [0.0, 0.0, 1.0])
+    assert cat_ticks["ticktext"] == ["X", "Y"]
+    assert cat_ticks["tickvals"] == [0, 1]
+
+
+def test_multi_attribute_scatters_plot_string_condition_column(tmp_path: Path) -> None:
+    node_path, spatial_path = _write_minimal_tables(tmp_path)
+    dataset = load_interpretability_dataset(
+        instance_table_path=node_path,
+        spatial_table_path=spatial_path,
+        id_column="instance_id",
+        bag_id_column="bag_id",
+        cell_type_column="cell_type",
+    )
+    cfg = {
+        "reduction": {"enabled": True, "method": "pca", "params": {"n_components": 2}},
+        "clustering": {
+            "enabled": True,
+            "method": "agglomerative",
+            "params": {"n_clusters": 2, "linkage": "ward"},
+        },
+        "plugins": {"enabled": []},
+    }
+    bundle = run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
+
+    figs = dict(bundle_figures(bundle))
+    condition_figs = [name for name in figs if name.endswith("_condition")]
+    assert condition_figs, f"expected a condition-colored scatter, got {sorted(figs)}"
+
+    marker = figs[condition_figs[0]].data[0].marker
+    assert list(marker.colorbar.ticktext) == ["X", "Y"]

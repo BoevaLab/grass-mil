@@ -840,3 +840,47 @@ def test_filtration_runtime_sanity() -> None:
     elapsed = time.perf_counter() - t0
     assert len(out.curves) > 0
     assert elapsed < 8.0
+
+
+def test_builtin_per_cluster_cell_type_enrichment_plugin_execution() -> None:
+    registry = create_builtin_registry()
+    ds = _sample_dataset()
+    labels = np.array([0, 0, 0, 1, 1, 1])
+    plugin = registry.get("per_cluster_cell_type_enrichment")
+    out = plugin.run(
+        ds,
+        PluginContext(state={"cluster_labels": labels}),
+        n_perms=0,
+        enrichment_mode="obs-exp",
+    )
+    assert out.name == "per_cluster_cell_type_enrichment"
+    enrichment = out.payload["enrichment_by_cluster"]
+    # Both clusters are internally connected in the sample spatial table.
+    assert set(enrichment) == {"0", "1"}
+    for frame in enrichment.values():
+        # Enrichment is a square cell-type x cell-type matrix.
+        assert list(frame.index) == list(frame.columns)
+    assert all(section.title.startswith("Cell-Type Enrichment") for section in out.sections)
+
+
+def test_per_cluster_cell_type_enrichment_skips_noise_cluster() -> None:
+    registry = create_builtin_registry()
+    ds = _sample_dataset()
+    labels = np.array([-1, -1, -1, 1, 1, 1])
+    plugin = registry.get("per_cluster_cell_type_enrichment")
+
+    skipped = plugin.run(
+        ds,
+        PluginContext(state={"cluster_labels": labels}),
+        skip_noise=True,
+        n_perms=0,
+    )
+    assert set(skipped.payload["enrichment_by_cluster"]) == {"1"}
+
+    retained = plugin.run(
+        ds,
+        PluginContext(state={"cluster_labels": labels}),
+        skip_noise=False,
+        n_perms=0,
+    )
+    assert set(retained.payload["enrichment_by_cluster"]) == {"-1", "1"}

@@ -353,6 +353,83 @@ class TissueGraphPlugin(InterpretabilityPlugin):
         return PluginResult(name=self.name, payload=payload, sections=sections)
 
 
+@dataclass
+class PerClusterCellTypeEnrichmentPlugin(InterpretabilityPlugin):
+    """Compute cell-type neighborhood enrichment within each cluster separately.
+
+    For each cluster, subsets the node table and spatial table to nodes belonging
+    to that cluster, then runs neighborhood enrichment with label_column=cell_type.
+    This answers: "within cluster C, which cell types are spatially co-located?"
+    """
+
+    name: str = "per_cluster_cell_type_enrichment"
+
+    def required_inputs(self) -> List[str]:
+        return ["spatial_table", "cluster_labels"]
+
+    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
+        if dataset.spatial_table is None:
+            raise ValueError("Spatial table is required for per-cluster cell-type enrichment.")
+        cell_type_column = str(
+            params.get("cell_type_column", dataset.cell_type_column or "cell_type")
+        )
+        cluster_column = str(params.get("cluster_column", "cluster_label"))
+        id_column = str(params.get("id_column", dataset.id_column))
+
+        table = dataset.instance_table.copy()
+        table[cluster_column] = np.asarray(context.state["cluster_labels"])
+
+        unique_clusters = sorted(set(table[cluster_column]))
+        skip_noise = bool(params.get("skip_noise", True))
+
+        enrichment_by_cluster: Dict[str, pd.DataFrame] = {}
+        sections: List[ReportSection] = []
+
+        for cluster_id in unique_clusters:
+            if skip_noise and cluster_id == -1:
+                continue
+            cluster_mask = table[cluster_column] == cluster_id
+            cluster_table = table[cluster_mask].copy()
+            if len(cluster_table) < 2:
+                continue
+
+            cluster_node_ids = set(cluster_table[id_column].astype(str))
+            spatial = dataset.spatial_table.copy()
+            cluster_spatial = spatial[
+                spatial["source_id"].astype(str).isin(cluster_node_ids)
+                & spatial["target_id"].astype(str).isin(cluster_node_ids)
+            ]
+            if cluster_spatial.empty:
+                continue
+
+            try:
+                result = run_neighborhood_enrichment(
+                    cluster_table,
+                    cluster_spatial,
+                    label_column=cell_type_column,
+                    id_column=id_column,
+                    n_perms=int(params.get("n_perms", 0)),
+                    random_state=int(params.get("random_state", 42)),
+                    undirected=bool(params.get("undirected", False)),
+                    enrichment_mode=str(params.get("enrichment_mode", "obs-exp")),
+                )
+                enrichment_by_cluster[str(cluster_id)] = result.enrichment
+                sections.append(
+                    ReportSection(
+                        title=f"Cell-Type Enrichment — Cluster {cluster_id}",
+                        description=(
+                            f"Cell-type neighborhood enrichment within cluster {cluster_id}."
+                        ),
+                        tables={"enrichment": result.enrichment},
+                    )
+                )
+            except (ValueError, KeyError):
+                continue
+
+        payload: Dict[str, Any] = {"enrichment_by_cluster": enrichment_by_cluster}
+        return PluginResult(name=self.name, payload=payload, sections=sections)
+
+
 def register_builtin_plugins(registry: PluginRegistry) -> None:
     registry.register(ClusterProfilesPlugin())
     registry.register(AttentionAttributionPlugin())
@@ -360,6 +437,7 @@ def register_builtin_plugins(registry: PluginRegistry) -> None:
     registry.register(DiffNeighborhoodEnrichmentPlugin())
     registry.register(FiltrationCurvesPlugin())
     registry.register(TissueGraphPlugin())
+    registry.register(PerClusterCellTypeEnrichmentPlugin())
 
 
 def create_builtin_registry() -> PluginRegistry:
