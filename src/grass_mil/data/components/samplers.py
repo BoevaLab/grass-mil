@@ -103,29 +103,29 @@ class RuntimeShadowConfig:
 def _build_weighted_node_idx(
     data: Data, *, property_name: str, weight_mode: str, min_weight: float
 ) -> Optional[torch.Tensor]:
-    if not hasattr(data, "categorical_index") or not hasattr(
+    if not hasattr(data, "categorical_codes") or not hasattr(
         data, "categorical_slices"
     ):
         return None
-    categorical_index = getattr(data, "categorical_index")
+    categorical_codes = getattr(data, "categorical_codes")
     categorical_slices = getattr(data, "categorical_slices")
     if not isinstance(categorical_slices, dict):
         return None
     if property_name not in categorical_slices:
         return None
     if (
-        not isinstance(categorical_index, torch.Tensor)
-        or categorical_index.numel() == 0
+        not isinstance(categorical_codes, torch.Tensor)
+        or categorical_codes.numel() == 0
     ):
         return None
-    if categorical_index.dim() != 2:
+    if categorical_codes.dim() != 2:
         return None
 
     prop_col = int(categorical_slices[property_name])
-    if prop_col < 0 or prop_col >= int(categorical_index.size(1)):
+    if prop_col < 0 or prop_col >= int(categorical_codes.size(1)):
         return None
 
-    node_labels = categorical_index[:, prop_col].long().view(-1)
+    node_labels = categorical_codes[:, prop_col].long().view(-1)
     if node_labels.numel() == 0:
         return None
 
@@ -813,8 +813,12 @@ class _ShaDowKHopSamplerWithTransform(torch.utils.data.DataLoader):
                     elif val.dim() == 0:
                         setattr(sub_data, key, val)
                     elif val.dim() > 0 and val.size(0) == batch.x.size(0):
-                        # Node-level feature tensors are already represented by `x`.
-                        continue
+                        # Node-level tensors must be sliced down to this subgraph.
+                        # They are NOT redundant with `x`: `categorical_codes`
+                        # carries the cell-type codes the encoder embeds, and
+                        # `pos` carries coordinates. Dropping them here silently
+                        # removed cell type from every sampled subgraph.
+                        setattr(sub_data, key, val[node_ids])
                     elif val.dim() > 0 and "edge_attr" in batch and val.size(0) == batch.edge_index.size(1):
                         continue
                     else:

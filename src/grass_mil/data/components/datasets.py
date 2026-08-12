@@ -18,6 +18,23 @@ class ProcessedIndexEntry:
     split: Optional[str] = None
 
 
+def _migrate_legacy_attributes(data):
+    """Upgrade graphs written by an older precompute.
+
+    ``categorical_index`` was renamed to ``categorical_codes`` because
+    PyTorch Geometric treats *any* attribute whose name contains ``index`` as an
+    edge-index tensor and concatenates it along the last dimension, which
+    corrupts node-level codes as soon as more than one graph is batched.
+    Migrating on load means existing processed caches stay usable without a
+    forced re-precompute.
+    """
+    legacy = getattr(data, "categorical_index", None)
+    if legacy is not None and getattr(data, "categorical_codes", None) is None:
+        data.categorical_codes = legacy
+        del data.categorical_index
+    return data
+
+
 class SpatialOmicsGraphDataset(Dataset):
     def __init__(self, index_path: str | Path) -> None:
         index_path = Path(index_path)
@@ -44,7 +61,7 @@ class SpatialOmicsGraphDataset(Dataset):
     def __getitem__(self, idx: int) -> torch.nn.Module:
         entry = self.entries[idx]
         data = torch.load(entry.path)
-        return data
+        return _migrate_legacy_attributes(data)
 
 
 class TransformDataset(Dataset):

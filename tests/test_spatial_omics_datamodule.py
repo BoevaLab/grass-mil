@@ -149,8 +149,8 @@ def test_spatial_omics_datamodule_precompute(tmp_path: Path) -> None:
     assert hasattr(data, "edge_attr")
     assert hasattr(data, "graph_y")
     assert data.x.shape[1] == 2  # gene1, gene2
-    assert hasattr(data, "categorical_index")
-    assert data.categorical_index.shape[1] == 1
+    assert hasattr(data, "categorical_codes")
+    assert data.categorical_codes.shape[1] == 1
     assert data.categorical_slices["cell_type"] == 0
 
     index_payload = json.loads((data_dir / "processed" / "processed_index.json").read_text())
@@ -265,8 +265,8 @@ def test_spatial_omics_datamodule_indices_no_molecular(tmp_path: Path) -> None:
     data = dm.train_dataloader().dataset[0]
     assert hasattr(data, "x")
     assert data.x.shape[1] == 0
-    assert hasattr(data, "categorical_index")
-    assert data.categorical_index.shape == (2, 1)
+    assert hasattr(data, "categorical_codes")
+    assert data.categorical_codes.shape == (2, 1)
 
 
 def test_h5ad_obsm_spatial_coords(tmp_path: Path) -> None:
@@ -1008,3 +1008,40 @@ def test_precompute_reuse_rejects_coord_scale_um_mismatch(tmp_path: Path) -> Non
     dm_third.prepare_data()
     third_index = json.loads((processed_dir / "processed_index.json").read_text())
     assert float(third_index["preprocessing"]["coord_scale_um"]) == 2.0
+
+
+def test_graph_dataset_migrates_legacy_categorical_index(tmp_path):
+    """Processed caches written before the rename must still load."""
+    import json
+
+    import torch
+    from torch_geometric.data import Data
+
+    from grass_mil.data.components.datasets import SpatialOmicsGraphDataset
+
+    graph_path = tmp_path / "legacy.pt"
+    data = Data(x=torch.randn(3, 2), edge_index=torch.empty(2, 0, dtype=torch.long))
+    data.num_nodes = 3
+    data.categorical_index = torch.tensor([[0], [1], [2]], dtype=torch.long)
+    torch.save(data, graph_path)
+
+    index_path = tmp_path / "processed_index.json"
+    index_path.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "path": str(graph_path),
+                        "sample_id": "s0",
+                        "region_id": "r0",
+                        "patch_id": "p0",
+                        "split": "train",
+                    }
+                ]
+            }
+        )
+    )
+
+    loaded = SpatialOmicsGraphDataset(index_path)[0]
+    assert torch.equal(loaded.categorical_codes.view(-1), torch.tensor([0, 1, 2]))
+    assert getattr(loaded, "categorical_index", None) is None

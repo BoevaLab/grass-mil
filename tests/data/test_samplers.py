@@ -42,7 +42,7 @@ def _toy_dataset_with_graph_attrs(n_graphs: int = 2, n_nodes: int = 20):
 
 
 def _attach_cell_type_metadata(data, labels):
-    data.categorical_index = torch.tensor(labels, dtype=torch.long).view(-1, 1)
+    data.categorical_codes = torch.tensor(labels, dtype=torch.long).view(-1, 1)
     data.categorical_slices = {"cell_type": 0}
     return data
 
@@ -545,3 +545,72 @@ def test_shadow_runtime_subsampled_len_matches_yielded_batches(monkeypatch):
     )
     yielded = sum(1 for _ in loader)
     assert len(loader) == yielded
+
+
+def test_shadow_custom_per_subgraph_transform_preserves_node_level_tensors():
+    """Node-level tensors must survive per-subgraph transform application.
+
+    ``categorical_codes`` carries the cell-type codes the encoder embeds and
+    ``pos`` carries coordinates; neither is recoverable from ``x``. They were
+    previously dropped as "already represented by x", which silently removed
+    cell type from every sampled subgraph.
+    """
+    pytest.importorskip("torch_geometric")
+    try:
+        import torch_sparse  # noqa: F401
+    except Exception:
+        pytest.skip("torch_sparse is not available")
+
+    from grass_mil.data.components.samplers import get_sampler_strategy
+
+    n_nodes = 20
+    data = _toy_dataset(n_graphs=1, n_nodes=n_nodes)[0]
+    _attach_cell_type_metadata(data, list(range(n_nodes)))
+    data.pos = torch.arange(n_nodes, dtype=torch.float32).view(-1, 1).repeat(1, 2)
+
+    strategy = get_sampler_strategy({"name": "shadow_custom", "kwargs": {}})
+    loader = strategy.build_unit_loader(
+        data=data,
+        depth=2,
+        num_neighbors=8,
+        batch_size=4,
+        transform=lambda d: d,
+    )
+    batch = next(iter(loader))
+
+    assert hasattr(batch, "categorical_codes"), "cell-type codes were dropped by sampling"
+    assert hasattr(batch, "pos"), "coordinates were dropped by sampling"
+    assert batch.categorical_codes.size(0) == batch.x.size(0)
+    assert batch.pos.size(0) == batch.x.size(0)
+
+    # The codes must be the ones belonging to the sampled nodes, not a stale
+    # or truncated slice: node i of the source graph carries code i.
+    expected = data.categorical_codes[batch.n_id].view(-1)
+    assert torch.equal(batch.categorical_codes.view(-1), expected)
+
+
+def test_node_level_codes_batch_along_the_node_dimension():
+    """Guard the attribute name against PyTorch Geometric's index heuristic.
+
+    ``Data.__cat_dim__`` returns -1 for any key containing ``index``, so an
+    attribute named ``categorical_index`` is concatenated along the feature
+    dimension when graphs are batched -- silently corrupting per-node codes (or
+    raising, when the graphs differ in size). The codes must batch along dim 0
+    like any other node attribute.
+    """
+    pytest.importorskip("torch_geometric")
+    from torch_geometric.data import Batch, Data
+
+    graphs = []
+    for n_nodes in (4, 7):
+        data = Data(x=torch.randn(n_nodes, 3), edge_index=torch.empty(2, 0, dtype=torch.long))
+        data.num_nodes = n_nodes
+        _attach_cell_type_metadata(data, list(range(n_nodes)))
+        graphs.append(data)
+
+    batch = Batch.from_data_list(graphs)
+    assert batch.categorical_codes.shape == (11, 1)
+    assert torch.equal(
+        batch.categorical_codes.view(-1),
+        torch.tensor([0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6]),
+    )

@@ -27,7 +27,7 @@ Optional fields:
 - `pos`: `torch.Tensor` with shape `[num_nodes, 2]` or `[num_nodes, d]`.
 - `graph_y`: `torch.Tensor` with shape `[1, num_tasks]` or `[batch_size, num_tasks]`.
 - `graph_w`: `torch.Tensor` with same shape as `graph_y` for weighted objectives.
-- `categorical_index`: `torch.LongTensor` for categorical annotations.
+- `categorical_codes`: `torch.LongTensor` for categorical annotations.
 
 Non-requirements:
 

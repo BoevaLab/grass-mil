@@ -685,8 +685,8 @@ class SpatialOmicsPreprocessor:
             encoded_cols.append(encoded)
             slices[label_name] = col_idx
 
-        categorical_index = np.stack(encoded_cols, axis=1)
-        data.categorical_index = torch.from_numpy(categorical_index).long()
+        categorical_codes = np.stack(encoded_cols, axis=1)
+        data.categorical_codes = torch.from_numpy(categorical_codes).long()
         data.categorical_labels = list(config.include_labels)
         data.categorical_slices = slices
 

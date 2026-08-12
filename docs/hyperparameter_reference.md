@@ -82,7 +82,7 @@ grass-mil-train key.path=value
 
 | Key | Default | Type | Valid Values | Active When | Example Override |
 |---|---|---|---|---|---|
-| `data.categorical_features.include_labels` | `[cell_type]` | list[str] | label names present in loaded data | attach `categorical_index` | `grass-mil-train data.categorical_features.include_labels="[cell_type,state]"` |
+| `data.categorical_features.include_labels` | `[cell_type]` | list[str] | label names present in loaded data | attach `categorical_codes` | `grass-mil-train data.categorical_features.include_labels="[cell_type,state]"` |
 
 ## 2.3 Split Config
 

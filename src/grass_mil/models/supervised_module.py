@@ -249,17 +249,17 @@ class SupervisedModule(L.LightningModule):
         label_name: str,
         device: torch.device,
     ) -> Optional[torch.Tensor]:
-        categorical_index = getattr(batch, "categorical_index", None)
-        if not isinstance(categorical_index, torch.Tensor) or categorical_index.numel() == 0:
+        categorical_codes = getattr(batch, "categorical_codes", None)
+        if not isinstance(categorical_codes, torch.Tensor) or categorical_codes.numel() == 0:
             return None
-        categorical_index = categorical_index.to(device=device).long()
-        if categorical_index.ndim != 2:
+        categorical_codes = categorical_codes.to(device=device).long()
+        if categorical_codes.ndim != 2:
             return None
         col_idx = SupervisedModule._resolve_categorical_column_index(batch, label_name)
-        if col_idx is None or col_idx < 0 or col_idx >= int(categorical_index.shape[1]):
+        if col_idx is None or col_idx < 0 or col_idx >= int(categorical_codes.shape[1]):
             return None
 
-        node_labels = categorical_index[:, int(col_idx)]
+        node_labels = categorical_codes[:, int(col_idx)]
         if node_labels.numel() == 0:
             return None
         batch_index = getattr(batch, "batch", None)
