@@ -1,0 +1,43 @@
+# @package _global_
+
+# Cox survival with MIL attention pooling. The head emits a single scalar
+# log-hazard per bag, so attention stays a single shared channel: there is no
+# per-class decomposition for a one-dimensional risk score.
+
+task:
+  name: finetune_survival
+  aggregation: mil_attention
+  bag_key: patch_id
+  bag_fallback_key: sample_id
+  max_instances_per_bag: 0
+  instance_sampling: all
+  target_type: survival
+  # Column ORDER is load-bearing: the loss reads [:, 0] as time and [:, 1] as
+  # the event indicator. Rename to match your targets file, but keep the order.
+  target_columns: [time, event]
+  loss: survival_coxsgd
+  optimization:
+    backbone_lr: null
+    attention_lr: null
+  lr_warmup:
+    enabled: false
+    warmup_steps: 0
+    start_factor: 0.1
+  region_accumulation:
+    enabled: false
+    mode: manual_region_buffer
+    hyperbatch_size: 8
+    flush_on_epoch_end: true
+
+model:
+  graph_head:
+    output_dim: 1
+  attention:
+    n_classes: 1
+  loss:
+    loss_type: survival_coxsgd
+    # Risk-set truncation; 0 uses the full risk set.
+    top_n: 5
+    # Shrinks the spread of predicted risks. Leaving this at 0 lets attention
+    # over-sharpen on small validation cohorts.
+    regularizer_weight: 0.05

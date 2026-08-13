@@ -163,28 +163,48 @@ def _regression_metrics(logits: torch.Tensor, targets: torch.Tensor) -> Dict[str
 
 
 def _survival_concordance_index(
-    risk_scores: torch.Tensor, times: torch.Tensor, events: torch.Tensor
+    risk_scores: torch.Tensor,
+    times: torch.Tensor,
+    events: torch.Tensor,
+    *,
+    chunk_size: int = 4096,
 ) -> float:
+    """Harrell's concordance index.
+
+    A pair is comparable when the earlier subject had an observed event; it is
+    concordant when that subject also carries the higher risk, and tied
+    contributes a half.
+
+    Evaluated in row chunks of the pair matrix, which bounds peak memory at
+    ``chunk_size * n`` booleans. The previous implementation was a Python
+    double loop with two ``.item()`` calls per pair, i.e. a device
+    synchronisation per pair.
+    """
     r = risk_scores.float().view(-1)
     t = times.float().view(-1)
     e = events.float().view(-1)
 
+    n = int(r.shape[0])
+    if n == 0:
+        return float("nan")
+
     concordant = 0.0
     ties = 0.0
     comparable = 0.0
-    n = int(r.shape[0])
-    for i in range(n):
-        if e[i].item() <= 0:
+    for start in range(0, n, chunk_size):
+        stop = min(start + chunk_size, n)
+        t_i = t[start:stop].unsqueeze(1)
+        r_i = r[start:stop].unsqueeze(1)
+        e_i = e[start:stop].unsqueeze(1)
+
+        # Strict inequality on time also excludes the diagonal.
+        is_comparable = (e_i > 0) & (t_i < t.unsqueeze(0))
+        if not bool(is_comparable.any()):
             continue
-        for j in range(n):
-            if i == j:
-                continue
-            if t[i].item() < t[j].item():
-                comparable += 1.0
-                if r[i].item() > r[j].item():
-                    concordant += 1.0
-                elif r[i].item() == r[j].item():
-                    ties += 1.0
+        comparable += float(is_comparable.sum().item())
+        concordant += float((is_comparable & (r_i > r.unsqueeze(0))).sum().item())
+        ties += float((is_comparable & (r_i == r.unsqueeze(0))).sum().item())
+
     if comparable == 0.0:
         return float("nan")
     return float((concordant + 0.5 * ties) / comparable)

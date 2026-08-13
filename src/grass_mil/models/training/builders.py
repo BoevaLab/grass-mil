@@ -97,6 +97,20 @@ def validate_task_config(task_cfg: Dict[str, Any]) -> None:
             "task.instance_sampling must be one of ['all', 'random'], "
             f"got '{instance_sampling}'."
         )
+    if target_type == "survival":
+        # Without these checks a mis-shaped survival config fails deep inside
+        # the Cox loss with an opaque shape error.
+        target_columns = task_cfg.get("target_columns")
+        if target_columns is not None and len(target_columns) != 2:
+            raise ValueError(
+                "Survival tasks need exactly two target columns, ordered "
+                f"[time, event]; got {list(target_columns)}."
+            )
+        if task_cfg.get("loss") not in (None, "survival_coxsgd"):
+            raise ValueError(
+                "task.target_type='survival' requires task.loss='survival_coxsgd', "
+                f"got '{task_cfg.get('loss')}'."
+            )
 
 
 def resolve_encoder_cfg(

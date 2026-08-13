@@ -16,19 +16,29 @@ def _make_graph(
     num_nodes: int = 6,
     input_dim: int = 8,
     patch_idx: int = 0,
+    survival: bool = False,
 ) -> Data:
     x = torch.randn(num_nodes, input_dim)
     edge_index = torch.tensor(
         [[0, 1, 2, 3, 4, 1, 2, 3, 4, 5], [1, 2, 3, 4, 5, 0, 1, 2, 3, 4]],
         dtype=torch.long,
     )
-    graph_y = torch.tensor([[label]], dtype=torch.float32)
-    graph_w = torch.ones_like(graph_y)
+    if survival:
+        # [time, event]; order is load-bearing for the Cox loss. Times are
+        # spread and events mixed so risk sets are non-degenerate -- if every
+        # event sat at the largest time the partial likelihood would be
+        # constant and carry no gradient.
+        follow_up = 1.0 + float(patch_idx % 7) + 3.0 * label
+        observed = float((patch_idx % 3) != 0)
+        graph_y = torch.tensor([[follow_up, observed]], dtype=torch.float32)
+    else:
+        graph_y = torch.tensor([[label]], dtype=torch.float32)
+    graph_w = torch.ones((1, 1), dtype=torch.float32)
     data = Data(x=x, edge_index=edge_index, graph_y=graph_y, graph_w=graph_w)
     data.sample_id = "sample_a"
     data.region_id = region_id
     data.patch_id = f"{region_id}_patch_{patch_idx}"
-    data.graph_label_names = ["label"]
+    data.graph_label_names = ["time", "event"] if survival else ["label"]
     return data
 
 
@@ -40,6 +50,7 @@ class SyntheticBagDataModule(L.LightningDataModule):
         pin_memory: bool = False,
         input_dim: int = 8,
         graphs_per_region: int = 20,
+        survival: bool = False,
     ) -> None:
         super().__init__()
         self.batch_size = batch_size
@@ -47,6 +58,7 @@ class SyntheticBagDataModule(L.LightningDataModule):
         self.pin_memory = pin_memory
         self.input_dim = input_dim
         self.graphs_per_region = graphs_per_region
+        self.survival = survival
         self.dataset_train = None
         self.dataset_val = None
         self.dataset_test = None
@@ -54,9 +66,23 @@ class SyntheticBagDataModule(L.LightningDataModule):
     def setup(self, stage=None):
         data = []
         for i in range(self.graphs_per_region):
-            data.append(_make_graph("region_0", 0.0, input_dim=self.input_dim, patch_idx=2 * i))
             data.append(
-                _make_graph("region_1", 1.0, input_dim=self.input_dim, patch_idx=2 * i + 1)
+                _make_graph(
+                    "region_0",
+                    0.0,
+                    input_dim=self.input_dim,
+                    patch_idx=2 * i,
+                    survival=self.survival,
+                )
+            )
+            data.append(
+                _make_graph(
+                    "region_1",
+                    1.0,
+                    input_dim=self.input_dim,
+                    patch_idx=2 * i + 1,
+                    survival=self.survival,
+                )
             )
         self.dataset_train = data
         self.dataset_val = data
