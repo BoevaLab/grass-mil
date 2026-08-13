@@ -36,7 +36,7 @@ from .optimization import (
     instantiate_scheduler,
     instantiate_scheduler_with_warmup,
 )
-from .ssl_runtime import CosineWarmup, augment_graph
+from .ssl_runtime import CosineWarmup
 
 __all__ = [
     "aggregate_bag_logits_attention",
@@ -66,5 +66,4 @@ __all__ = [
     "instantiate_scheduler",
     "instantiate_scheduler_with_warmup",
     "CosineWarmup",
-    "augment_graph",
 ]

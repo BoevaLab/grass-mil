@@ -9,7 +9,6 @@ import torch.nn.functional as F
 from .components import EncoderConfig, build_encoder, build_ssl
 from .training import (
     CosineWarmup,
-    augment_graph,
     build_augmentation,
     infer_encoder_input_dim,
     resolve_encoder_cfg,
@@ -58,10 +57,21 @@ class BGRLModule(L.LightningModule):
         self.init_strict = init_strict
         self.encoder_init_map = encoder_init_map
 
-        self._drop_edge_p1 = float(self.task_cfg.get("drop_edge_p1", 0.0))
-        self._drop_edge_p2 = float(self.task_cfg.get("drop_edge_p2", 0.0))
-        self._drop_feat_p1 = float(self.task_cfg.get("drop_feat_p1", 0.0))
-        self._drop_feat_p2 = float(self.task_cfg.get("drop_feat_p2", 0.0))
+        # Per-view uniform drop rates, used when no augmentation config is set.
+        self._view_params = (
+            {
+                "mode": "uniform",
+                "drop_edge_p": float(self.task_cfg.get("drop_edge_p1", 0.0)),
+                "drop_feat_p": float(self.task_cfg.get("drop_feat_p1", 0.0)),
+            },
+            {
+                "mode": "uniform",
+                "drop_edge_p": float(self.task_cfg.get("drop_edge_p2", 0.0)),
+                "drop_feat_p": float(self.task_cfg.get("drop_feat_p2", 0.0)),
+            },
+        )
+        self._augmentation_seed = int(self.task_cfg.get("augmentation_seed", 0))
+        self._view_generator: Optional[torch.Generator] = None
         self._momentum_base = float(self.task_cfg.get("momentum", 0.99))
         self._momentum_min = float(self.task_cfg.get("momentum_min", 0.99))
         self._warmup_steps = int(self.task_cfg.get("warmup_steps", 0))
@@ -71,6 +81,7 @@ class BGRLModule(L.LightningModule):
         # When set, replaces the uniform drop_edge/drop_feat views.
         self._augmentation_cfg = self.task_cfg.get("augmentation")
         self._augmentation = None
+        self._fallback_augmentations = None
 
     def setup(self, stage: Optional[str] = None) -> None:
         if self._built:
@@ -79,16 +90,18 @@ class BGRLModule(L.LightningModule):
             dict(self.hparams.encoder), infer_encoder_input_dim(self), module=self
         )
         self.encoder = build_encoder(EncoderConfig(**encoder_cfg))
+        input_proj = getattr(self.encoder, "input_proj", None)
+        categorical = getattr(input_proj, "categorical", None)
+        build_kwargs = {
+            "feature_names": _molecular_feature_names(self),
+            "unassigned_index": getattr(input_proj, "unassigned_index", None),
+            "categorical_column": (None if categorical is None else categorical.column_index or 0),
+        }
         if self._augmentation_cfg:
-            input_proj = getattr(self.encoder, "input_proj", None)
-            categorical = getattr(input_proj, "categorical", None)
-            self._augmentation = build_augmentation(
-                self._augmentation_cfg,
-                feature_names=_molecular_feature_names(self),
-                unassigned_index=getattr(input_proj, "unassigned_index", None),
-                categorical_column=(
-                    None if categorical is None else categorical.column_index or 0
-                ),
+            self._augmentation = build_augmentation(self._augmentation_cfg, **build_kwargs)
+        else:
+            self._fallback_augmentations = tuple(
+                build_augmentation(params, **build_kwargs) for params in self._view_params
             )
         self.ssl_model = build_ssl(True, self.encoder, dict(self.hparams.ssl))
         if self.ssl_model is None:
@@ -127,21 +140,25 @@ class BGRLModule(L.LightningModule):
             getattr(batch, "categorical_codes", None),
         )
 
+    def _view_rng(self) -> torch.Generator:
+        """Generator for the augmentation draws.
+
+        Seeded once from ``task.augmentation_seed`` and then advanced, so the
+        two views of a batch differ while the whole pretraining run stays
+        reproducible. Without an explicit generator the augmentations would
+        consume the global RNG and silently depend on unrelated call order.
+        """
+        if self._view_generator is None:
+            self._view_generator = torch.Generator()
+            self._view_generator.manual_seed(self._augmentation_seed)
+        return self._view_generator
+
     def _make_views(self, batch):
+        generator = self._view_rng()
         if self._augmentation is not None:
-            return self._augmentation(batch, None), self._augmentation(batch, None)
-        return (
-            augment_graph(
-                batch,
-                drop_edge_p=self._drop_edge_p1,
-                drop_feat_p=self._drop_feat_p1,
-            ),
-            augment_graph(
-                batch,
-                drop_edge_p=self._drop_edge_p2,
-                drop_feat_p=self._drop_feat_p2,
-            ),
-        )
+            return self._augmentation(batch, generator), self._augmentation(batch, generator)
+        first, second = self._fallback_augmentations
+        return first(batch, generator), second(batch, generator)
 
     def _step(self, batch) -> torch.Tensor:
         view1, view2 = self._make_views(batch)

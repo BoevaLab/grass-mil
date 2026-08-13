@@ -145,31 +145,34 @@ def drop_edges(
 ):
     """Uniformly drop edges.
 
-    ``force_undirected`` defaults to True: the legacy finetune-time transform
-    defaulted it to False while BGRL pretraining used True, so the two regimes
-    silently augmented differently.
-    """
-    from torch_geometric.utils import dropout_edge
+    ``force_undirected`` keeps both directions of an edge together: the legacy
+    finetune transform left it off while pretraining had it on, so the two
+    regimes augmented differently and message passing became
+    direction-dependent.
 
+    The draw is taken here rather than through ``torch_geometric.utils
+    .dropout_edge``, which offers no generator argument and would silently
+    consume the global RNG, making seeded runs irreproducible.
+    """
     if p <= 0.0:
         return data
+    if not 0.0 <= p < 1.0:
+        raise ValueError(f"drop probability must be within [0, 1), got {p}.")
+
     out = _clone(data)
-    edge_index, edge_mask = dropout_edge(
-        out.edge_index,
-        p=float(p),
-        force_undirected=force_undirected,
-        training=True,
-    )
-    out.edge_index = edge_index
+    edge_index = out.edge_index
+    if edge_index.numel() == 0:
+        return out
+
+    draws = torch.rand((edge_index.size(1),), generator=generator, device=edge_index.device)
+    keep = draws >= float(p)
+    if force_undirected:
+        keep = _mutual_edge_mask(edge_index, keep)
+
+    out.edge_index = edge_index[:, keep]
     edge_attr = getattr(out, "edge_attr", None)
     if edge_attr is not None:
-        if force_undirected:
-            # dropout_edge returns the mask over the original edges and then
-            # re-symmetrises, so the attributes are duplicated to match.
-            kept = edge_attr[edge_mask]
-            out.edge_attr = torch.cat([kept, kept], dim=0)[: edge_index.size(1)]
-        else:
-            out.edge_attr = edge_attr[edge_mask]
+        out.edge_attr = edge_attr[keep]
     return out
 
 

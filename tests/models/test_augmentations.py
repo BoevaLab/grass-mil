@@ -171,3 +171,73 @@ def test_build_augmentation_dispatches_on_mode() -> None:
 def test_drop_importance_validates_its_hyperparameters(mu: float, p_lambda: float) -> None:
     with pytest.raises(ValueError):
         drop_importance(_star_graph(), mu=mu, p_lambda=p_lambda)
+
+
+def test_drop_edges_honours_its_generator() -> None:
+    """The generator must actually drive the draw.
+
+    torch_geometric's dropout_edge takes no generator and consumes the global
+    RNG, so routing through it made seeded runs silently irreproducible.
+    """
+    data = _star_graph(n_leaves=24)
+
+    first = drop_edges(data, p=0.5, generator=_generator(11))
+    second = drop_edges(data, p=0.5, generator=_generator(11))
+    torch.testing.assert_close(first.edge_index, second.edge_index)
+
+    different = drop_edges(data, p=0.5, generator=_generator(12))
+    assert not (
+        first.edge_index.shape == different.edge_index.shape
+        and torch.equal(first.edge_index, different.edge_index)
+    )
+
+    # The global RNG must not influence the result at all.
+    torch.manual_seed(0)
+    a = drop_edges(data, p=0.5, generator=_generator(11))
+    torch.manual_seed(999)
+    b = drop_edges(data, p=0.5, generator=_generator(11))
+    torch.testing.assert_close(a.edge_index, b.edge_index)
+
+
+def test_bgrl_views_are_reproducible_and_distinct() -> None:
+    """Two views must differ from each other but repeat across runs."""
+    import lightning as L
+
+    from grass_mil.models.bgrl_module import BGRLModule
+
+    def _views(seed: int):
+        module = BGRLModule(
+            encoder={"input_dim": 3, "hidden_dim": 8, "out_dim": 8, "num_layers": 2},
+            ssl={
+                "method": "bgrl",
+                "predictor": {
+                    "_target_": "grass_mil.models.components.ssl.MLPPredictor",
+                    "input_size": 8,
+                    "output_size": 8,
+                    "hidden_size": 16,
+                },
+            },
+            task={
+                "drop_edge_p1": 0.4,
+                "drop_feat_p1": 0.4,
+                "drop_edge_p2": 0.4,
+                "drop_feat_p2": 0.4,
+                "augmentation_seed": seed,
+                # Set explicitly so setup() never reaches for a Trainer.
+                "total_steps": 10,
+            },
+        )
+        L.seed_everything(123, workers=True)
+        module.setup("fit")
+        return module._make_views(_star_graph(n_leaves=20))
+
+    first_a, first_b = _views(5)
+    second_a, second_b = _views(5)
+
+    # Same augmentation seed reproduces both views exactly.
+    torch.testing.assert_close(first_a.edge_index, second_a.edge_index)
+    torch.testing.assert_close(first_b.edge_index, second_b.edge_index)
+
+    # The two views of one batch are independent draws, not copies.
+    same_shape = first_a.edge_index.shape == first_b.edge_index.shape
+    assert not (same_shape and torch.equal(first_a.edge_index, first_b.edge_index))

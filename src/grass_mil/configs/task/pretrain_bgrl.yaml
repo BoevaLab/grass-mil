@@ -21,6 +21,9 @@ task:
   total_steps: 10000
   momentum: 0.99
   momentum_min: 0.99
+  # Seeds the augmentation draws so pretraining views are reproducible
+  # independently of the global RNG.
+  augmentation_seed: 0
   drop_edge_p1: 0.2
   drop_edge_p2: 0.2
   drop_feat_p1: 0.2
