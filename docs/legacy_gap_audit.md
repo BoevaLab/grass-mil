@@ -1,58 +1,74 @@
-# Legacy Gap Audit
+# Published-Method Fidelity Status
 
-This project intentionally does not copy legacy implementation details directly.
-Instead, it ports validated concepts into a clean contract-first architecture.
+This document used to assert that a list of "legacy risks" had been resolved by
+rebuilding from concepts rather than porting code. That framing hid a real
+problem: several load-bearing pieces of the published method were not
+implemented here at all, and the audit could not have caught it, because it
+checked engineering hygiene rather than fidelity to the method.
 
-## Resolved Legacy Risks
+It is now a status record. For the authoritative mapping of method → code →
+test, see [`method_fidelity.md`](method_fidelity.md).
 
-1. Broken module registration patterns
+## Gaps that were open and are now closed
 
-- Risk: modules stored in plain Python lists are not registered in `nn.Module`.
-- Resolution: always use `nn.ModuleList`/`nn.ModuleDict` for learnable submodules.
+1. **The encoder could not express the published input scheme.** There was no
+   cell-type embedding, so cell identity — the only node input for some cohorts
+   — had no path into the model. Closed by `NodeInputEmbedding`.
+2. **Edge conditioning was wrong.** `gine` fed the whole edge-attribute vector
+   into the convolution. The production models condition on the scalar edge
+   length. Closed by `EncoderConfig.edge_feature_index`.
+3. **Attention was single-channel.** Bag pooling squeezed the head to one
+   channel broadcast across all class logits, so the per-class formulation —
+   and therefore the exact attribution identity — could not be expressed.
+   Closed; the identity is now asserted at `atol=1e-12`.
+4. **Sampling controls were missing.** No ego-graph radius cutoff and no
+   interior seeding, so ego-graphs rooted at a section edge were truncated by
+   the boundary rather than by biology.
+5. **SSL views were uniform.** Elementwise masking instead of the
+   degree-importance drop plus cell-size noise.
+6. **No attribution.** Attention lift existed; margins, the identity check and
+   uncertainty intervals did not.
+7. **No spatial statistics.** Moran's I, Ripley's cross-L and cross-space
+   agreement had no implementation.
 
-2. Fragile attention assumptions
+## Bugs found while closing them
 
-- Risk: implicit transpose/shape assumptions lead to silent logic errors.
-- Resolution: explicit input-output shape contracts and attention normalization controlled by caller.
+These produced silently wrong results rather than failures, which is why they
+survived:
 
-3. Hidden mutable dataset/sampler coupling
+1. **Sampling discarded cell type.** `_apply_transform_to_each_subgraph` dropped
+   every node-length tensor as "already represented by `x`" — false for
+   `categorical_index` and `pos`.
+2. **Node codes were batched along the wrong axis.** PyTorch Geometric treats
+   any attribute whose name contains `index` as an edge-index tensor, so
+   `categorical_index` was concatenated along the feature dimension. Renamed to
+   `categorical_codes`; graphs from older runs are migrated on load.
+3. **Attention flattening in two directions.** `inference/aggregation.py`
+   silently reshaped multi-column attention to 1-D while
+   `interpretability_export.py` raised on it. One gave wrong numbers, the other
+   crashed.
+4. **Asymmetric edge dropping.** The finetune-time transform left
+   `force_undirected=False` while pretraining used `True`, so the two regimes
+   augmented differently and message passing became direction-dependent.
+5. **Order-dependent Ripley radii.** The radius grid came from whichever region
+   was iterated first.
+6. **A concordance index that synchronised per pair.** O(n²) Python with two
+   `.item()` calls per pair.
 
-- Risk: mutating dataset-global indices/cache from training code introduces race conditions and stale state.
-- Resolution: sampler strategies operate on provided graph units only, no mutation of datamodule internals.
+## Engineering invariants (the original content, still enforced)
 
-4. Hardcoded script behavior
+- Learnable submodules live in `nn.ModuleList`/`nn.ModuleDict`.
+- Attention shape contracts are explicit; normalisation is caller-controlled and
+  validated by `grass_mil.contracts.validate_attention_width`.
+- Samplers do not mutate datamodule state.
+- Behaviour is config-driven, not hardcoded per project. The legacy
+  `os.environ` control surface is deliberately not ported.
+- Native PyG operators are preferred; adapters stay thin.
+- Optional components instantiate only when their config is set.
 
-- Risk: project, path, split, and task logic hardcoded in scripts prevents reuse.
-- Resolution: all component behavior and toggles are Hydra-configurable.
+## Deliberately retained
 
-5. Over-customized message passing
-
-- Risk: custom conv implementations increase maintenance burden and bug surface.
-- Resolution: use native PyG layers by default; add only thin adapters when strictly needed.
-
-6. Inconsistent loss interfaces
-
-- Risk: different tasks using incompatible shape conventions.
-- Resolution: standardized loss interfaces with validation for categorical, regression, and Cox objectives.
-
-7. Optional feature leakage
-
-- Risk: attention/SSL paths accidentally active by default due to implicit construction.
-- Resolution: explicit config flags (`use_attention`, `use_ssl`) govern instantiation.
-
-8. LOOCV split leakage in legacy scripts
-
-- Risk: legacy LOOCV scripts computed class weights and dataset-wide metadata before or across fold boundaries, allowing held-out fold information to influence training.
-- Resolution: configurable LOOCV split assignment is performed in precompute, reducer `train_only` fitting is guarded for fold-specific preprocessing, and validation strategy is explicit (`heldout_fold_items` or `patches_from_train_items`) with deterministic seeds.
-
-9. Fragile cluster transfer state assumptions
-
-- Risk: notebook-era transfer used implicit estimator internals (for example `clusterer._embedding_`) that are absent for some clustering backends and break silently across versions.
-- Resolution: explicit transfer bundle contract persists projector + kNN model + metadata, and transfer fitting reads clustering feature-space outputs from `ReportBundle`.
-
-## Acceptance Criteria
-
-- Component modules are side-effect free.
-- Sampler API is data-layer agnostic.
-- Optional modules instantiate only when enabled.
-- Tests cover shape contracts and native/custom sampler parity on synthetic inputs.
+- Region accumulation. It is a throughput mechanism rather than an objective,
+  and the final NSCLC runs use it (`hyperbatch_size: 16`), so it stays.
+- The clustering algorithm's own names (`run_clustering`, `n_clusters`,
+  `min_cluster_size`). Clustering is the method; niches are its result.

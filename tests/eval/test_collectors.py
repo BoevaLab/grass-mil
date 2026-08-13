@@ -4,7 +4,7 @@ import pytest
 import torch
 from types import SimpleNamespace
 
-from src.inference.collectors import collect_inference_payload
+from grass_mil.inference.collectors import collect_inference_payload
 
 
 class _FakeTrainer:

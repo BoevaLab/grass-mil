@@ -1,0 +1,54 @@
+# @package _global_
+
+model:
+  flags:
+    use_attention: true
+    use_ssl: false
+
+  encoder:
+    _target_: grass_mil.models.components.backbones.EncoderConfig
+    input_dim: 64
+    hidden_dim: 128
+    out_dim: 128
+    num_layers: 3
+    dropout: 0.1
+    conv_type: gin
+    norm: batchnorm
+    jk: last
+    act: relu
+    pooling: mean
+    gat_heads: 4
+    use_edge_attr: false
+    edge_weight_index: 0
+    edge_attr_dim: null
+    # Selects a single scalar edge column (the edge length) for GINE message
+    # passing; null passes the whole edge_attr vector through.
+    edge_feature_index: null
+    # Learned embedding of a categorical node label, summed with the projection
+    # of the continuous features. null disables it (features come from `x` only).
+    categorical_embedding: null
+
+  attention:
+    _target_: grass_mil.models.components.attention.AttnNetGatedProjected
+    input_dim: 128
+    projection_dim: 64
+    hidden_dim: 16
+    dropout: false
+    # Must equal graph_head.output_dim: attention is per-class.
+  n_classes: 1
+
+  ssl:
+    method: bgrl
+    predictor:
+      _target_: grass_mil.models.components.ssl.MLPPredictor
+      input_size: 128
+      output_size: 128
+      hidden_size: 512
+
+  graph_head:
+    _target_: grass_mil.models.components.heads.GraphPredictionHead
+    input_dim: 128
+    output_dim: 1
+    hidden_dim: 128
+    num_layers: 2
+    dropout: 0.0

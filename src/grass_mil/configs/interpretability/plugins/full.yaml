@@ -1,0 +1,14 @@
+# Every builtin analysis enabled. Slower than the default preset:
+# Moran's I and Ripley scale with niche size and permutation count.
+defaults:
+  - default
+  - _self_
+
+enabled:
+  - niche_profiles
+  - margin_attribution
+  - neighborhood_enrichment
+  - per_niche_cell_type_enrichment
+  - filtration_curves
+  - morans_i
+  - ripley

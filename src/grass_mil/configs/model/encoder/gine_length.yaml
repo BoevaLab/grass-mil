@@ -1,0 +1,36 @@
+# Production GRASS-MIL encoder: GINE conditioned on the scalar edge length,
+# with cell identity supplied through a learned embedding rather than as a
+# one-hot column of `x`.
+#
+# `input_dim: 0` lets the datamodule report the continuous node-feature width
+# (0 for cell-type-only cohorts, 1 when cell size is present). Likewise
+# `num_embeddings: null` and `column_index: null` are resolved from the
+# processed dataset's label map and categorical slices.
+_target_: grass_mil.models.components.backbones.EncoderConfig
+input_dim: 0
+hidden_dim: 256
+out_dim: 256
+num_layers: 4
+dropout: 0.2
+conv_type: gine
+norm: layernorm
+jk: last
+act: relu
+pooling: max
+gat_heads: 4
+
+# Message passing reads exactly one edge column: the edge length. Index 0 of
+# `edge_attr` is `distance` for the delaunay graph builder's default
+# `edge_features: ["distance", "neighbor"]`.
+use_edge_attr: true
+edge_weight_index: 0
+edge_attr_dim: 1
+edge_feature_index: 0
+
+categorical_embedding:
+  label: cell_type
+  num_embeddings: null
+  column_index: null
+  # Reserve a trailing row so BGRL augmentations can mark a dropped node
+  # "unassigned" without resizing the table.
+  reserve_unassigned: true

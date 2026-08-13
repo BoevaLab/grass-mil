@@ -10,21 +10,20 @@ from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, open_dict
 from omegaconf import OmegaConf
 
-from src.inference.schemas import (
+from grass_mil.inference.schemas import (
     AggregatedPredictionPayload,
     BatchPredictionPayload,
     CollectedInferencePayload,
     EmbeddingPayload,
 )
-from src.inference.predict import (
+from grass_mil.inference.predict import (
     _needs_instance_payload,
     _plan_preforward_subsampling,
     predict,
 )
-from src.train import train
+from grass_mil.train import train
 
 
-@pytest.mark.slow
 def test_predict_cli_smoke(cfg_train: DictConfig, cfg_predict: DictConfig, tmp_path: Path) -> None:
     with open_dict(cfg_train):
         cfg_train.trainer.max_epochs = 1
@@ -186,7 +185,7 @@ def test_needs_instance_payload(cfg_dict, expected) -> None:
 def test_predict_raises_when_preforward_subsampling_is_requested_but_ineffective(
     monkeypatch, tmp_path: Path
 ) -> None:
-    import src.inference.predict as predict_module
+    import grass_mil.inference.predict as predict_module
 
     datamodule = _DataModule(sampler_name="identity", runtime={"enabled": True})
 
@@ -243,7 +242,7 @@ def test_predict_raises_when_preforward_subsampling_is_requested_but_ineffective
 def test_predict_disables_post_subsampling_only_when_preforward_is_effective(
     monkeypatch, tmp_path: Path
 ) -> None:
-    import src.inference.predict as predict_module
+    import grass_mil.inference.predict as predict_module
 
     datamodule = _DataModule(sampler_name="shadow_native", runtime={"enabled": True})
     captured = {}
@@ -345,7 +344,7 @@ def test_predict_disables_post_subsampling_only_when_preforward_is_effective(
 def test_predict_writes_embeddings_from_single_pass_collected_payload(
     monkeypatch, tmp_path: Path
 ) -> None:
-    import src.inference.predict as predict_module
+    import grass_mil.inference.predict as predict_module
 
     datamodule = _DataModule(sampler_name="shadow_native", runtime={"enabled": True})
     wrote_paths = []
@@ -465,7 +464,7 @@ def test_predict_writes_embeddings_from_single_pass_collected_payload(
 
 
 def test_predict_summary_includes_aggregation_metadata(monkeypatch, tmp_path: Path) -> None:
-    import src.inference.predict as predict_module
+    import grass_mil.inference.predict as predict_module
 
     class _FakeDataModule:
         pass
@@ -611,7 +610,7 @@ def test_predict_raises_when_ckpt_path_missing(tmp_path: Path) -> None:
 
 
 def test_predict_can_export_interpretability_tables(monkeypatch, tmp_path: Path) -> None:
-    import src.inference.predict as predict_module
+    import grass_mil.inference.predict as predict_module
 
     class _FakeDataModule:
         class _Dataset:

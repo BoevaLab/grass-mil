@@ -3,7 +3,7 @@ import torch
 
 
 def test_weighted_cross_entropy():
-    from src.models.components.losses import WeightedCrossEntropyLoss
+    from grass_mil.models.components.losses import WeightedCrossEntropyLoss
 
     loss_fn = WeightedCrossEntropyLoss()
     logits = torch.randn(12, 3)
@@ -15,7 +15,7 @@ def test_weighted_cross_entropy():
 
 
 def test_weighted_bce():
-    from src.models.components.losses import WeightedBCEWithLogitsLoss
+    from grass_mil.models.components.losses import WeightedBCEWithLogitsLoss
 
     loss_fn = WeightedBCEWithLogitsLoss()
     logits = torch.randn(12, 1)
@@ -28,7 +28,7 @@ def test_weighted_bce():
 
 @pytest.mark.parametrize("loss_name", ["mse", "huber"])
 def test_regression_losses(loss_name):
-    from src.models.components.losses import WeightedHuberLoss, WeightedMSELoss
+    from grass_mil.models.components.losses import WeightedHuberLoss, WeightedMSELoss
 
     pred = torch.randn(12, 2)
     target = torch.randn(12, 2)
@@ -40,7 +40,7 @@ def test_regression_losses(loss_name):
 
 
 def test_coxsgd_loss():
-    from src.models.components.losses import CoxSGDLoss
+    from grass_mil.models.components.losses import CoxSGDLoss
 
     loss_fn = CoxSGDLoss(top_n=2, regularizer_weight=0.01)
     y_pred = torch.randn(16, 1)
@@ -52,7 +52,7 @@ def test_coxsgd_loss():
 
 
 def test_coxsgd_top_n_handles_tiny_batches():
-    from src.models.components.losses import CoxSGDLoss
+    from grass_mil.models.components.losses import CoxSGDLoss
 
     loss_fn = CoxSGDLoss(top_n=10, regularizer_weight=0.01)
     y_pred = torch.randn(1, 1)

@@ -1,0 +1,2 @@
+_target_: grass_mil.models.components.losses.WeightedHuberLoss
+delta: 1.0

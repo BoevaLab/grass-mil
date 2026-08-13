@@ -4,7 +4,7 @@ import json
 import math
 from pathlib import Path
 
-from src.inference.io import write_json
+from grass_mil.inference.io import write_json
 
 
 def test_write_json_sanitizes_non_finite_floats(tmp_path: Path) -> None:

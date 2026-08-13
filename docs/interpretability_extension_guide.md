@@ -31,8 +31,8 @@ Examples:
 
 Create a module:
 
-- `src/interpretability/core/<your_method>.py`
-- or `src/interpretability/tier2/<your_method>.py`
+- `src/grass_mil/interpretability/core/<your_method>.py`
+- or `src/grass_mil/interpretability/tier2/<your_method>.py`
 
 Guidelines:
 
@@ -52,7 +52,7 @@ def compute_spatial_entropy(
     node_table: pd.DataFrame,
     spatial_table: pd.DataFrame,
     *,
-    label_column: str = "cluster_label",
+    label_column: str = "niche_label",
 ) -> pd.DataFrame:
     if label_column not in node_table.columns:
         raise ValueError(f"Missing label column {label_column!r}.")
@@ -64,12 +64,12 @@ def compute_spatial_entropy(
 
 Add plugin class in:
 
-- `src/interpretability/plugins/builtin.py`
+- `src/grass_mil/interpretability/plugins/builtin.py`
 - or a new plugin module imported at registration time.
 
 Plugin responsibilities:
 
-1. Read context state (e.g., cluster labels).
+1. Read context state (e.g., niche labels).
 2. Call your pure analysis function.
 3. Return `PluginResult` with:
 - `payload` for machine consumption
@@ -83,15 +83,15 @@ class SpatialEntropyPlugin(InterpretabilityPlugin):
     name: str = "spatial_entropy"
 
     def required_inputs(self) -> list[str]:
-        return ["spatial_table", "cluster_labels"]
+        return ["spatial_table", "niche_labels"]
 
     def run(self, dataset, context: PluginContext, **params):
         table = dataset.instance_table.copy()
-        table["cluster_label"] = context.state["cluster_labels"]
+        table["niche_label"] = context.state["niche_labels"]
         entropy_df = compute_spatial_entropy(
             table,
             dataset.spatial_table,
-            label_column=str(params.get("label_column", "cluster_label")),
+            label_column=str(params.get("label_column", "niche_label")),
         )
         return PluginResult(
             name=self.name,
@@ -99,7 +99,7 @@ class SpatialEntropyPlugin(InterpretabilityPlugin):
             sections=[
                 ReportSection(
                     title="Spatial Entropy",
-                    description="Entropy by cluster.",
+                    description="Entropy by niche.",
                     tables={"entropy": entropy_df},
                 )
             ],
@@ -141,11 +141,11 @@ Example:
 
 ```yaml
 enabled:
-  - cluster_profiles
+  - niche_profiles
   - spatial_entropy
 params:
   spatial_entropy:
-    label_column: cluster_label
+    label_column: niche_label
     radius: 50.0
 ```
 
@@ -153,7 +153,7 @@ params:
 
 If table-only output is insufficient:
 
-1. Add figure builder in `src/interpretability/reporting/plotly_builders.py`.
+1. Add figure builder in `src/grass_mil/interpretability/reporting/plotly_builders.py`.
 2. Detect plugin payload and create a figure.
 3. Ensure figure naming is stable for snapshot paths.
 

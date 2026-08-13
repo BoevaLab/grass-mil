@@ -1,0 +1,2 @@
+_target_: grass_mil.models.components.losses.WeightedCrossEntropyLoss
+class_weight: null

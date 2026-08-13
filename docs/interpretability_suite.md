@@ -28,7 +28,7 @@ Key principles:
 
 Package roots:
 
-- `src/interpretability/`
+- `src/grass_mil/interpretability/`
 - `configs/interpretability/`
 - `tests/interpretability/`
 
@@ -37,34 +37,34 @@ Package roots:
 Core layers:
 
 1. Data contracts and loaders
-- `src/interpretability/contracts.py`
-- `src/interpretability/core/data.py`
+- `src/grass_mil/interpretability/contracts.py`
+- `src/grass_mil/interpretability/core/data.py`
 
 2. Core numerical analysis
-- `src/interpretability/core/reduction.py`
-- `src/interpretability/core/clustering.py`
-- `src/interpretability/core/biomarkers.py`
+- `src/grass_mil/interpretability/core/reduction.py`
+- `src/grass_mil/interpretability/core/clustering.py`
+- `src/grass_mil/interpretability/core/biomarkers.py`
 
 3. Tier-2 analyses
-- `src/interpretability/tier2/neighborhood.py`
-- `src/interpretability/tier2/filtration.py`
+- `src/grass_mil/interpretability/tier2/neighborhood.py`
+- `src/grass_mil/interpretability/tier2/filtration.py`
 
 4. Plugin orchestration
-- `src/interpretability/plugins/base.py`
-- `src/interpretability/plugins/registry.py`
-- `src/interpretability/plugins/builtin.py`
-- `src/interpretability/pipeline.py`
+- `src/grass_mil/interpretability/plugins/base.py`
+- `src/grass_mil/interpretability/plugins/registry.py`
+- `src/grass_mil/interpretability/plugins/builtin.py`
+- `src/grass_mil/interpretability/pipeline.py`
 
 5. Reporting
-- `src/interpretability/reporting/plotly_builders.py`
-- `src/interpretability/reporting/sections.py`
-- `src/interpretability/reporting/html.py`
-- `src/interpretability/reporting/snapshot.py`
-- `src/interpretability/reporting/pdf.py`
-- `src/interpretability/reporting/render.py`
+- `src/grass_mil/interpretability/reporting/plotly_builders.py`
+- `src/grass_mil/interpretability/reporting/sections.py`
+- `src/grass_mil/interpretability/reporting/html.py`
+- `src/grass_mil/interpretability/reporting/snapshot.py`
+- `src/grass_mil/interpretability/reporting/pdf.py`
+- `src/grass_mil/interpretability/reporting/render.py`
 
 6. CLI
-- `src/interpretability/report_cli.py`
+- `src/grass_mil/interpretability/report_cli.py`
 
 ## 3) Normalized Input Contracts
 
@@ -102,7 +102,7 @@ Common optional columns:
 - `instance_attention_logits` export requires shape `(N, 1)`; multi-column attention logits are
   rejected as ambiguous.
 
-Note: `cluster_profiles` and `attention_attribution` require `comp_*` columns.
+Note: `niche_profiles` requires `comp_*` columns.
 There is no fallback to one-hot `cell_type` composition.
 
 `variance_estimator` convention (biomarker z-scoring):
@@ -146,10 +146,10 @@ Public exports:
 - `compute_filtration_curves(...)`
 - `prepare_tissue_graph_view(...)`
 - `build_tissue_graph_figure(...)`
-- `fit_cluster_transfer_from_report_bundle(...)`
-- `apply_cluster_transfer(...)`
-- `save_cluster_transfer_bundle(...)`
-- `load_cluster_transfer_bundle(...)`
+- `fit_niche_transfer_from_report_bundle(...)`
+- `apply_niche_transfer(...)`
+- `save_niche_transfer_bundle(...)`
+- `load_niche_transfer_bundle(...)`
 - `run_interpretability_pipeline(...)`
 - `render_interpretability_report(...)`
 
@@ -161,8 +161,8 @@ from src.interpretability import (
     run_clustering,
     prepare_tissue_graph_view,
     build_tissue_graph_figure,
-    fit_cluster_transfer_from_report_bundle,
-    apply_cluster_transfer,
+    fit_niche_transfer_from_report_bundle,
+    apply_niche_transfer,
     run_interpretability_pipeline,
     render_interpretability_report,
 )
@@ -245,7 +245,7 @@ Common parameters:
 
 Returns a `ClusteringResult` dataclass with:
 
-- cluster labels
+- niche labels
 - resolved parameters
 - fitted object
 
@@ -271,8 +271,8 @@ Plugin registration is per pipeline run (fresh `PluginRegistry`).
 
 Built-in plugins:
 
-- `cluster_profiles`
-- `attention_attribution`
+- `niche_profiles`
+- `margin_attribution`
 - `neighborhood_enrichment`
 - `diff_neighborhood_enrichment`
 - `filtration_curves`
@@ -288,7 +288,7 @@ Built-in plugins:
 - disabled by default in `plugins.enabled`
 - requires explicit `sample_value` selection (no auto-pick)
 - requires `center_x` and `center_y` coordinates in `instance_table`
-- colors nodes by pipeline `cluster_labels` context
+- colors nodes by pipeline `niche_labels` context
 - uses `spatial_table` edges filtered to selected sample nodes
 
 ## 7) Pipeline Orchestration
@@ -300,14 +300,14 @@ Workflow:
 1. Load embedding matrix from `instance_table`.
 2. Run configured reduction.
 3. Run configured clustering:
-- `cluster_on_pca=true`: cluster on PCA projection used for clustering.
-- `cluster_on_pca=false`: cluster on raw embedding columns.
-4. Build core cluster summaries.
+- `cluster_on_pca=true`: niche on PCA projection used for clustering.
+- `cluster_on_pca=false`: niche on raw embedding columns.
+4. Build core niche summaries.
 5. Execute enabled plugins in order.
 6. Persist canonical artifacts:
-- `artifacts/instance_with_clusters.csv`
+- `artifacts/instance_with_niches.csv`
 - `artifacts/reduction.csv` (if enabled)
-- `artifacts/cluster_labels.csv` (if enabled)
+- `artifacts/niche_labels.csv` (if enabled)
 - `artifacts/pipeline_summary.json`
 7. Return `ReportBundle`.
 
@@ -316,11 +316,11 @@ Workflow:
 - populated with clustering PCA result when `cluster_on_pca=true`
 - `None` when clustering runs on raw embeddings
 
-## 8) Cluster Transfer Workflow (Library API)
+## 8) Niche Transfer Workflow (Library API)
 
-Notebook-parity cluster transfer is available as a library workflow:
+Notebook-parity niche transfer is available as a library workflow:
 
-1. Fit transfer bundle on a source interpretability run (cluster labels + clustering feature space).
+1. Fit transfer bundle on a source interpretability run (niche labels + clustering feature space).
 2. Persist bundle (`.joblib`) for deterministic reuse.
 3. Apply bundle to a query `instance_table` to obtain transferred labels.
 
@@ -338,14 +338,14 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.interpretability.core.data import load_interpretability_dataset
-from src.interpretability.core.transfer import (
-    apply_cluster_transfer,
-    fit_cluster_transfer_from_report_bundle,
-    load_cluster_transfer_bundle,
-    save_cluster_transfer_bundle,
+from grass_mil.interpretability.core.data import load_interpretability_dataset
+from grass_mil.interpretability.core.transfer import (
+    apply_niche_transfer,
+    fit_niche_transfer_from_report_bundle,
+    load_niche_transfer_bundle,
+    save_niche_transfer_bundle,
 )
-from src.interpretability.pipeline import run_interpretability_pipeline
+from grass_mil.interpretability.pipeline import run_interpretability_pipeline
 
 dataset = load_interpretability_dataset(instance_table_path=Path("/abs/source_instance_table.csv"))
 bundle = run_interpretability_pipeline(
@@ -363,18 +363,18 @@ bundle = run_interpretability_pipeline(
     },
     artifacts_dir=Path("/abs/source_artifacts"),
 )
-transfer = fit_cluster_transfer_from_report_bundle(dataset, bundle, n_neighbors=15)
-save_cluster_transfer_bundle(transfer, "/abs/cluster_transfer_bundle.joblib")
+transfer = fit_niche_transfer_from_report_bundle(dataset, bundle, n_neighbors=15)
+save_niche_transfer_bundle(transfer, "/abs/cluster_transfer_bundle.joblib")
 
-loaded = load_cluster_transfer_bundle("/abs/cluster_transfer_bundle.joblib")
+loaded = load_niche_transfer_bundle("/abs/cluster_transfer_bundle.joblib")
 query_table = pd.read_csv("/abs/query_instance_table.csv")
-transferred = apply_cluster_transfer(loaded, query_table)
+transferred = apply_niche_transfer(loaded, query_table)
 ```
 
 Notebook helper example for single tissue graph:
 
 ```python
-from src.interpretability.tier2.tissue_graph import (
+from grass_mil.interpretability.tier2.tissue_graph import (
     build_tissue_graph_figure,
     prepare_tissue_graph_view,
 )
@@ -387,7 +387,7 @@ view = prepare_tissue_graph_view(
     id_column="instance_id",
     x_column="center_x",
     y_column="center_y",
-    label_column="cluster_label",
+    label_column="niche_label",
 )
 fig = build_tissue_graph_figure(view, show_edges=True)
 fig.show()
@@ -424,7 +424,7 @@ Engine:
 Generate interpretability-ready tables directly from inference:
 
 ```bash
-python src/inference/predict.py \
+grass-mil-predict \
   ckpt_path=/abs/path/model.ckpt \
   data=spatial_omics \
   interpretability.enabled=true \
@@ -438,23 +438,23 @@ This writes `instance_table.csv` (and optionally `spatial_table.csv`) into
 Entrypoint:
 
 ```bash
-python src/interpretability/report_cli.py \
+grass-mil-report \
   data.instance_table=/abs/path/instance_table.csv
 ```
 
 With spatial plugins:
 
 ```bash
-python src/interpretability/report_cli.py \
+grass-mil-report \
   data.instance_table=/abs/path/instance_table.csv \
   data.spatial_table=/abs/path/spatial_table.csv \
-  plugins.enabled="[cluster_profiles,attention_attribution,neighborhood_enrichment,diff_neighborhood_enrichment,filtration_curves]"
+  plugins.enabled="[niche_profiles,margin_attribution,neighborhood_enrichment,diff_neighborhood_enrichment,filtration_curves]"
 ```
 
-Render a single selected tissue graph colored by cluster labels:
+Render a single selected tissue graph colored by niche labels:
 
 ```bash
-python src/interpretability/report_cli.py \
+grass-mil-report \
   data.instance_table=/abs/path/instance_table.csv \
   data.spatial_table=/abs/path/spatial_table.csv \
   plugins.enabled="[tissue_graph]" \
@@ -465,7 +465,7 @@ python src/interpretability/report_cli.py \
 Override algorithms:
 
 ```bash
-python src/interpretability/report_cli.py \
+grass-mil-report \
   data.instance_table=/abs/path/instance_table.csv \
   reduction=umap \
   clustering=dbscan \
@@ -476,7 +476,7 @@ python src/interpretability/report_cli.py \
 Tune HDBSCAN selection behavior explicitly:
 
 ```bash
-python src/interpretability/report_cli.py \
+grass-mil-report \
   data.instance_table=/abs/path/instance_table.csv \
   clustering=hdbscan \
   clustering.params.min_cluster_size=100 \
@@ -488,7 +488,7 @@ python src/interpretability/report_cli.py \
 Enable/disable report outputs:
 
 ```bash
-python src/interpretability/report_cli.py \
+grass-mil-report \
   data.instance_table=/abs/path/instance_table.csv \
   report.pdf.enabled=true \
   report.html.enabled=true
@@ -540,7 +540,7 @@ Parameter contract:
 From project root:
 
 ```bash
-pip install -r requirements.txt
+pip install -e ".[interpretability,report,spatial-stats,io]"
 ```
 
 For PDF export, install Playwright browser binaries:
@@ -616,3 +616,26 @@ Fix:
 - prediction/inference payload generation: `docs/inference_utility_suite.md`
 - training/eval workflows: `docs/workflows_train_infer.md`
 - extension instructions: `docs/interpretability_extension_guide.md`
+
+## Niche vocabulary
+
+Outputs use the language a biologist reads, not the algorithm's:
+
+- The groups are **niches** — recurring local tissue neighbourhoods — not
+  "clusters". Tables carry a `niche_label` column and figures name niches
+  `Niche 3`, keeping the numeric id so a figure joins back to the table.
+- Label `-1` is **Background**, not "noise". Density-based clustering assigns it
+  to neighbourhoods that fit no dense group; those are usually transitional or
+  sparsely populated tissue, which is a meaningful category rather than a
+  failure. Set `skip_background: false` on the per-niche plugins to include it.
+- Niches are ordered by a **dendrogram over their cellular composition**
+  (`core/niches.py::order_niches_by_composition`), so compositionally similar
+  niches sit next to each other in every table and heatmap instead of appearing
+  in arbitrary label order. Background is pinned last: it is a catch-all, and
+  letting it join the tree distorts the ordering. Correlation distance is the
+  default, so two niches with the same makeup at different densities read as
+  similar. Pass `order_by_composition=False` for plain numeric order.
+
+The *algorithm* is still clustering, so `run_clustering`, `ClusteringResult` and
+the sklearn parameters (`n_clusters`, `min_cluster_size`) keep their names. The
+distinction is deliberate: those are the method, the niches are the result.

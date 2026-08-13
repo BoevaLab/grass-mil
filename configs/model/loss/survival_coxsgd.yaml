@@ -1,3 +1,0 @@
-_target_: src.models.components.losses.CoxSGDLoss
-top_n: 5
-regularizer_weight: 0.05

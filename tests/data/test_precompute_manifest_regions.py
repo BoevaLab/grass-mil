@@ -5,7 +5,7 @@ import pytest
 
 pytest.importorskip("lightning")
 
-from src.data.components.precompute import ManifestConfig, SpatialOmicsPreprocessor
+from grass_mil.data.components.precompute import ManifestConfig, SpatialOmicsPreprocessor
 
 
 def _validator() -> SimpleNamespace:

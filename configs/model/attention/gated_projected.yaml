@@ -1,6 +1,0 @@
-_target_: src.models.components.attention.AttnNetGatedProjected
-input_dim: 128
-projection_dim: 64
-hidden_dim: 16
-dropout: false
-n_classes: 1

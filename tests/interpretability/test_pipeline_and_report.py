@@ -8,15 +8,15 @@ import pytest
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, open_dict
 
-from src.interpretability.contracts import ClusteringResult
-from src.interpretability.core.data import load_interpretability_dataset
-from src.interpretability.pipeline import run_interpretability_pipeline
-from src.interpretability.report_cli import run_report
+from grass_mil.contracts import ClusteringResult
+from grass_mil.interpretability.core.data import load_interpretability_dataset
+from grass_mil.interpretability.pipeline import run_interpretability_pipeline
+from grass_mil.interpretability.report_cli import run_report
 
 pytest.importorskip("plotly.graph_objects")
 
-from src.interpretability.reporting.plotly_builders import bundle_figures
-from src.interpretability.reporting.render import render_interpretability_report
+from grass_mil.interpretability.reporting.plotly_builders import bundle_figures
+from grass_mil.interpretability.reporting.render import render_interpretability_report
 
 
 def _write_minimal_tables(tmp_path: Path) -> tuple[Path, Path]:
@@ -69,10 +69,7 @@ def test_pipeline_and_report_render(monkeypatch, tmp_path: Path) -> None:
             "params": {"n_clusters": 2, "linkage": "ward"},
         },
         "plugins": {
-            "enabled": ["cluster_profiles", "attention_attribution"],
-            "params": {
-                "attention_attribution": {"attention_column": "attention", "score_column": "score"}
-            },
+            "enabled": ["niche_profiles"],
         },
     }
     bundle = run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
@@ -80,11 +77,11 @@ def test_pipeline_and_report_render(monkeypatch, tmp_path: Path) -> None:
     assert len(figs) >= 2
 
     monkeypatch.setattr(
-        "src.interpretability.reporting.render.render_pdf_via_playwright",
+        "grass_mil.interpretability.reporting.render.render_pdf_via_playwright",
         lambda html_path, pdf_path: pdf_path,  # type: ignore[lambda-assign]
     )
     monkeypatch.setattr(
-        "src.interpretability.reporting.render.export_plotly_snapshots",
+        "grass_mil.interpretability.reporting.render.export_plotly_snapshots",
         lambda figures, output_dir, scale=2.0: {},  # type: ignore[lambda-assign]
     )
     out = render_interpretability_report(
@@ -116,7 +113,7 @@ def test_report_render_tolerates_snapshot_export_failure_when_pdf_disabled(
             "params": {"n_clusters": 2, "linkage": "ward"},
         },
         "plugins": {
-            "enabled": ["cluster_profiles"],
+            "enabled": ["niche_profiles"],
             "params": {},
         },
     }
@@ -126,7 +123,7 @@ def test_report_render_tolerates_snapshot_export_failure_when_pdf_disabled(
         raise RuntimeError("kaleido unavailable")
 
     monkeypatch.setattr(
-        "src.interpretability.reporting.render.export_plotly_snapshots",
+        "grass_mil.interpretability.reporting.render.export_plotly_snapshots",
         _raise_snapshot_error,
     )
     out = render_interpretability_report(
@@ -177,7 +174,7 @@ def test_pipeline_and_report_render_with_diff_neighborhood_plugin(
     assert "diff_neighborhood_enrichment_X_Y" in figs
 
     monkeypatch.setattr(
-        "src.interpretability.reporting.render.export_plotly_snapshots",
+        "grass_mil.interpretability.reporting.render.export_plotly_snapshots",
         lambda figures, output_dir, scale=2.0: {},  # type: ignore[lambda-assign]
     )
     out = render_interpretability_report(
@@ -222,7 +219,7 @@ def test_pipeline_and_report_render_with_tissue_graph_plugin(monkeypatch, tmp_pa
     assert "tissue_graph_sample_id_sx" in figs
 
     monkeypatch.setattr(
-        "src.interpretability.reporting.render.export_plotly_snapshots",
+        "grass_mil.interpretability.reporting.render.export_plotly_snapshots",
         lambda figures, output_dir, scale=2.0: {},  # type: ignore[lambda-assign]
     )
     out = render_interpretability_report(
@@ -248,9 +245,9 @@ def test_pipeline_fails_fast_when_plugin_required_inputs_missing_cluster_labels(
     cfg = {
         "reduction": {"enabled": True, "method": "pca", "params": {"n_components": 2}},
         "clustering": {"enabled": False},
-        "plugins": {"enabled": ["cluster_profiles"], "params": {}},
+        "plugins": {"enabled": ["niche_profiles"], "params": {}},
     }
-    with pytest.raises(ValueError, match="missing required inputs: cluster_labels"):
+    with pytest.raises(ValueError, match="missing required inputs: niche_labels"):
         run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
 
 
@@ -299,7 +296,9 @@ def test_pipeline_clusters_on_raw_embeddings_when_cluster_on_pca_disabled(
             fitted_object=None,
         )
 
-    monkeypatch.setattr("src.interpretability.pipeline.run_clustering", _capture_run_clustering)
+    monkeypatch.setattr(
+        "grass_mil.interpretability.pipeline.run_clustering", _capture_run_clustering
+    )
     cfg = {
         "reduction": {"enabled": True, "method": "pca", "params": {"n_components": 1}},
         "clustering": {
@@ -314,7 +313,7 @@ def test_pipeline_clusters_on_raw_embeddings_when_cluster_on_pca_disabled(
     assert "x" in captured
     assert captured["x"].shape == expected_raw.shape
     assert np.allclose(captured["x"], expected_raw)
-    assert bundle.cluster_feature_reduction is None
+    assert bundle.niche_feature_reduction is None
 
 
 def test_pipeline_exposes_cluster_feature_reduction_when_cluster_on_pca_enabled(
@@ -339,9 +338,9 @@ def test_pipeline_exposes_cluster_feature_reduction_when_cluster_on_pca_enabled(
         "plugins": {"enabled": [], "params": {}},
     }
     bundle = run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
-    assert bundle.cluster_feature_reduction is not None
-    assert bundle.cluster_feature_reduction.method == "pca"
-    assert bundle.cluster_feature_reduction.embedding.shape[1] == 1
+    assert bundle.niche_feature_reduction is not None
+    assert bundle.niche_feature_reduction.method == "pca"
+    assert bundle.niche_feature_reduction.embedding.shape[1] == 1
 
 
 def test_report_cli_smoke(
@@ -351,11 +350,11 @@ def test_report_cli_smoke(
 ) -> None:
     instance_path, spatial_path = _write_minimal_tables(tmp_path)
     monkeypatch.setattr(
-        "src.interpretability.reporting.render.render_pdf_via_playwright",
+        "grass_mil.interpretability.reporting.render.render_pdf_via_playwright",
         lambda html_path, pdf_path: pdf_path,  # type: ignore[lambda-assign]
     )
     monkeypatch.setattr(
-        "src.interpretability.reporting.render.export_plotly_snapshots",
+        "grass_mil.interpretability.reporting.render.export_plotly_snapshots",
         lambda figures, output_dir, scale=2.0: {},  # type: ignore[lambda-assign]
     )
     with open_dict(cfg_interpret):
@@ -365,8 +364,7 @@ def test_report_cli_smoke(
         cfg_interpret.reduction.method = "pca"
         cfg_interpret.reduction.params = {"n_components": 2, "random_state": 42}
         cfg_interpret.plugins.enabled = [
-            "cluster_profiles",
-            "attention_attribution",
+            "niche_profiles",
             "neighborhood_enrichment",
             "diff_neighborhood_enrichment",
             "filtration_curves",
@@ -383,7 +381,7 @@ def test_report_cli_smoke(
 
 
 def test_pdf_renderer_raises_when_unavailable(monkeypatch, tmp_path: Path) -> None:
-    from src.interpretability.reporting.pdf import render_pdf_via_playwright
+    from grass_mil.interpretability.reporting.pdf import render_pdf_via_playwright
 
     real_import = __import__
 
@@ -398,3 +396,46 @@ def test_pdf_renderer_raises_when_unavailable(monkeypatch, tmp_path: Path) -> No
             html_path=tmp_path / "foo.html",
             pdf_path=tmp_path / "foo.pdf",
         )
+
+
+def test_resolve_color_values_handles_numeric_and_categorical_columns() -> None:
+    from grass_mil.interpretability.reporting.plotly_builders import _resolve_color_values
+
+    numeric_values, numeric_ticks = _resolve_color_values(pd.Series([0.5, 1.5, 2.5]))
+    np.testing.assert_allclose(numeric_values, [0.5, 1.5, 2.5])
+    assert numeric_ticks == {}
+
+    # A string column (``condition`` routinely is one) must be factorized rather
+    # than raising, with the original labels preserved as colorbar ticks.
+    cat_values, cat_ticks = _resolve_color_values(pd.Series(["X", "X", "Y"]))
+    np.testing.assert_allclose(cat_values, [0.0, 0.0, 1.0])
+    assert cat_ticks["ticktext"] == ["X", "Y"]
+    assert cat_ticks["tickvals"] == [0, 1]
+
+
+def test_multi_attribute_scatters_plot_string_condition_column(tmp_path: Path) -> None:
+    node_path, spatial_path = _write_minimal_tables(tmp_path)
+    dataset = load_interpretability_dataset(
+        instance_table_path=node_path,
+        spatial_table_path=spatial_path,
+        id_column="instance_id",
+        bag_id_column="bag_id",
+        cell_type_column="cell_type",
+    )
+    cfg = {
+        "reduction": {"enabled": True, "method": "pca", "params": {"n_components": 2}},
+        "clustering": {
+            "enabled": True,
+            "method": "agglomerative",
+            "params": {"n_clusters": 2, "linkage": "ward"},
+        },
+        "plugins": {"enabled": []},
+    }
+    bundle = run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
+
+    figs = dict(bundle_figures(bundle))
+    condition_figs = [name for name in figs if name.endswith("_condition")]
+    assert condition_figs, f"expected a condition-colored scatter, got {sorted(figs)}"
+
+    marker = figs[condition_figs[0]].data[0].marker
+    assert list(marker.colorbar.ticktext) == ["X", "Y"]

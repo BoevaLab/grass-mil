@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 import rootutils
-from hydra import compose, initialize
+from hydra import compose, initialize_config_module
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig, OmegaConf, open_dict
 
@@ -15,7 +15,7 @@ def cfg_train_global() -> DictConfig:
 
     :return: A DictConfig object containing a default Hydra configuration for training.
     """
-    with initialize(version_base="1.3", config_path="../configs"):
+    with initialize_config_module(version_base="1.3", config_module="grass_mil.configs"):
         cfg = compose(config_name="train.yaml", return_hydra_config=True, overrides=[])
 
         # set defaults for all tests
@@ -51,7 +51,7 @@ def cfg_eval_global() -> DictConfig:
 
     :return: A DictConfig containing a default Hydra configuration for evaluation.
     """
-    with initialize(version_base="1.3", config_path="../configs"):
+    with initialize_config_module(version_base="1.3", config_module="grass_mil.configs"):
         cfg = compose(config_name="eval.yaml", return_hydra_config=True, overrides=["ckpt_path=."])
 
         # set defaults for all tests
@@ -82,7 +82,7 @@ def cfg_eval_global() -> DictConfig:
 @pytest.fixture(scope="package")
 def cfg_predict_global() -> DictConfig:
     """A pytest fixture for inference prediction configuration."""
-    with initialize(version_base="1.3", config_path="../configs"):
+    with initialize_config_module(version_base="1.3", config_module="grass_mil.configs"):
         cfg = compose(
             config_name="inference/predict.yaml",
             return_hydra_config=True,
@@ -114,7 +114,7 @@ def cfg_predict_global() -> DictConfig:
 
 @pytest.fixture(scope="package")
 def cfg_interpret_global() -> DictConfig:
-    with initialize(version_base="1.3", config_path="../configs"):
+    with initialize_config_module(version_base="1.3", config_module="grass_mil.configs"):
         cfg = compose(
             config_name="interpretability/report.yaml",
             return_hydra_config=True,
