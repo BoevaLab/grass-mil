@@ -25,16 +25,9 @@ from grass_mil.interpretability.tier2.cell_level import (
     per_niche_cell_type_moran,
     per_niche_cell_type_ripley,
 )
-from grass_mil.interpretability.tier2.autocorrelation import (
-    diff_morans_i_vs_reference,
-    run_morans_i,
-)
-from grass_mil.interpretability.tier2.filtration import compute_filtration_curves
 from grass_mil.interpretability.tier2.neighborhood import (
     run_diff_neighborhood_enrichment,
-    run_neighborhood_enrichment,
 )
-from grass_mil.interpretability.tier2.ripley import aggregate_ripley
 from grass_mil.interpretability.tier2.tissue_graph import prepare_tissue_graph_view
 
 
@@ -99,142 +92,6 @@ class NicheProfilesPlugin(InterpretabilityPlugin):
                     "composition": summary.composition,
                     "enrichment": summary.enrichment,
                 },
-            )
-        ]
-        return PluginResult(name=self.name, payload=payload, sections=sections)
-
-
-@dataclass
-class NeighborhoodEnrichmentPlugin(InterpretabilityPlugin):
-    name: str = "neighborhood_enrichment"
-
-    def required_inputs(self) -> List[str]:
-        return ["spatial_table", "niche_labels"]
-
-    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
-        if dataset.spatial_table is None:
-            raise ValueError("Spatial table is required for neighborhood enrichment plugin.")
-        table = dataset.instance_table.copy()
-        table["niche_label"] = np.asarray(context.state["niche_labels"])
-        result = run_neighborhood_enrichment(
-            table,
-            dataset.spatial_table,
-            label_column=str(params.get("label_column", "niche_label")),
-            id_column=str(params.get("id_column", dataset.id_column)),
-            n_perms=int(params.get("n_perms", 0)),
-            random_state=int(params.get("random_state", 42)),
-            undirected=bool(params.get("undirected", False)),
-            enrichment_mode=str(params.get("enrichment_mode", "zscore")),
-        )
-        payload = {
-            "enrichment": result.enrichment,
-            "observed": result.observed,
-            "expected": result.expected,
-            "pvalues": result.pvalues,
-        }
-        section_tables = {
-            "enrichment": result.enrichment,
-            "observed": result.observed,
-            "expected": result.expected,
-        }
-        if result.pvalues is not None:
-            section_tables["pvalues"] = result.pvalues
-        sections = [
-            ReportSection(
-                title="Neighborhood Enrichment",
-                description="Niche adjacency enrichment relative to expected connectivity.",
-                tables=section_tables,
-            )
-        ]
-        return PluginResult(name=self.name, payload=payload, sections=sections)
-
-
-@dataclass
-class DiffNeighborhoodEnrichmentPlugin(InterpretabilityPlugin):
-    name: str = "diff_neighborhood_enrichment"
-
-    def required_inputs(self) -> List[str]:
-        return ["spatial_table", "niche_labels"]
-
-    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
-        if dataset.spatial_table is None:
-            raise ValueError("Spatial table is required for differential neighborhood enrichment.")
-        table = dataset.instance_table.copy()
-        table["niche_label"] = np.asarray(context.state["niche_labels"])
-        condition_column = str(
-            params.get("condition_column", dataset.condition_column or "condition")
-        )
-        pairwise = run_diff_neighborhood_enrichment(
-            table,
-            dataset.spatial_table,
-            label_column=str(params.get("label_column", "niche_label")),
-            condition_column=condition_column,
-            permutation_group_column=str(params.get("permutation_group_column", "sample_id")),
-            id_column=str(params.get("id_column", dataset.id_column)),
-            n_perms=int(params.get("n_perms", 0)),
-            random_state=int(params.get("random_state", 42)),
-            undirected=bool(params.get("undirected", False)),
-            enrichment_mode=str(params.get("enrichment_mode", "zscore")),
-        )
-        payload = {
-            "enrichment_by_pair": {pair: out.enrichment for pair, out in pairwise.items()},
-            "observed_by_pair": {pair: out.observed for pair, out in pairwise.items()},
-            "expected_by_pair": {pair: out.expected for pair, out in pairwise.items()},
-            "pvalues_by_pair": {
-                pair: out.pvalues for pair, out in pairwise.items() if out.pvalues is not None
-            },
-        }
-        sections: List[ReportSection] = []
-        for pair, out in pairwise.items():
-            section_tables = {
-                "enrichment": out.enrichment,
-                "observed": out.observed,
-                "expected": out.expected,
-            }
-            if out.pvalues is not None:
-                section_tables["pvalues"] = out.pvalues
-            sections.append(
-                ReportSection(
-                    title=f"Differential Neighborhood Enrichment ({pair})",
-                    description=(
-                        "Pairwise condition differential neighborhood enrichment "
-                        "(left condition minus right condition)."
-                    ),
-                    tables=section_tables,
-                )
-            )
-        return PluginResult(name=self.name, payload=payload, sections=sections)
-
-
-@dataclass
-class FiltrationCurvesPlugin(InterpretabilityPlugin):
-    name: str = "filtration_curves"
-
-    def required_inputs(self) -> List[str]:
-        return ["spatial_table", "niche_labels"]
-
-    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
-        if dataset.spatial_table is None:
-            raise ValueError("Spatial table is required for filtration curves plugin.")
-        table = dataset.instance_table.copy()
-        table["niche_label"] = np.asarray(context.state["niche_labels"])
-        thresholds = _resolve_filtration_thresholds(dict(params))
-        result = compute_filtration_curves(
-            table,
-            dataset.spatial_table,
-            thresholds=thresholds,
-            niche_column=str(params.get("niche_column", "niche_label")),
-            cell_type_column=str(params.get("cell_type_column", "cell_type")),
-            id_column=str(params.get("id_column", dataset.id_column)),
-            distance_column=str(params.get("distance_column", "distance")),
-            scale_within_cluster=bool(params.get("scale_within_cluster", True)),
-        )
-        payload: Dict[str, Any] = {"thresholds": result.thresholds, "curves": result.curves}
-        sections = [
-            ReportSection(
-                title="Filtration Curves",
-                description="Distance-threshold accumulation by niche and cell type.",
-                metadata={"thresholds": result.thresholds.tolist()},
             )
         ]
         return PluginResult(name=self.name, payload=payload, sections=sections)
@@ -309,83 +166,6 @@ class TissueGraphPlugin(InterpretabilityPlugin):
                 metadata=meta,
             )
         ]
-        return PluginResult(name=self.name, payload=payload, sections=sections)
-
-
-@dataclass
-class PerNicheCellTypeEnrichmentPlugin(InterpretabilityPlugin):
-    """Compute cell-type neighborhood enrichment within each niche separately.
-
-    For each niche, subsets the node table and spatial table to nodes belonging
-    to that niche, then runs neighborhood enrichment with label_column=cell_type.
-    This answers: "within niche C, which cell types are spatially co-located?"
-    """
-
-    name: str = "per_niche_cell_type_enrichment"
-
-    def required_inputs(self) -> List[str]:
-        return ["spatial_table", "niche_labels"]
-
-    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
-        if dataset.spatial_table is None:
-            raise ValueError("Spatial table is required for per-niche cell-type enrichment.")
-        cell_type_column = str(
-            params.get("cell_type_column", dataset.cell_type_column or "cell_type")
-        )
-        niche_column = str(params.get("niche_column", "niche_label"))
-        id_column = str(params.get("id_column", dataset.id_column))
-
-        table = dataset.instance_table.copy()
-        table[niche_column] = np.asarray(context.state["niche_labels"])
-
-        unique_niches = sorted(set(table[niche_column]))
-        skip_background = bool(params.get("skip_background", True))
-
-        enrichment_by_niche: Dict[str, pd.DataFrame] = {}
-        sections: List[ReportSection] = []
-
-        for niche_id in unique_niches:
-            if skip_background and niche_id == -1:
-                continue
-            niche_mask = table[niche_column] == niche_id
-            niche_table = table[niche_mask].copy()
-            if len(niche_table) < 2:
-                continue
-
-            niche_node_ids = set(niche_table[id_column].astype(str))
-            spatial = dataset.spatial_table.copy()
-            niche_spatial = spatial[
-                spatial["source_id"].astype(str).isin(niche_node_ids)
-                & spatial["target_id"].astype(str).isin(niche_node_ids)
-            ]
-            if niche_spatial.empty:
-                continue
-
-            try:
-                result = run_neighborhood_enrichment(
-                    niche_table,
-                    niche_spatial,
-                    label_column=cell_type_column,
-                    id_column=id_column,
-                    n_perms=int(params.get("n_perms", 0)),
-                    random_state=int(params.get("random_state", 42)),
-                    undirected=bool(params.get("undirected", False)),
-                    enrichment_mode=str(params.get("enrichment_mode", "obs-exp")),
-                )
-                enrichment_by_niche[str(niche_id)] = result.enrichment
-                sections.append(
-                    ReportSection(
-                        title=f"Cell-Type Enrichment — Niche {niche_id}",
-                        description=(
-                            f"Cell-type neighborhood enrichment within niche {niche_id}."
-                        ),
-                        tables={"enrichment": result.enrichment},
-                    )
-                )
-            except (ValueError, KeyError):
-                continue
-
-        payload: Dict[str, Any] = {"enrichment_by_niche": enrichment_by_niche}
         return PluginResult(name=self.name, payload=payload, sections=sections)
 
 
@@ -486,117 +266,6 @@ class MarginAttributionPlugin(InterpretabilityPlugin):
 
 
 @dataclass
-class MoransIPlugin(InterpretabilityPlugin):
-    """Spatial autocorrelation per niche, with a permutation null."""
-
-    name: str = "morans_i"
-
-    def required_inputs(self) -> List[str]:
-        return ["spatial_table", "niche_labels"]
-
-    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
-        if dataset.spatial_table is None:
-            raise ValueError("Moran's I requires a spatial table.")
-        table = dataset.instance_table.copy()
-        niche_column = str(params.get("niche_column", "niche_label"))
-        table[niche_column] = np.asarray(context.state["niche_labels"])
-
-        feature_columns = _resolve_columns(
-            table,
-            str(params.get("feature_prefix", "comp_")),
-            params.get("feature_columns"),
-        )
-        if not feature_columns:
-            raise ValueError("Moran's I found no feature columns to evaluate.")
-
-        result = run_morans_i(
-            table,
-            dataset.spatial_table,
-            feature_columns=feature_columns,
-            group_column=niche_column,
-            id_column=str(params.get("id_column", dataset.id_column)),
-            n_perms=int(params.get("n_perms", 100)),
-            random_state=int(params.get("random_state", 0)),
-            min_nodes=int(params.get("min_nodes", 3)),
-        )
-        payload: Dict[str, Any] = {
-            "statistic": result.statistic,
-            "pvalue": result.pvalue,
-            "qvalue": result.qvalue,
-            "n_nodes": result.n_nodes,
-        }
-        tables = {"morans_i": result.statistic, "qvalue": result.qvalue}
-
-        reference = params.get("reference_group", -1)
-        if reference in result.statistic.index:
-            differential = diff_morans_i_vs_reference(result, reference_group=reference)
-            payload["differential_z"] = differential
-            tables["differential_z"] = differential
-
-        sections = [
-            ReportSection(
-                title="Spatial Autocorrelation (Moran's I)",
-                description=(
-                    "Global Moran's I per niche over the instance graph, with a "
-                    "permutation null and BH-FDR adjustment."
-                ),
-                tables=tables,
-            )
-        ]
-        return PluginResult(name=self.name, payload=payload, sections=sections)
-
-
-@dataclass
-class RipleyPlugin(InterpretabilityPlugin):
-    """Centred cross-L curves over instance centroids."""
-
-    name: str = "ripley"
-
-    def required_inputs(self) -> List[str]:
-        return ["niche_labels"]
-
-    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
-        table = dataset.instance_table.copy()
-        label_column = str(params.get("label_column", "niche_label"))
-        if label_column == "niche_label":
-            table[label_column] = np.asarray(context.state["niche_labels"])
-
-        pairs = params.get("pairs")
-        if pairs is not None:
-            pairs = [(str(a), str(b)) for a, b in pairs]
-
-        result = aggregate_ripley(
-            table,
-            label_column=label_column,
-            group_column=params.get("group_column"),
-            x_column=str(params.get("x_column", "center_x")),
-            y_column=str(params.get("y_column", "center_y")),
-            pairs=pairs,
-            n_radii=int(params.get("n_radii", 50)),
-            max_fraction=float(params.get("max_fraction", 0.25)),
-            min_count=int(params.get("min_count", 5)),
-            radius_source=str(params.get("radius_source", "median")),
-        )
-        curves = result.to_frame()
-        payload = {
-            "radii": result.radii,
-            "curves": curves,
-            "n_groups": result.n_groups,
-        }
-        sections = [
-            ReportSection(
-                title="Ripley Cross-L",
-                description=(
-                    "Centred cross-L, L(r) - r: zero under complete spatial randomness, "
-                    "positive under clustering, negative under regularity."
-                ),
-                tables={"cross_l": curves},
-            )
-        ]
-        return PluginResult(name=self.name, payload=payload, sections=sections)
-
-
-@dataclass
 class NicheAgreementPlugin(InterpretabilityPlugin):
     """Agreement between the active partition and previously stored ones.
 
@@ -650,20 +319,15 @@ class NicheAgreementPlugin(InterpretabilityPlugin):
 
 def register_builtin_plugins(registry: PluginRegistry) -> None:
     registry.register(NicheProfilesPlugin())
-    registry.register(NeighborhoodEnrichmentPlugin())
-    registry.register(DiffNeighborhoodEnrichmentPlugin())
-    registry.register(FiltrationCurvesPlugin())
     registry.register(TissueGraphPlugin())
-    registry.register(PerNicheCellTypeEnrichmentPlugin())
     registry.register(MarginAttributionPlugin())
-    registry.register(MoransIPlugin())
-    registry.register(RipleyPlugin())
     registry.register(NicheAgreementPlugin())
     registry.register(CellTypeEnrichmentPerNichePlugin())
     registry.register(CellTypeMoranPerNichePlugin())
     registry.register(NicheLabelMoranPlugin())
     registry.register(CellFiltrationCurvesPlugin())
     registry.register(CellTypeRipleyPerNichePlugin())
+    registry.register(CellTypeDiffEnrichmentByConditionPlugin())
 
 
 def create_builtin_registry() -> PluginRegistry:
@@ -929,5 +593,67 @@ class CellTypeRipleyPerNichePlugin(InterpretabilityPlugin):
                 "radii": result.radii,
                 "pair_counts": result.pair_counts,
             },
+            sections=sections,
+        )
+
+
+@dataclass
+class CellTypeDiffEnrichmentByConditionPlugin(InterpretabilityPlugin):
+    """Cell-type contact enrichment differenced between conditions.
+
+    The cell-level counterpart of the removed instance-level differential: it
+    asks how the wiring between cell types changes between, say, responders and
+    non-responders, rather than how neighbourhood labels co-occur.
+    """
+
+    name: str = "cell_type_diff_enrichment_by_condition"
+
+    def required_inputs(self) -> List[str]:
+        return ["cell_table", "cell_edge_table", "niche_labels"]
+
+    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
+        condition_column = str(
+            params.get("condition_column", dataset.condition_column or "condition")
+        )
+        niche_column = str(params.get("niche_column", "niche_label"))
+        cells = _cells_with_niches(dataset, context, niche_column)
+
+        # The condition lives on instances (it is a bag-level property), so it
+        # is joined onto cells the same way the niche label is.
+        if condition_column not in cells.columns:
+            instance_conditions = dataset.instance_table[
+                [dataset.id_column, condition_column]
+            ].drop_duplicates(subset=[dataset.id_column])
+            cells = cells.merge(instance_conditions, on=dataset.id_column, how="left")
+
+        results = run_diff_neighborhood_enrichment(
+            cells,
+            dataset.cell_edge_table,
+            label_column=str(params.get("cell_type_column", "cell_type")),
+            condition_column=condition_column,
+            permutation_group_column=str(params.get("permutation_group_column", "sample_id")),
+            id_column=str(params.get("cell_id_column", dataset.cell_id_column)),
+            n_perms=int(params.get("n_perms", 0)),
+            random_state=int(params.get("random_state", 42)),
+            undirected=bool(params.get("undirected", False)),
+            warn_analytical=False,
+            enrichment_mode=str(params.get("enrichment_mode", "zscore")),
+        )
+        tables = {key: result.enrichment for key, result in results.items()}
+        sections = [
+            ReportSection(
+                title="Cell-type enrichment differences between conditions",
+                description=(
+                    "Cell-type x cell-type contact enrichment computed per "
+                    "condition and differenced, over the cells inside the "
+                    "ego-graphs. Positive entries mean the pair is in closer "
+                    "contact in the first condition."
+                ),
+                tables=tables,
+            )
+        ]
+        return PluginResult(
+            name=self.name,
+            payload={key: result.enrichment for key, result in results.items()},
             sections=sections,
         )

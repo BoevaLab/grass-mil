@@ -121,28 +121,6 @@ def test_builtin_tissue_graph_plugin_fails_when_coords_missing() -> None:
         )
 
 
-def test_builtin_diff_neighborhood_plugin_execution() -> None:
-    registry = create_builtin_registry()
-    ds = _sample_dataset()
-    labels = np.array([0, 0, 1, 1, 1, 0])
-    plugin = registry.get("diff_neighborhood_enrichment")
-    out = plugin.run(
-        ds,
-        PluginContext(state={"niche_labels": labels}),
-        condition_column="condition",
-        permutation_group_column="sample_id",
-        n_perms=0,
-        undirected=True,
-    )
-    assert out.name == "diff_neighborhood_enrichment"
-    assert "enrichment_by_pair" in out.payload
-    assert "X_Y" in out.payload["enrichment_by_pair"]
-    assert any(
-        section.title.startswith("Differential Neighborhood Enrichment")
-        for section in out.sections
-    )
-
-
 def test_cluster_profiles_reuses_context_cluster_summary(monkeypatch) -> None:
     registry = create_builtin_registry()
     ds = _sample_dataset()
@@ -808,50 +786,6 @@ def test_filtration_runtime_sanity() -> None:
     assert elapsed < 8.0
 
 
-def test_builtin_per_niche_cell_type_enrichment_plugin_execution() -> None:
-    registry = create_builtin_registry()
-    ds = _sample_dataset()
-    labels = np.array([0, 0, 0, 1, 1, 1])
-    plugin = registry.get("per_niche_cell_type_enrichment")
-    out = plugin.run(
-        ds,
-        PluginContext(state={"niche_labels": labels}),
-        n_perms=0,
-        enrichment_mode="obs-exp",
-    )
-    assert out.name == "per_niche_cell_type_enrichment"
-    enrichment = out.payload["enrichment_by_niche"]
-    # Both niches are internally connected in the sample spatial table.
-    assert set(enrichment) == {"0", "1"}
-    for frame in enrichment.values():
-        # Enrichment is a square cell-type x cell-type matrix.
-        assert list(frame.index) == list(frame.columns)
-    assert all(section.title.startswith("Cell-Type Enrichment") for section in out.sections)
-
-
-def test_per_niche_cell_type_enrichment_skips_noise_cluster() -> None:
-    registry = create_builtin_registry()
-    ds = _sample_dataset()
-    labels = np.array([-1, -1, -1, 1, 1, 1])
-    plugin = registry.get("per_niche_cell_type_enrichment")
-
-    skipped = plugin.run(
-        ds,
-        PluginContext(state={"niche_labels": labels}),
-        skip_background=True,
-        n_perms=0,
-    )
-    assert set(skipped.payload["enrichment_by_niche"]) == {"1"}
-
-    retained = plugin.run(
-        ds,
-        PluginContext(state={"niche_labels": labels}),
-        skip_background=False,
-        n_perms=0,
-    )
-    assert set(retained.payload["enrichment_by_niche"]) == {"-1", "1"}
-
-
 def _attribution_dataset() -> InterpretabilityDataset:
     """Sample dataset carrying per-class attention and instance logits."""
     ds = _sample_dataset()
@@ -894,34 +828,6 @@ def test_margin_attribution_requires_instance_logits() -> None:
         registry.get("margin_attribution").run(
             ds, PluginContext(state={"niche_labels": np.zeros(6, dtype=int)})
         )
-
-
-def test_morans_i_plugin_runs_over_the_instance_graph() -> None:
-    registry = create_builtin_registry()
-    ds = _sample_dataset()
-    labels = np.array([0, 0, 0, 1, 1, 1])
-
-    out = registry.get("morans_i").run(
-        ds, PluginContext(state={"niche_labels": labels}), n_perms=10, min_nodes=2
-    )
-    assert out.name == "morans_i"
-    assert set(out.payload["statistic"].index) == {0, 1}
-    assert "comp_A" in out.payload["statistic"].columns
-    assert (out.payload["qvalue"].to_numpy(dtype=float) >= 0).any()
-
-
-def test_ripley_plugin_produces_centred_curves() -> None:
-    registry = create_builtin_registry()
-    ds = _sample_dataset()
-    labels = np.array([0, 0, 1, 1, 0, 1])
-
-    out = registry.get("ripley").run(
-        ds, PluginContext(state={"niche_labels": labels}), n_radii=6, min_count=2
-    )
-    assert out.name == "ripley"
-    curves = out.payload["curves"]
-    assert len(out.payload["radii"]) == 6
-    assert curves.shape[0] == 6
 
 
 def test_cluster_agreement_plugin_compares_stored_labelings() -> None:

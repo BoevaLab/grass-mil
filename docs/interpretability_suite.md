@@ -286,30 +286,41 @@ Plugin registration is per pipeline run (fresh `PluginRegistry`).
 
 Built-in plugins:
 
-- `niche_profiles`
-- `margin_attribution`
-- `neighborhood_enrichment`
-- `diff_neighborhood_enrichment`
-- `per_niche_cell_type_enrichment`
-- `filtration_curves`
-- `morans_i`
-- `ripley`
-- `niche_agreement`
-- `tissue_graph`
+| Plugin | Unit |
+|---|---|
+| `niche_profiles` | instances, composition over all their cells |
+| `margin_attribution` | instances |
+| `cell_type_enrichment_per_niche` | cells, within each niche |
+| `cell_type_moran_per_niche` | cells, within each niche |
+| `cell_filtration_curves` | cell-cell edges, within each niche |
+| `cell_type_ripley_per_niche` | cells, within each niche |
+| `cell_type_diff_enrichment_by_condition` | cells, differenced between conditions |
+| `niche_label_moran` | instances, globally |
+| `niche_agreement` | instances |
+| `tissue_graph` | instances (visualisation) |
 
-Four of these are not enabled by any shipped preset because each needs an input
-the pipeline cannot infer:
+The tier-2 statistics are cell-level: the instance-level versions were removed,
+because treating a whole ego-graph as one node measures how neighbourhood
+*labels* relate rather than how cells do. Two niches with identical composition
+but opposite spatial arrangement are indistinguishable to an instance-level
+analysis.
+
+The cell-level plugins need `cell_table` and `cell_edge_table`, exported by
+`grass-mil-predict interpretability.cells.enabled=true` and passed to the report
+as `data.cell_table` / `data.cell_edge_table`.
+
+Three plugins are not in any shipped preset, because each needs an input the
+pipeline cannot infer:
 
 | Plugin | Additional input required |
 |---|---|
-| `diff_neighborhood_enrichment` | a condition column, plus a permutation group column in permutation mode |
+| `cell_type_diff_enrichment_by_condition` | a condition column, plus a permutation group column in permutation mode |
 | `tissue_graph` | an explicit `sample_value` (no auto-pick) |
-| `niche_agreement` | a second niche labeling column to compare against |
-| `per_niche_cell_type_enrichment` | enabled in `full.yaml`; needs `cell_type` |
+| `niche_agreement` | a second niche labelling column to compare against |
 
-`filtration_curves` default threshold grid:
+`cell_filtration_curves` default threshold grid:
 
-- notebook-parity default is `np.linspace(0.0, 55.0, 500)`
+- `np.linspace(0.0, 55.0, 500)`
 - thresholds are interpreted in micrometers
 
 `tissue_graph` behavior:
@@ -535,8 +546,7 @@ Subgroups:
 - `configs/interpretability/clustering/*.yaml`
 - `configs/interpretability/plugins/default.yaml` — `niche_profiles` only
 - `configs/interpretability/plugins/full.yaml` — composes `default` and adds
-  `margin_attribution`, `neighborhood_enrichment`,
-  `per_niche_cell_type_enrichment`, `filtration_curves`, `morans_i`, `ripley`
+  `margin_attribution`, the four cell-level analyses, and `niche_label_moran`
 
 Select a preset with:
 
@@ -705,11 +715,12 @@ What each analysis therefore measures:
 
 | Analysis | Unit | Measures |
 |---|---|---|
-| `neighborhood_enrichment` | instance pairs | how often two labels are adjacent in the instance graph, versus chance. `label_column` defaults to `niche_label`, so by default it is niche-vs-niche co-occurrence, not cell type. Point it at `cell_type` for root-cell types. |
-| `morans_i` | instances | spatial autocorrelation of a numeric column across the instance graph |
-| `ripley` | instance centroids | cross-L between point sets grouped by a label |
-| `filtration_curves` | instance pairs | counts per cell-type pair as a distance threshold grows, using root-cell types |
-| `niche_profiles` | instances | mean `comp_*` per niche -- the one summary that reflects every cell |
+| `cell_type_enrichment_per_niche` | cell pairs inside a niche | how often two cell types are in contact, versus chance |
+| `cell_type_moran_per_niche` | cells inside a niche | whether each cell type forms contiguous patches |
+| `cell_filtration_curves` | cell-cell edges inside a niche | cells of each type reached as the distance threshold grows |
+| `cell_type_ripley_per_niche` | cells inside a niche | cross-L between cell types, from their own coordinates |
+| `niche_label_moran` | instances, globally | whether niches form contiguous territories |
+| `niche_profiles` | instances | mean `comp_*` per niche, which reflects every cell in the ego-graphs |
 
 **Roots are a weighted sample, not every cell.** With
 `data.sampler.runtime.proportional_root_sampling=true` (the default) roots are

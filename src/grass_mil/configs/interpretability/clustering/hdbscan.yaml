@@ -3,7 +3,10 @@ method: hdbscan
 cluster_on_pca: true
 pca_components: 10
 params:
-  min_cluster_size: 100
+  # `auto` = 0.5% of the instances being clustered. A fixed value does not
+  # transfer between cohorts: 100 is a sensible floor at ~20k instances and
+  # swallows every niche at 2k. Set an integer to override.
+  min_cluster_size: auto
   min_samples: 1
   cluster_selection_method: eom
   cluster_selection_epsilon: 0.0

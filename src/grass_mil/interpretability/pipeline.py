@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from dataclasses import replace
 
 import json
@@ -8,6 +10,8 @@ from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
+
+log = logging.getLogger(__name__)
 
 from grass_mil.contracts import (
     NicheSummary,
@@ -71,6 +75,32 @@ def _write_table(df: pd.DataFrame, path: Path) -> None:
 def _write_json(payload: Dict[str, Any], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, default=str))
+
+
+def _resolve_adaptive_min_cluster_size(
+    params: Dict[str, Any], *, n_instances: int, method: str
+) -> Dict[str, Any]:
+    """Scale `min_cluster_size` to the cohort unless it was set explicitly.
+
+    A fixed value does not transfer between runs: 100 is a reasonable floor for
+    ~20k instances and swallows every niche at 2k. `auto` (the default) uses
+    0.5% of the instances being clustered, which keeps the smallest admissible
+    niche a constant *fraction* of the sample.
+    """
+    if method.strip().lower() not in {"hdbscan", "optics"}:
+        return params
+    value = params.get("min_cluster_size", "auto")
+    if value not in (None, "auto"):
+        return params
+    resolved = max(2, int(round(0.005 * float(n_instances))))
+    out = dict(params)
+    out["min_cluster_size"] = resolved
+    log.info(
+        "clustering.params.min_cluster_size=auto -> %d (0.5%% of %d instances)",
+        resolved,
+        n_instances,
+    )
+    return out
 
 
 def run_interpretability_pipeline(
@@ -145,6 +175,9 @@ def run_interpretability_pipeline(
                     random_state=None,
                 )
             clustering_input = combo_pca_result.embedding
+        params = _resolve_adaptive_min_cluster_size(
+            params, n_instances=int(clustering_input.shape[0]), method=method
+        )
         clustering_result = run_clustering(method, clustering_input, **params)
         labels = clustering_result.labels
 
