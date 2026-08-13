@@ -37,17 +37,25 @@ Package roots:
 Core layers:
 
 1. Data contracts and loaders
-- `src/grass_mil/interpretability/contracts.py`
+- `src/grass_mil/contracts.py` (shared package-level contracts, not
+  interpretability-specific)
 - `src/grass_mil/interpretability/core/data.py`
 
 2. Core numerical analysis
 - `src/grass_mil/interpretability/core/reduction.py`
 - `src/grass_mil/interpretability/core/clustering.py`
+- `src/grass_mil/interpretability/core/niches.py` (naming and dendrogram order)
 - `src/grass_mil/interpretability/core/biomarkers.py`
+- `src/grass_mil/interpretability/core/attribution.py` (margin attribution)
+- `src/grass_mil/interpretability/core/agreement.py` (cross-space agreement)
+- `src/grass_mil/interpretability/core/transfer.py` (niche label transfer)
 
 3. Tier-2 analyses
 - `src/grass_mil/interpretability/tier2/neighborhood.py`
 - `src/grass_mil/interpretability/tier2/filtration.py`
+- `src/grass_mil/interpretability/tier2/autocorrelation.py` (Moran's I)
+- `src/grass_mil/interpretability/tier2/ripley.py` (Ripley cross-L)
+- `src/grass_mil/interpretability/tier2/tissue_graph.py`
 
 4. Plugin orchestration
 - `src/grass_mil/interpretability/plugins/base.py`
@@ -138,9 +146,7 @@ Public exports:
 
 - `run_reduction(...)`
 - `run_clustering(...)`
-- `cluster_biomarker_summary(...)`
-- `cluster_attention_summary(...)`
-- `cluster_survival_attention_summary(...)`
+- `niche_composition_summary(...)`
 - `run_neighborhood_enrichment(...)`
 - `run_diff_neighborhood_enrichment(...)`
 - `compute_filtration_curves(...)`
@@ -156,7 +162,7 @@ Public exports:
 Import path:
 
 ```python
-from src.interpretability import (
+from grass_mil.interpretability import (
     run_reduction,
     run_clustering,
     prepare_tissue_graph_view,
@@ -168,11 +174,20 @@ from src.interpretability import (
 )
 ```
 
-Biomarker summary API:
+Composition summary API:
 
-- `cluster_biomarker_summary`, `cluster_attention_summary`, and
-  `cluster_survival_attention_summary` operate on explicit composition columns (`comp_*`).
-- `cell_type_column` is not part of these helper signatures.
+- `niche_composition_summary` operates on explicit composition columns
+  (`comp_` by default, via `composition_prefix`).
+- `cell_type_column` is not part of the signature.
+
+The attention-based summaries that used to sit here
+(`cluster_attention_summary`, `cluster_survival_attention_summary`) have been
+removed. Attention alone is not an attribution: it says where the model looked,
+not which way that evidence pushed the prediction. Use
+`niche_attribution_summary` from `grass_mil.interpretability.core.attribution`
+instead, which reports attention-weighted logit margins and satisfies the
+attribution identity in [`method_fidelity.md`](method_fidelity.md). Survival
+routes through the same function with hazard as the single class.
 
 ### Neighborhood Enrichment Behavior
 
@@ -275,8 +290,22 @@ Built-in plugins:
 - `margin_attribution`
 - `neighborhood_enrichment`
 - `diff_neighborhood_enrichment`
+- `per_niche_cell_type_enrichment`
 - `filtration_curves`
+- `morans_i`
+- `ripley`
+- `niche_agreement`
 - `tissue_graph`
+
+Four of these are not enabled by any shipped preset because each needs an input
+the pipeline cannot infer:
+
+| Plugin | Additional input required |
+|---|---|
+| `diff_neighborhood_enrichment` | a condition column, plus a permutation group column in permutation mode |
+| `tissue_graph` | an explicit `sample_value` (no auto-pick) |
+| `niche_agreement` | a second niche labeling column to compare against |
+| `per_niche_cell_type_enrichment` | enabled in `full.yaml`; needs `cell_type` |
 
 `filtration_curves` default threshold grid:
 
@@ -504,7 +533,25 @@ Subgroups:
 
 - `configs/interpretability/reduction/*.yaml`
 - `configs/interpretability/clustering/*.yaml`
-- `configs/interpretability/plugins/default.yaml`
+- `configs/interpretability/plugins/default.yaml` — `niche_profiles` only
+- `configs/interpretability/plugins/full.yaml` — composes `default` and adds
+  `margin_attribution`, `neighborhood_enrichment`,
+  `per_niche_cell_type_enrichment`, `filtration_curves`, `morans_i`, `ripley`
+
+Select a preset with:
+
+```bash
+grass-mil-report interpretability/plugins@plugins=full
+```
+
+The `@plugins` package part is required. `report.yaml` is `# @package _global_`,
+so the shorter `plugins=full` does **not** load the preset — it silently
+overwrites the `plugins` node with the literal string `"full"`, and the run then
+fails downstream with a confusing error rather than at the override.
+
+`full.yaml` is materially slower than the default: Moran's I and Ripley both
+scale with niche size and permutation count. It does not enable the four
+plugins listed above that need inputs the pipeline cannot infer.
 
 Important knobs:
 

@@ -11,7 +11,7 @@ listed at the bottom.
 
 | Component | Definition | Implementation | Test |
 |---|---|---|---|
-| Cellular graph | Voronoi/Delaunay adjacency, edge distance + neighbour flag | `data/components/graph_builders.py` | `tests/data/` |
+| Cellular graph | Delaunay adjacency, edge distance + neighbour flag | `data/components/graph_builders.py::DelaunayGraphBuilder` | `tests/test_spatial_omics_datamodule.py` (indirect; no direct unit test) |
 | Node inputs | `h⁰ = E[t] + Wₓx` — cell-type embedding **summed** with a projection of continuous features | `models/components/embeddings.py::NodeInputEmbedding` | `test_node_embeddings.py::test_node_embedding_sums_rather_than_concatenates` |
 | Cell-type-only cohorts | `x` has zero columns; the embedding is the whole input | same | `test_node_embedding_supports_cell_type_only_cohorts`, `test_encoder_trains_on_cell_type_only_cohort` |
 | Message passing | GINE conditioned on the **scalar edge length** only | `models/components/backbones.py::_select_edge_features` | `test_gine_reads_only_the_selected_edge_column` |
@@ -43,7 +43,30 @@ The interpretability claim rests on one identity. If `identity_residual` is not
 | Moran's I + permutation null + BH-FDR | `interpretability/tier2/autocorrelation.py` | `test_spatial_statistics.py::test_morans_i_*` |
 | Ripley cross-L, centred `L(r) − r` | `interpretability/tier2/ripley.py` | `test_ripley_l_is_near_zero_for_a_poisson_pattern` |
 | Neighbourhood enrichment | `interpretability/tier2/neighborhood.py` | `test_plugins_and_tier2.py` |
-| Cross-space agreement (ARI/AMI/NMI) | `interpretability/core/agreement.py` | `test_niche_agreement_*` |
+| Cross-space agreement (ARI/AMI/NMI) | `interpretability/core/agreement.py` | `test_spatial_statistics.py::test_cluster_agreement_*` |
+
+## Defaults ordering: why `task` is merged last
+
+`task` is listed **after** `model`, `optim` and `scheduler` in the root defaults
+lists (`train.yaml`, `eval.yaml`). This is load-bearing, not cosmetic:
+
+- `task/finetune_mil.yaml` sets `model.graph_head.output_dim: 2` and
+  `model.attention.n_classes: 2`. With `task` listed first, the module preset
+  merged afterwards and reset both to 1 — so `task=finetune_mil` silently ran a
+  single-logit head with a single attention channel, which cannot express the
+  attribution identity above.
+- `task/pretrain_bgrl.yaml` declares `defaults: - override /scheduler:
+  cosine_step`. With `task` listed first, that override could not resolve and
+  composition failed outright with `Could not override 'scheduler'`.
+
+Neither failure was visible to the test suite, because the training tests build
+their config by loading YAML files directly rather than composing through
+Hydra, and `validate_attention_width(1, 1)` passes — one channel for one class
+is internally consistent.
+
+`tests/configs/test_task_preset_composition.py` now composes every task preset
+the way the CLI does and asserts both invariants, so a future reordering fails
+loudly.
 
 ## Known divergences from `methods.tex`
 

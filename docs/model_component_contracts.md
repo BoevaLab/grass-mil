@@ -36,9 +36,10 @@ Non-requirements:
 
 ## Encoder Contract
 
-Encoders accept:
+Signature:
 
-- `x`, `edge_index`, optional `edge_attr`, optional `batch`.
+- `forward(x, edge_index, edge_attr=None, batch=None, categorical_codes=None,
+  return_graph_embedding=False)`.
 
 Encoders return:
 
@@ -49,6 +50,16 @@ Supported jump-knowledge modes:
 
 - `last`, `concat`, `max`, `sum`.
 
+Categorical inputs:
+
+- `categorical_codes` is `[num_nodes, num_labels]` long. The encoder embeds one
+  configured column and **sums** it with the projection of `x`; it is not
+  concatenated, so the embedding width is `hidden_dim`.
+- `input_dim == 0` is legal and means the cohort has no continuous node
+  features. A categorical embedding is then required.
+- Out-of-range categorical codes raise. They are never clamped: clamping trains
+  on a wrong cell type silently.
+
 ## Attention Contract
 
 Attention modules accept node/subgraph embeddings:
@@ -57,10 +68,23 @@ Attention modules accept node/subgraph embeddings:
 
 Attention modules return:
 
-- Unnormalized attention logits: shape `[n_items, n_classes]` (default `n_classes=1`).
+- Unnormalized attention logits: shape `[n_items, n_classes]`.
 - Pass-through embeddings (for compatibility): shape `[n_items, emb_dim]`.
 
-Normalization (softmax/sigmoid) is handled by caller to keep modules reusable.
+Normalization is handled by the caller to keep modules reusable: softmax over
+`dim=0` (instances), applied **per class column**.
+
+Width rule:
+
+- `n_classes` must equal the head's `output_dim` **exactly**. A binary head needs
+  two attention channels, not one shared channel broadcast across both — a
+  shared channel cannot express a niche that pushes toward one class and away
+  from the other.
+- Enforced by `grass_mil.contracts.validate_attention_width` at build time.
+  Width 1 is legal only when the head emits a single logit.
+
+`head_spaces()` exposes intermediate activations (`a_pre_tanh`, `gate_product`)
+so analysis code does not reach into module internals.
 
 ## Loss Contracts
 
@@ -115,27 +139,6 @@ Native-first policy:
 - Avoid undocumented inline numeric defaults in implementation modules.
 - Structural literals are acceptable only for clear invariants (for example, rank checks).
 
-## Encoder Contract (updated)
-
-- `forward(x, edge_index, edge_attr=None, batch=None, categorical_codes=None,
-  return_graph_embedding=False)`.
-- `categorical_codes` is `[num_nodes, num_labels]` long. The encoder embeds one
-  configured column and **sums** it with the projection of `x`; it is not
-  concatenated, so the embedding width is `hidden_dim`.
-- `input_dim == 0` is legal and means the cohort has no continuous node
-  features. A categorical embedding is then required.
-- Out-of-range categorical codes raise. They are never clamped: clamping trains
-  on a wrong cell type silently.
-
-## Attention Contract
-
-- Attention returns `[n_items, n_classes]`. Callers apply softmax over
-  `dim=0` (instances) **per class column**.
-- Only two widths are legal: 1 (one shared channel) or one per class. Enforced
-  by `grass_mil.contracts.validate_attention_width`, at build time and at use.
-- `head_spaces()` exposes intermediate activations (`a_pre_tanh`,
-  `gate_product`) so analysis code does not reach into module internals.
-
 ## Attribution Contract
 
 The bag logit is an attention-weighted sum of instance logits with no added
@@ -144,5 +147,5 @@ bias, so for every bag and class:
     sum_i A[i,c] * l[i,c] == L_c
 
 This is an invariant, not an approximation. Any change to bag pooling must
-preserve it, and `cluster_attribution_summary` reports `identity_residual` so a
-violation surfaces rather than propagating into the cluster summaries.
+preserve it, and `niche_attribution_summary` reports `identity_residual` so a
+violation surfaces rather than propagating into the niche summaries.

@@ -45,7 +45,7 @@ Important manifest rules:
 
 ## 3) Match Input Schema To Config
 
-Default parsing config lives in [`configs/data/spatial_omics.yaml`](/Users/lovrorabuzin/Projects/grass-mil_unification/grass-mil/configs/data/spatial_omics.yaml).
+Default parsing config lives in [`src/grass_mil/configs/data/spatial_omics.yaml`](../src/grass_mil/configs/data/spatial_omics.yaml).
 
 ### CSV / TSV
 

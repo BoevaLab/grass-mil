@@ -8,6 +8,8 @@ This reference covers repo-defined configuration keys and behavior for:
 - `configs/data/spatial_omics.yaml`
 - `configs/task/*.yaml`
 - `configs/model/**/*.yaml`
+- `configs/augmentation/*.yaml`
+- `configs/data/sampler/*.yaml`
 - `configs/optim/*.yaml`
 - `configs/scheduler/*.yaml`
 - `configs/trainer/*.yaml`
@@ -16,6 +18,10 @@ This reference covers repo-defined configuration keys and behavior for:
 - `configs/debug/*.yaml`
 - `configs/hydra/default.yaml`
 - `configs/extras/default.yaml`
+
+> Throughout this document `configs/...` is shorthand for
+> `src/grass_mil/configs/...`. The config tree lives inside the package so it
+> ships with the wheel; Hydra resolves it relative to the entrypoint module.
 
 Override syntax examples use:
 
@@ -187,6 +193,28 @@ Notes:
 | `data.sampler.runtime.property_name` | `cell_type` | str | categorical label present in `categorical_slices` | weighted root sampling | `grass-mil-train data.sampler.runtime.property_name=cell_type` |
 | `data.sampler.runtime.weight_mode` | `inverse` | str | `inverse`, `sqrt_inverse`, `proportional` | weighted root sampling | `grass-mil-train data.sampler.runtime.weight_mode=sqrt_inverse` |
 | `data.sampler.runtime.min_weight` | `1.0e-6` | float | `>0` | weighted root sampling | `grass-mil-train data.sampler.runtime.min_weight=1.0e-4` |
+| `data.sampler.runtime.interior_seeds.enabled` | `false` | bool | `true/false` | shadow runtime | `grass-mil-train data.sampler.runtime.interior_seeds.enabled=true` |
+| `data.sampler.runtime.interior_seeds.n_hops` | `null` | int/null | `>=1`, `null` uses `depth` | `interior_seeds.enabled=true` | `grass-mil-train data.sampler.runtime.interior_seeds.n_hops=3` |
+| `data.sampler.runtime.interior_seeds.seed_tolerance_multiplier` | `1.0` | float | `>=0` | `interior_seeds.enabled=true` | `grass-mil-train data.sampler.runtime.interior_seeds.seed_tolerance_multiplier=1.5` |
+| `data.sampler.runtime.interior_seeds.keep_largest_component` | `true` | bool | `true/false` | `interior_seeds.enabled=true` | `grass-mil-train data.sampler.runtime.interior_seeds.keep_largest_component=false` |
+| `data.sampler.runtime.interior_seeds.cache_dir` | `null` | str/null | path, `null` disables caching | `interior_seeds.enabled=true` | `grass-mil-train data.sampler.runtime.interior_seeds.cache_dir=.cache/seeds` |
+| `data.sampler.runtime.ego_radius.enabled` | `false` | bool | `true/false` | shadow runtime | `grass-mil-train data.sampler.runtime.ego_radius.enabled=true` |
+| `data.sampler.runtime.ego_radius.radius_per_hop` | `75.0` | float | `>0`, datamodule units | `ego_radius.enabled=true` | `grass-mil-train data.sampler.runtime.ego_radius.radius_per_hop=30.0` |
+| `data.sampler.runtime.ego_radius.radius_offset` | `55.0` | float | `>=0`, datamodule units | `ego_radius.enabled=true` | `grass-mil-train data.sampler.runtime.ego_radius.radius_offset=22.0` |
+| `data.sampler.runtime.ego_radius.keep_root_component` | `true` | bool | `true/false` | `ego_radius.enabled=true` | `grass-mil-train data.sampler.runtime.ego_radius.keep_root_component=false` |
+
+Two notes on these, both of which cause silent misconfiguration rather than errors:
+
+- **`interior_seeds`** restricts ego-graph roots to the tissue interior.
+  Ego-graphs rooted at the section edge are truncated by the slide boundary
+  rather than by biology, so they are not comparable to interior ones. Only the
+  `n_hops` rim around the convex hull is excluded; internal holes are not
+  treated as boundary. The interior mask is intersected into the candidate pool
+  *before* class-proportional weighting.
+- **`ego_radius` distances are in datamodule coordinate units** (µm after
+  `coord_scale_um`), **not pixels**. The `75.0`/`55.0` defaults come from the
+  NSCLC cohort at its native pixel scale; convert your cohort's values before
+  setting them, or the cap will be wrong by whatever the scale factor is.
 
 ## 2.11 Tiling And Graph Label Keys
 
@@ -247,7 +275,7 @@ Includes all keys above plus MIL-specific controls:
 
 | Key | Default | Type | Valid Values | Active When | Example Override |
 |---|---|---|---|---|---|
-| `defaults` | `override /scheduler: cosine_step` | Hydra defaults entry | scheduler group override | pretrain task composition | `grass-mil-train task=pretrain_bgrl` |
+| `defaults` | `override /scheduler: cosine_step` | Hydra defaults entry | scheduler group override | pretrain task composition | `grass-mil-train task=pretrain_bgrl model=bgrl_module` |
 | `task.name` | `pretrain_bgrl` | str | label | always | `grass-mil-train task.name=ssl_run` |
 | `task.aggregation` | `mean` | str | `mean` | BGRL module ignores bag loss semantics but keeps task schema | `grass-mil-train task.aggregation=mean` |
 | `task.bag_key` | `region_id` | str | batch attr | task metadata | `grass-mil-train task.bag_key=sample_id` |
@@ -327,7 +355,7 @@ Same encoder block as supervised module plus SSL/pretrain init keys:
 | `model.ssl.predictor.hidden_size` | `512` | int | `>=1` | predictor width | `grass-mil-train model.ssl.predictor.hidden_size=1024` |
 | `model.optim` | `${optim}` | DictConfig | optimizer object | always | `grass-mil-train optim.lr=1e-3` |
 | `model.scheduler` | `${scheduler}` | DictConfig | scheduler object | always | `grass-mil-train scheduler.T_max=20000` |
-| `model.task` | `${task}` | DictConfig | pretrain task object | always | `grass-mil-train task=pretrain_bgrl` |
+| `model.task` | `${task}` | DictConfig | pretrain task object | always | `grass-mil-train task=pretrain_bgrl model=bgrl_module` |
 | `model.init_from_ckpt` | `null` | str/null | checkpoint path | optional init | `grass-mil-train model.init_from_ckpt=/abs/ssl.ckpt` |
 | `model.init_strict` | `false` | bool | `true/false` | checkpoint init | `grass-mil-train model.init_strict=true` |
 | `model.encoder_init_map` | `auto_bgrl_or_identity` | str | `identity`, `auto_bgrl_or_identity` | checkpoint init | `grass-mil-train model.encoder_init_map=identity` |
@@ -338,21 +366,28 @@ Same encoder block as supervised module plus SSL/pretrain init keys:
 
 | Key | Default | Type | Valid Values | Active When | Example Override |
 |---|---|---|---|---|---|
-| `model.flags.use_attention` | `true` | bool | `true/false` | component notebook/testing | `grass-mil-train model.flags.use_attention=false` |
 | `model.flags.use_ssl` | `false` | bool | `true/false` | component notebook/testing | `grass-mil-train model.flags.use_ssl=true` |
-| `model.encoder._target_` | `grass_mil.models.components.backbones.EncoderConfig` | str | import path | hydra instantiate | `grass-mil-train model.encoder._target_=...` |
+| `model.attention.attention_type` | `gated_projected` | str | `gated`, `gated_projected` | `task.aggregation=mil_attention` | `grass-mil-train model.attention.attention_type=gated` |
 | `model.encoder.*` | same fields as section 4.1 | mixed | see section 4.1 | component testing | `grass-mil-train model.encoder.conv_type=gcn` |
-| `model.attention._target_` | `grass_mil.models.components.attention.AttnNetGatedProjected` | str | import path | component testing | `grass-mil-train model.attention._target_=...AttnNetGated` |
 | `model.attention.*` | defaults per file | mixed | see attention files below | component testing | `grass-mil-train model.attention.hidden_dim=32` |
 | `model.ssl.method` | `bgrl` | str | `bgrl` | component testing | `grass-mil-train model.ssl.method=bgrl` |
-| `model.ssl.predictor._target_` | `grass_mil.models.components.ssl.MLPPredictor` | str | import path | component testing | `grass-mil-train model.ssl.predictor._target_=...` |
-| `model.ssl.predictor.input_size` | `128` | int | `>=1` | component testing | `grass-mil-train model.ssl.predictor.input_size=256` |
-| `model.ssl.predictor.output_size` | `128` | int | `>=1` | component testing | `grass-mil-train model.ssl.predictor.output_size=256` |
 | `model.ssl.predictor.hidden_size` | `512` | int | `>=1` | component testing | `grass-mil-train model.ssl.predictor.hidden_size=256` |
-| `model.graph_head._target_` | `grass_mil.models.components.heads.GraphPredictionHead` | str | import path | component testing | `grass-mil-train model.graph_head._target_=...` |
 | `model.graph_head.*` | see section 4.1 | mixed | MLP head args | component testing | `grass-mil-train model.graph_head.num_layers=3` |
-| `model.node_head._target_` | `grass_mil.models.components.heads.NodePredictionHead` | str | import path | component testing | `grass-mil-train model.node_head._target_=...` |
-| `model.node_head.*` | graph-head-like args | mixed | MLP head args | component testing | `grass-mil-train model.node_head.dropout=0.1` |
+
+Attention is **not** toggled by a model flag. `SupervisedModule` derives it from
+the task: `use_attention = (task.aggregation == "mil_attention")`. Use
+`task=finetune_mil` to enable it and `task=finetune_mean` to disable it.
+
+The component sub-configs (`model.encoder`, `model.attention`,
+`model.graph_head`, `model.ssl.predictor`) are plain option dicts consumed by
+`build_supervised_components`, not Hydra `_target_` instantiations. Selecting a
+different attention implementation is therefore
+`model.attention.attention_type=gated`, not a `_target_` override.
+
+`task=finetune_mil` sets the per-class widths itself
+(`model.graph_head.output_dim=2`, `model.attention.n_classes=2`). This works
+because `task` is merged after `model` in the root defaults list; see the
+comment in `configs/train.yaml`.
 
 ### Encoder preset files (`configs/model/encoder/*.yaml`)
 
@@ -363,17 +398,38 @@ Covered files:
 - `configs/model/encoder/gat.yaml`
 - `configs/model/encoder/graphsage.yaml`
 - `configs/model/encoder/gine.yaml`
+- `configs/model/encoder/gine_length.yaml`
 
-All five files expose the same keys:
+All six files expose the same base keys:
 
+- `_target_`, `input_dim`, `hidden_dim`, `out_dim`, `num_layers`, `dropout`,
+  `conv_type`, `norm`, `jk`, `act`, `pooling`, `gat_heads`, `use_edge_attr`,
+  `edge_weight_index`, `edge_attr_dim`
 
-Per-file defaults differ mainly in `conv_type`, `use_edge_attr`, and `edge_attr_dim`:
+Per-file defaults differ mainly in `conv_type`, `norm`, `use_edge_attr`, and
+`edge_attr_dim`:
 
-- `gin.yaml`: `conv_type=gin`, `use_edge_attr=false`, `edge_attr_dim=null`
-- `gcn.yaml`: `conv_type=gcn`, `use_edge_attr=true`, `edge_attr_dim=null`
-- `gat.yaml`: `conv_type=gat`, `use_edge_attr=false`, `edge_attr_dim=null`
-- `graphsage.yaml`: `conv_type=graphsage`, `use_edge_attr=false`, `edge_attr_dim=null`
-- `gine.yaml`: `conv_type=gine`, `use_edge_attr=true`, `edge_attr_dim=2`
+- `gin.yaml`: `conv_type=gin`, `norm=batchnorm`, `use_edge_attr=false`, `edge_attr_dim=null`
+- `gcn.yaml`: `conv_type=gcn`, `norm=batchnorm`, `use_edge_attr=true`, `edge_attr_dim=null`
+- `gat.yaml`: `conv_type=gat`, `norm=batchnorm`, `use_edge_attr=false`, `edge_attr_dim=null`
+- `graphsage.yaml`: `conv_type=graphsage`, `norm=batchnorm`, `use_edge_attr=false`, `edge_attr_dim=null`
+- `gine.yaml`: `conv_type=gine`, `norm=batchnorm`, `use_edge_attr=true`, `edge_attr_dim=2`
+- `gine_length.yaml`: `conv_type=gine`, `norm=layernorm`, `use_edge_attr=true`, `edge_attr_dim=1`
+
+`gine_length.yaml` is the production encoder and the only preset that sets two
+further keys:
+
+- `edge_feature_index: 0` — narrows `edge_attr` to the scalar edge-length
+  column, so the convolution conditions on distance alone. There is no notion of
+  edge type.
+- `categorical_embedding: {label: cell_type, num_embeddings: null, column_index: null}`
+  — adds the cell-type embedding, summed with the projected continuous features
+  (`h⁰ = E[t] + Wₓx`). The two `null`s are resolved at build time from the
+  processed dataset's label map and categorical slices; set them explicitly to
+  override.
+
+Because the embedding can carry the whole node representation, this preset is
+the one that supports cell-type-only cohorts (`input_dim=0`).
 
 ### Attention preset files (`configs/model/attention/*.yaml`)
 
@@ -393,13 +449,17 @@ Covered files:
 
 - `configs/model/heads/graph.yaml`
 
-Both `graph.yaml` and `node.yaml` expose:
+`graph.yaml` exposes:
 
 - `_target_`, `input_dim`, `output_dim`, `hidden_dim`, `num_layers`, `dropout`
 
-Defaults in both files:
+Defaults:
 
 - `input_dim=128`, `output_dim=1`, `hidden_dim=128`, `num_layers=2`, `dropout=0.0`
+
+There is no node head preset. `NodePredictionHead` existed only to serve the
+instance-pull auxiliary loss, which is not part of the published objective and
+has been removed along with it; region cross-entropy is the sole objective.
 
 ### Loss preset files (`configs/model/loss/*.yaml`)
 
@@ -428,6 +488,61 @@ Keys:
 - `predictor.input_size`
 - `predictor.output_size`
 - `predictor.hidden_size`
+
+### Augmentation preset files (`configs/augmentation/*.yaml`)
+
+Selects how BGRL builds its two views. Applies to `task=pretrain_bgrl`.
+
+Covered files:
+
+- `configs/augmentation/bgrl_paper.yaml` (production view generator)
+- `configs/augmentation/uniform.yaml` (structure-independent baseline)
+
+**This group is not in any defaults list, so it must be attached explicitly.**
+`bgrl_module` reads `task.augmentation`; attach a preset there with:
+
+```bash
+grass-mil-train task=pretrain_bgrl model=bgrl_module \
+  +augmentation@task.augmentation=bgrl_paper
+```
+
+The leading `+` and the `@task.augmentation` package are both required. A bare
+`augmentation.mode=uniform` fails with `Could not override 'augmentation.mode'`,
+because no `augmentation` key exists in the composed config until the preset is
+attached.
+
+If `task.augmentation` is left unset, the module falls back to per-view uniform
+drop rates read from `task.drop_edge_p1/p2` and `task.drop_feat_p1/p2` (see the
+pretrain task table above). That fallback, not `bgrl_paper`, is what you get by
+default.
+
+Once attached, individual keys are overridden under `task.augmentation.*`:
+
+| Key | Default (`bgrl_paper`) | Type | Valid Values | Active When | Example Override |
+|---|---|---|---|---|---|
+| `task.augmentation.mode` | `importance` | str | `importance`, `uniform` | always | `grass-mil-train task.augmentation.mode=uniform` |
+| `task.augmentation.mu` | `0.25` | float | `>0` | `mode=importance` | `grass-mil-train task.augmentation.mu=0.3` |
+| `task.augmentation.p_lambda` | `0.45` | float | `(0, 1]` | `mode=importance` | `grass-mil-train task.augmentation.p_lambda=0.5` |
+| `task.augmentation.feature_noise_std` | `0.2` | float | `>=0` | `mode=importance` | `grass-mil-train task.augmentation.feature_noise_std=0.1` |
+| `task.augmentation.feature_noise_columns` | `["SIZE"]` | list[str] | column names | `mode=importance` | `grass-mil-train 'task.augmentation.feature_noise_columns=[AREA]'` |
+| `task.augmentation.drop_edge_p` | `0.1` (`uniform`) | float | `[0, 1)` | `mode=uniform` | `grass-mil-train task.augmentation.drop_edge_p=0.2` |
+| `task.augmentation.drop_feat_p` | `0.1` (`uniform`) | float | `[0, 1)` | `mode=uniform` | `grass-mil-train task.augmentation.drop_feat_p=0.2` |
+
+Two further constraints are easy to get wrong:
+
+- **Noise columns are resolved by name, never by index.** A hardcoded index that
+  means cell size in one cohort means something else in another, which silently
+  feeds the encoder pure noise. Names are matched against the dataset's
+  molecular feature names.
+- **`mode=importance` needs the reserved embedding slot.** Dropped nodes have
+  their features zeroed and their cell type set to an "unassigned" code, so it
+  requires `model.encoder.categorical_embedding.reserve_unassigned=true`.
+  Cohorts with no continuous node features cannot use the Gaussian-noise step at
+  all; use `uniform` there.
+
+Node drop probability under `importance` is
+`min((1 − importance) · mu, p_lambda)`, where importance is the mean-max
+normalised log-degree — so hubs are preserved and low-degree nodes are masked.
 
 ## 5) Optimizer And Scheduler Configs
 

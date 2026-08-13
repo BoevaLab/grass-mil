@@ -9,13 +9,13 @@ Interpretability workflows are documented in:
 
 ## 0) Environment And Dependency Prerequisites
 
-From `/Users/lovrorabuzin/Projects/grass-mil_unification/grass-mil`:
+From the repository root:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[interpretability,report,spatial-stats,io]"
-export PROJECT_ROOT=/Users/lovrorabuzin/Projects/grass-mil_unification/grass-mil
+export PROJECT_ROOT=$(pwd)
 ```
 
 Dependency notes by data type:
@@ -268,10 +268,15 @@ Training artifacts (`paths.output_dir`):
 grass-mil-train task=pretrain_bgrl model=bgrl_module data=spatial_omics
 ```
 
-Default pretraining task includes:
+The task preset selects the step-wise scheduler itself via
+`defaults: - override /scheduler: cosine_step`. That resolves because `task` is
+merged after `scheduler` in the root defaults list.
 
-- `scheduler=cosine_step` override
-- BGRL augment settings (`drop_edge_*`, `drop_feat_*`)
+The pretraining task also sets:
+
+- View generation, selected via the `augmentation` config group
+  (`bgrl_paper` or `uniform`) — see the augmentation section of
+  [`hyperparameter_reference.md`](hyperparameter_reference.md)
 - Momentum schedule (`momentum`, `momentum_min`, `warmup_steps`, `total_steps`)
 
 ### Step 2: Choose A Checkpoint
@@ -486,7 +491,7 @@ from pathlib import Path
 from omegaconf import open_dict
 
 # Compose exactly as train/eval does.
-project_root = Path("/Users/lovrorabuzin/Projects/grass-mil_unification/grass-mil")
+project_root = Path.cwd()
 with hydra.initialize_config_dir(
     config_dir=str(project_root / "configs"),
     version_base="1.3",

@@ -45,7 +45,7 @@ survived:
    `categorical_codes`; graphs from older runs are migrated on load.
 3. **Attention flattening in two directions.** `inference/aggregation.py`
    silently reshaped multi-column attention to 1-D while
-   `interpretability_export.py` raised on it. One gave wrong numbers, the other
+   `inference/interpretability_export.py` raised on it. One gave wrong numbers, the other
    crashed.
 4. **Asymmetric edge dropping.** The finetune-time transform left
    `force_undirected=False` while pretraining used `True`, so the two regimes
