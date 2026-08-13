@@ -169,40 +169,6 @@ def test_cluster_profiles_reuses_context_cluster_summary(monkeypatch) -> None:
     assert out.payload["enrichment"].equals(summary.enrichment)
 
 
-def test_attention_attribution_reuses_context_base_summary(monkeypatch) -> None:
-    registry = create_builtin_registry()
-    ds = _sample_dataset()
-    labels = np.array([0, 0, 1, 1, 1, 0])
-    base_summary = NicheSummary(
-        niche_labels=labels.copy(),
-        composition=pd.DataFrame({"comp_A": [0.6, 0.4]}, index=[0, 1]),
-        enrichment=pd.DataFrame({"comp_A": [0.2, -0.2]}, index=[0, 1]),
-        niche_counts=pd.Series({0: 3, 1: 3}),
-    )
-    attn_summary = NicheSummary(
-        niche_labels=labels.copy(),
-        composition=pd.DataFrame({"comp_A": [0.9, 0.1]}, index=[0, 1]),
-        enrichment=pd.DataFrame({"comp_A": [1.2, -1.2]}, index=[0, 1]),
-        niche_counts=pd.Series({0: 2, 1: 4}),
-        weighted_scores=pd.Series({0: 0.3, 1: 0.7}),
-        mean_scores=pd.Series({0: 0.2, 1: 0.8}),
-        attention_present=pd.Series({0: 0.4, 1: 0.6}),
-        attention_lift_present=pd.Series({0: 1.1, 1: 0.9}),
-    )
-
-    monkeypatch.setattr(
-        "grass_mil.interpretability.plugins.builtin.niche_attention_summary",
-        lambda *args, **kwargs: attn_summary,  # type: ignore[no-untyped-def]
-    )
-    plugin = registry.get("attention_attribution")
-    out = plugin.run(
-        ds,
-        PluginContext(state={"niche_labels": labels, "niche_summary": base_summary}),
-    )
-    assert out.payload["weighted_scores"].equals(attn_summary.weighted_scores)
-    assert out.payload["mean_scores"].equals(attn_summary.mean_scores)
-
-
 def test_plugin_registry_instances_are_isolated() -> None:
     class _DummyPlugin:
         name = "dummy"
@@ -916,7 +882,7 @@ def test_margin_attribution_plugin_reports_per_niche_intervals() -> None:
     summary = out.payload["per_niche"]
     # (niche_label, class_index); a binary head summarises the positive class.
     assert set(summary.index) == {(0, 1), (1, 1)}
-    for column in ("margin_signed_share", "attention_lift", "prevalence"):
+    for column in ("margin_signed_share", "prevalence"):
         assert column in summary.columns
         assert f"{column}_lo" in summary.columns
 

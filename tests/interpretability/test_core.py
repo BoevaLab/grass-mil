@@ -5,7 +5,6 @@ import pandas as pd
 import pytest
 
 from grass_mil.interpretability.core.biomarkers import (
-    niche_attention_summary,
     niche_composition_summary,
 )
 from grass_mil.interpretability.core.clustering import run_clustering
@@ -40,16 +39,6 @@ def test_cluster_biomarker_and_attention_summary() -> None:
     bio = niche_composition_summary(table, labels)
     assert "comp_A" in bio.composition.columns
     assert bio.niche_counts.sum() == len(table)
-
-    att = niche_attention_summary(
-        table,
-        labels,
-        attention_column="attention",
-        score_column="score",
-        bag_id_column="bag_id",
-    )
-    assert att.weighted_scores is not None
-    assert att.attention_lift_present is not None
 
 
 def test_cluster_biomarker_requires_composition_columns() -> None:

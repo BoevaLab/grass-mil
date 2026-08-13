@@ -251,9 +251,8 @@ def niche_attribution_summary(
     for class_index in _resolve_focus_classes(n_classes, focus_classes):
         frame = per_instance.copy()
         frame["margin"] = margins[:, class_index]
-        part = _summarise_clusters(
+        part = _summarise_niches(
             frame,
-            attention=_attention_for_class(attention, class_index),
             bag_id_column=bag_id_column,
             n_bootstrap=n_bootstrap,
             random_state=random_state,
@@ -267,15 +266,6 @@ def niche_attribution_summary(
         per_niche=summary,
         identity_residual=identity_residual,
     )
-
-
-def _attention_for_class(attention: np.ndarray, class_index: int) -> np.ndarray:
-    """Attention weights driving one class, or the shared channel."""
-    if attention.ndim == 1:
-        return attention[:, None]
-    if attention.shape[1] == 1:
-        return attention
-    return attention[:, class_index : class_index + 1]
 
 
 def _identity_residual(
@@ -300,45 +290,34 @@ def _identity_residual(
     return residual
 
 
-def _summarise_clusters(
+def _summarise_niches(
     per_instance: pd.DataFrame,
     *,
-    attention: np.ndarray,
     bag_id_column: str,
     n_bootstrap: int,
     random_state: int,
     margin_eps: float,
 ) -> pd.DataFrame:
     frame = per_instance.copy()
-    # A shared attention channel is broadcast; per-class attention is summed to
-    # one selection weight per instance.
-    frame["__attention"] = attention.sum(axis=1) if attention.ndim == 2 else attention
-
     bag_margin = frame.groupby(bag_id_column)["margin"].sum()
     bag_size = frame.groupby(bag_id_column).size()
 
     cell_margin = frame.groupby([bag_id_column, "niche_label"])["margin"].sum()
     cell_count = frame.groupby([bag_id_column, "niche_label"]).size()
-    cell_attention = frame.groupby([bag_id_column, "niche_label"])["__attention"].sum()
 
     rng = np.random.default_rng(random_state)
     rows = []
     for niche in sorted(frame["niche_label"].unique()):
-        cluster_margin = cell_margin.xs(niche, level="niche_label")
-        cluster_count = cell_count.xs(niche, level="niche_label")
-        cluster_attn = cell_attention.xs(niche, level="niche_label")
-        bags = cluster_margin.index
+        niche_margin = cell_margin.xs(niche, level="niche_label")
+        niche_count = cell_count.xs(niche, level="niche_label")
+        bags = niche_margin.index
 
         totals = bag_margin.loc[bags].to_numpy(dtype=float)
-        margins = cluster_margin.to_numpy(dtype=float)
-        counts = cluster_count.to_numpy(dtype=float)
+        margins = niche_margin.to_numpy(dtype=float)
+        counts = niche_count.to_numpy(dtype=float)
         sizes = bag_size.loc[bags].to_numpy(dtype=float)
-        attn = cluster_attn.to_numpy(dtype=float)
 
         prevalence = counts / np.maximum(sizes, 1.0)
-        # Abundance-corrected attention lift: 1 is neutral, >1 preferentially
-        # attended relative to how common the niche is in that bag.
-        lift = np.divide(attn, prevalence, out=np.full_like(attn, np.nan), where=prevalence > 0)
 
         # Shares are fractions of the bag margin and sum to 1 across a full
         # partition, but an individual niche is NOT bounded to [-1, 1]: it can
@@ -354,7 +333,6 @@ def _summarise_clusters(
             ("margin_signed_share", share, None),
             ("margin_weighted", margins, np.abs(totals)),
             ("margin_sign_consistency", consistency, None),
-            ("attention_lift", lift, None),
             ("prevalence", prevalence, None),
         ):
             point, lo, hi = percentile_bootstrap_ci(

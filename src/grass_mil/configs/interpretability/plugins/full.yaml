@@ -6,7 +6,6 @@ defaults:
 
 enabled:
   - niche_profiles
-  - attention_attribution
   - margin_attribution
   - neighborhood_enrichment
   - per_niche_cell_type_enrichment

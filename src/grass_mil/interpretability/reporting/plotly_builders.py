@@ -408,9 +408,12 @@ def build_multi_attribute_scatters(
 
 
 def build_composite_niche_heatmap(bundle: ReportBundle) -> "go.Figure":
-    """Build a composite heatmap with enrichment + predictions + attention lift + abundance.
+    """Composition enrichment beside niche abundance.
 
-    Replicates the notebook's 4-panel biomarker summary figure using Plotly subplots.
+    Attention-only panels were removed: interpretation is expressed through
+    weighted logit margins (the ``margin_attribution`` plugin), not through
+    attention weights on their own, which say what the model looked at but not
+    which way it pushed the decision.
     """
     go = _require_plotly()
     from plotly.subplots import make_subplots
@@ -420,24 +423,17 @@ def build_composite_niche_heatmap(bundle: ReportBundle) -> "go.Figure":
         raise ValueError("Niche summary is missing.")
 
     enr = summary.enrichment
-    # Dendrogram order comes from the niche summary; Background is named.
+    # Niche ids already carry dendrogram order; Background is named.
     niche_ids = niche_display_names(enr.index)
     feature_names = [str(c) for c in enr.columns]
 
-    has_attention = summary.mean_scores is not None and summary.attention_lift_present is not None
-
-    n_cols = 4 if has_attention else 2
-    widths = [13, 1, 1, 1] if has_attention else [13, 1]
-
     fig = make_subplots(
         rows=1,
-        cols=n_cols,
+        cols=2,
         shared_yaxes=True,
-        column_widths=widths,
+        column_widths=[13, 1],
         horizontal_spacing=0.02,
     )
-
-    # Panel 1: Enrichment heatmap
     fig.add_trace(
         go.Heatmap(
             z=enr.to_numpy(),
@@ -445,64 +441,28 @@ def build_composite_niche_heatmap(bundle: ReportBundle) -> "go.Figure":
             y=niche_ids,
             colorscale="RdBu",
             zmid=0.0,
-            colorbar={"title": "Enrichment", "x": 0.65, "len": 0.9},
+            colorbar={"title": "Enrichment", "x": 0.86, "len": 0.9},
         ),
         row=1,
         col=1,
     )
 
-    # Panel 2: Mean predictions
-    if summary.mean_scores is not None:
-        preds = summary.mean_scores.reindex(enr.index).to_numpy().reshape(-1, 1)
-    else:
-        preds = summary.niche_counts.reindex(enr.index).to_numpy().reshape(-1, 1).astype(float)
+    counts = summary.niche_counts.reindex(enr.index).to_numpy().astype(float)
+    log_counts = np.log(np.clip(counts, 1, None)).reshape(-1, 1)
     fig.add_trace(
         go.Heatmap(
-            z=preds,
-            x=["Predictions"],
+            z=log_counts,
+            x=["Log Abund."],
             y=niche_ids,
-            colorscale="RdBu_r",
-            colorbar={"title": "Pred", "x": 0.78, "len": 0.9},
+            colorscale="Viridis",
+            colorbar={"title": "Log N", "x": 1.02, "len": 0.9},
         ),
         row=1,
         col=2,
     )
 
-    if has_attention:
-        # Panel 3: Attention lift (presence conditioned)
-        lift = summary.attention_lift_present.reindex(enr.index).to_numpy().reshape(-1, 1)
-        fig.add_trace(
-            go.Heatmap(
-                z=lift,
-                x=["Attn Lift"],
-                y=niche_ids,
-                colorscale="RdGy",
-                zmid=1.0,
-                zmin=0.7,
-                zmax=1.3,
-                colorbar={"title": "Attn Lift", "x": 0.90, "len": 0.9},
-            ),
-            row=1,
-            col=3,
-        )
-
-        # Panel 4: Log abundance
-        counts = summary.niche_counts.reindex(enr.index).to_numpy().astype(float)
-        log_counts = np.log(np.clip(counts, 1, None)).reshape(-1, 1)
-        fig.add_trace(
-            go.Heatmap(
-                z=log_counts,
-                x=["Log Abund."],
-                y=niche_ids,
-                colorscale="Viridis",
-                colorbar={"title": "Log N", "x": 1.02, "len": 0.9},
-            ),
-            row=1,
-            col=4,
-        )
-
     fig.update_layout(
-        title="Niche Summary: Enrichment + Predictions + Attention + Abundance",
+        title="Niche Composition and Abundance",
         template="plotly_white",
         height=max(400, 50 * len(niche_ids) + 200),
     )

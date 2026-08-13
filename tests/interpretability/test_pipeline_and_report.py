@@ -69,10 +69,7 @@ def test_pipeline_and_report_render(monkeypatch, tmp_path: Path) -> None:
             "params": {"n_clusters": 2, "linkage": "ward"},
         },
         "plugins": {
-            "enabled": ["niche_profiles", "attention_attribution"],
-            "params": {
-                "attention_attribution": {"attention_column": "attention", "score_column": "score"}
-            },
+            "enabled": ["niche_profiles"],
         },
     }
     bundle = run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
@@ -368,7 +365,6 @@ def test_report_cli_smoke(
         cfg_interpret.reduction.params = {"n_components": 2, "random_state": 42}
         cfg_interpret.plugins.enabled = [
             "niche_profiles",
-            "attention_attribution",
             "neighborhood_enrichment",
             "diff_neighborhood_enrichment",
             "filtration_curves",

@@ -1,7 +1,5 @@
 from grass_mil.interpretability.core.biomarkers import (
-    niche_attention_summary,
     niche_composition_summary,
-    niche_survival_attention_summary,
 )
 from grass_mil.interpretability.core.clustering import run_clustering
 from grass_mil.interpretability.core.data import (
@@ -20,8 +18,6 @@ __all__ = [
     "run_reduction",
     "run_clustering",
     "niche_composition_summary",
-    "niche_attention_summary",
-    "niche_survival_attention_summary",
     "load_interpretability_dataset",
     "extract_embedding_set",
     "fit_niche_transfer_from_report_bundle",

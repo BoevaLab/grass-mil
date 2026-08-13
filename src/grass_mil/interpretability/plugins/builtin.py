@@ -13,10 +13,7 @@ from grass_mil.contracts import (
 )
 from grass_mil.interpretability.core.agreement import compute_niche_agreement
 from grass_mil.interpretability.core.attribution import niche_attribution_summary
-from grass_mil.interpretability.core.biomarkers import (
-    niche_attention_summary,
-    niche_composition_summary,
-)
+from grass_mil.interpretability.core.biomarkers import niche_composition_summary
 from grass_mil.interpretability.plugins.base import InterpretabilityPlugin, PluginContext
 from grass_mil.interpretability.plugins.registry import PluginRegistry, create_plugin_registry
 from grass_mil.interpretability.tier2.autocorrelation import (
@@ -93,58 +90,6 @@ class NicheProfilesPlugin(InterpretabilityPlugin):
                     "composition": summary.composition,
                     "enrichment": summary.enrichment,
                 },
-            )
-        ]
-        return PluginResult(name=self.name, payload=payload, sections=sections)
-
-
-@dataclass
-class AttentionAttributionPlugin(InterpretabilityPlugin):
-    name: str = "attention_attribution"
-
-    def required_inputs(self) -> List[str]:
-        return ["niche_labels"]
-
-    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
-        labels = np.asarray(context.state["niche_labels"])
-        attn_summary = niche_attention_summary(
-            dataset.instance_table,
-            labels,
-            attention_column=str(params.get("attention_column", "attention")),
-            score_column=str(params.get("score_column", "score")),
-            bag_id_column=str(params.get("bag_id_column", dataset.bag_id_column)),
-            composition_prefix=str(params.get("composition_prefix", "comp_")),
-            variance_estimator=str(params.get("variance_estimator", "unbiased")),
-        )
-        base_summary = _context_cluster_summary(context, labels=labels)
-        if base_summary is not None:
-            summary = NicheSummary(
-                niche_labels=base_summary.niche_labels,
-                composition=base_summary.composition,
-                enrichment=base_summary.enrichment,
-                niche_counts=base_summary.niche_counts,
-                weighted_scores=attn_summary.weighted_scores,
-                mean_scores=attn_summary.mean_scores,
-                attention_present=attn_summary.attention_present,
-                attention_lift_present=attn_summary.attention_lift_present,
-            )
-        else:
-            summary = attn_summary
-        payload = {
-            "weighted_scores": summary.weighted_scores,
-            "mean_scores": summary.mean_scores,
-            "attention_present": summary.attention_present,
-            "attention_lift_present": summary.attention_lift_present,
-        }
-        section_tables = {}
-        for key, value in payload.items():
-            if value is not None:
-                section_tables[key] = value.to_frame(name=key)
-        sections = [
-            ReportSection(
-                title="Attention Attribution",
-                description="Attention-weighted and abundance-corrected niche scores.",
-                tables=section_tables,
             )
         ]
         return PluginResult(name=self.name, payload=payload, sections=sections)
@@ -696,7 +641,6 @@ class NicheAgreementPlugin(InterpretabilityPlugin):
 
 def register_builtin_plugins(registry: PluginRegistry) -> None:
     registry.register(NicheProfilesPlugin())
-    registry.register(AttentionAttributionPlugin())
     registry.register(NeighborhoodEnrichmentPlugin())
     registry.register(DiffNeighborhoodEnrichmentPlugin())
     registry.register(FiltrationCurvesPlugin())

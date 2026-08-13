@@ -77,10 +77,6 @@ class NicheSummary:
     composition: pd.DataFrame
     enrichment: pd.DataFrame
     niche_counts: pd.Series
-    weighted_scores: Optional[pd.Series] = None
-    mean_scores: Optional[pd.Series] = None
-    attention_present: Optional[pd.Series] = None
-    attention_lift_present: Optional[pd.Series] = None
 
 
 @dataclass(frozen=True)

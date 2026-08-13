@@ -120,35 +120,9 @@ def test_cluster_summaries_are_bounded_and_carry_intervals() -> None:
     assert summary["margin_sign_consistency"].between(0.0, 1.0).all()
     assert summary["prevalence"].between(0.0, 1.0).all()
 
-    for column in ("attention_lift", "prevalence"):
+    for column in ("prevalence",):
         assert (summary[f"{column}_lo"] <= summary[column] + 1e-9).all()
         assert (summary[column] <= summary[f"{column}_hi"] + 1e-9).all()
-
-
-def test_attention_lift_is_neutral_when_attention_matches_abundance() -> None:
-    """Uniform attention over a bag gives every niche a lift of 1."""
-    per_bag = 6
-    rows = []
-    for bag in range(4):
-        for i in range(per_bag):
-            rows.append(
-                {
-                    "bag_id": f"bag_{bag}",
-                    "attention_c0": 1.0 / per_bag,
-                    "logit_0": float(i),
-                }
-            )
-    table = pd.DataFrame(rows)
-    labels = np.array([i % 2 for i in range(len(table))])
-
-    result = niche_attribution_summary(
-        table,
-        labels,
-        attention_columns=["attention_c0"],
-        logit_columns=["logit_0"],
-        n_bootstrap=20,
-    )
-    np.testing.assert_allclose(result.per_niche["attention_lift"].to_numpy(), 1.0, atol=1e-9)
 
 
 def test_signed_share_across_clusters_sums_to_one_per_region() -> None:
@@ -290,40 +264,6 @@ def test_focus_classes_can_be_selected_explicitly() -> None:
             logit_columns=[f"logit_{c}" for c in range(3)],
             focus_classes=[7],
         )
-
-
-def test_multiclass_attention_lift_uses_the_matching_class_channel() -> None:
-    """Each class's summary must use that class's own attention column."""
-    per_bag = 4
-    rows = []
-    for bag in range(3):
-        for i in range(per_bag):
-            rows.append(
-                {
-                    "bag_id": f"bag_{bag}",
-                    # Class 0 attends instance 0 almost exclusively; class 1 is uniform.
-                    "attention_c0": 0.97 if i == 0 else 0.01,
-                    "attention_c1": 1.0 / per_bag,
-                    "attention_c2": 1.0 / per_bag,
-                    "logit_0": float(i),
-                    "logit_1": float(i),
-                    "logit_2": float(i),
-                }
-            )
-    table = pd.DataFrame(rows)
-    labels = np.array([0 if i % per_bag == 0 else 1 for i in range(len(table))])
-
-    result = niche_attribution_summary(
-        table,
-        labels,
-        attention_columns=["attention_c0", "attention_c1", "attention_c2"],
-        logit_columns=["logit_0", "logit_1", "logit_2"],
-        n_bootstrap=0,
-    )
-    lift = result.per_niche["attention_lift"]
-    # Niche 0 is the singled-out instance: strongly lifted for class 0 only.
-    assert lift.loc[(0, 0)] > 3.0
-    assert lift.loc[(0, 1)] == pytest.approx(1.0, abs=1e-6)
 
 
 def test_head_bias_is_read_from_a_checkpoint(tmp_path) -> None:

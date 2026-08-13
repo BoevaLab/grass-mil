@@ -1,12 +1,7 @@
 enabled:
   - niche_profiles
-  - attention_attribution
 params:
   niche_profiles:
-    variance_estimator: unbiased
-  attention_attribution:
-    attention_column: attention
-    score_column: score
     variance_estimator: unbiased
   neighborhood_enrichment:
     label_column: niche_label
