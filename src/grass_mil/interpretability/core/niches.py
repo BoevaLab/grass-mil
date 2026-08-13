@@ -30,7 +30,7 @@ __all__ = [
     "niche_display_name",
     "niche_display_names",
     "order_niches_by_composition",
-    "sort_by_niche_order",
+    "relabel_niches_by_composition",
 ]
 
 BACKGROUND_NICHE_ID = -1
@@ -119,29 +119,49 @@ def order_niches_by_composition(
     return [ordered_ids[int(position)] for position in order] + background
 
 
-def sort_by_niche_order(
-    frame: pd.DataFrame,
-    order: Sequence,
+def relabel_niches_by_composition(
+    table: pd.DataFrame,
+    labels: np.ndarray,
     *,
-    axis: int = 0,
-    level: Optional[str] = None,
-) -> pd.DataFrame:
-    """Reindex a frame onto a niche order, keeping anything not listed.
+    composition_prefix: str = "comp_",
+    method: str = "average",
+    metric: str = "correlation",
+    start_at: int = 1,
+) -> tuple[np.ndarray, dict]:
+    """Renumber niches so that the id *is* the dendrogram position.
 
-    Args:
-        level: Name of the niche level when the frame carries a MultiIndex.
+    Called once, immediately after clustering. Niche 1 is first in dendrogram
+    order, Niche 2 second, and so on, so every downstream table, figure and
+    export can simply sort by id and get composition order for free -- no
+    ordering state has to be threaded through the pipeline. Background keeps its
+    own label and takes no position in the tree.
+
+    Returns:
+        ``(relabelled, mapping)`` where ``mapping`` is old id -> new id.
     """
-    if frame is None or frame.empty or not len(order):
-        return frame
+    labels = np.asarray(labels)
+    composition_columns = [c for c in table.columns if str(c).startswith(composition_prefix)]
+    if not composition_columns:
+        # Nothing to order by; leave the labels untouched rather than guessing.
+        return labels, {value: value for value in np.unique(labels)}
 
-    labels = frame.index if axis == 0 else frame.columns
-    if level is not None and isinstance(labels, pd.MultiIndex):
-        niche_values = labels.get_level_values(level)
-        rank = {value: position for position, value in enumerate(order)}
-        sort_key = [rank.get(value, len(order)) for value in niche_values]
-        return frame.iloc[np.argsort(sort_key, kind="stable")]
+    composition = (
+        table.loc[:, composition_columns]
+        .astype(float)
+        .groupby(pd.Series(labels, name="niche_label"))
+        .mean()
+        .sort_index()
+    )
+    order = order_niches_by_composition(composition, method=method, metric=metric)
 
-    known = [value for value in order if value in labels]
-    remainder = [value for value in labels if value not in set(known)]
-    ordered = known + remainder
-    return frame.reindex(index=ordered) if axis == 0 else frame.reindex(columns=ordered)
+    mapping = {}
+    next_id = int(start_at)
+    for niche_id in order:
+        if is_background(niche_id):
+            mapping[niche_id] = BACKGROUND_NICHE_ID
+            continue
+        mapping[niche_id] = next_id
+        next_id += 1
+
+    relabelled = np.array([mapping.get(value, value) for value in labels])
+    return relabelled, mapping

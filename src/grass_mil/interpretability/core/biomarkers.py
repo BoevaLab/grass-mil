@@ -4,10 +4,6 @@ import numpy as np
 import pandas as pd
 
 from grass_mil.contracts import NicheSummary
-from grass_mil.interpretability.core.niches import (
-    order_niches_by_composition,
-    sort_by_niche_order,
-)
 
 
 def _resolve_variance_estimator(variance_estimator: str) -> int:
@@ -40,14 +36,12 @@ def niche_composition_summary(
     *,
     composition_prefix: str = "comp_",
     variance_estimator: str = "unbiased",
-    order_by_composition: bool = True,
 ) -> NicheSummary:
     """Mean composition and z-scored enrichment per niche.
 
-    Niches are ordered by a dendrogram over their composition profiles, so
-    compositionally similar niches are adjacent in every downstream table and
-    heatmap. Background is pinned last. Set ``order_by_composition=False`` for
-    plain numeric order.
+    Rows come out in niche-id order, which is dendrogram order: the pipeline
+    renumbers niches by composition once, right after clustering, so nothing
+    downstream has to re-derive or thread an ordering.
     """
     if len(table) != int(niche_labels.shape[0]):
         raise ValueError("table rows and niche_labels length mismatch.")
@@ -63,12 +57,6 @@ def niche_composition_summary(
     composition = comp.groupby(labels).mean().sort_index()
     enrichment = z_comp.groupby(labels).mean().sort_index()
     counts = labels.value_counts().sort_index()
-
-    if order_by_composition:
-        order = order_niches_by_composition(composition)
-        composition = sort_by_niche_order(composition, order)
-        enrichment = sort_by_niche_order(enrichment, order)
-        counts = counts.reindex(composition.index)
 
     return NicheSummary(
         niche_labels=np.asarray(niche_labels),

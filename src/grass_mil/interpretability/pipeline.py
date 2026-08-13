@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import json
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -14,6 +16,7 @@ from grass_mil.contracts import (
     ReportBundle,
 )
 from grass_mil.interpretability.core.biomarkers import niche_composition_summary
+from grass_mil.interpretability.core.niches import relabel_niches_by_composition
 from grass_mil.interpretability.core.clustering import run_clustering
 from grass_mil.interpretability.core.data import extract_embedding_set
 from grass_mil.interpretability.core.reduction import run_reduction
@@ -147,6 +150,18 @@ def run_interpretability_pipeline(
         clustering_result = run_clustering(method, clustering_input, **params)
         labels = clustering_result.labels
 
+    niche_relabel_map: Dict[Any, Any] = {}
+    if labels is not None and bool(config.get("relabel_niches_by_composition", True)):
+        # Renumber once so the niche id carries the dendrogram order. Everything
+        # downstream then gets composition order by sorting on the id.
+        labels, niche_relabel_map = relabel_niches_by_composition(
+            dataset.instance_table,
+            labels,
+            composition_prefix=str(config.get("composition_prefix", "comp_")),
+        )
+        if clustering_result is not None:
+            clustering_result = replace(clustering_result, labels=labels)
+
     niche_summary: Optional[NicheSummary] = None
     if labels is not None:
         niche_summary = niche_composition_summary(
@@ -208,6 +223,7 @@ def run_interpretability_pipeline(
         "cluster_on_pca": cluster_on_pca,
         "cluster_pca_components": effective_cluster_pca_components,
         "enabled_plugins": enabled_plugins,
+        "niche_relabel_map": {str(k): int(v) for k, v in niche_relabel_map.items()},
     }
     _write_json(summary_payload, artifacts_dir / "pipeline_summary.json")
 
