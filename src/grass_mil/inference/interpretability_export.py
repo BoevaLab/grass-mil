@@ -176,6 +176,47 @@ def resolve_composition_column_names(
     return names
 
 
+def _resolve_instance_root_cell_types(
+    instance_graphs: Sequence[Any],
+    *,
+    labels: Sequence[str],
+    composition_label: str,
+) -> Optional[List[str]]:
+    """Cell type of each instance's root cell, as a readable name.
+
+    `root_n_id` holds a global node id, so the root's row within the subgraph is
+    found by matching it against `n_id`. Returns None if any instance cannot be
+    resolved, so a partially-correct column is never emitted.
+    """
+    out: List[str] = []
+    for graph in instance_graphs:
+        codes = getattr(graph, "categorical_codes", None)
+        n_id = getattr(graph, "n_id", None)
+        if not isinstance(codes, torch.Tensor) or not isinstance(n_id, torch.Tensor):
+            return None
+        try:
+            root_global = _resolve_instance_root_node_id(graph)
+        except ValueError:
+            return None
+
+        matches = (n_id.detach().cpu().long().view(-1) == int(root_global)).nonzero().view(-1)
+        if matches.numel() == 0:
+            return None
+        local_idx = int(matches[0])
+
+        column = 0
+        slices = getattr(graph, "categorical_slices", None)
+        if isinstance(slices, dict) and composition_label in slices:
+            column = int(slices[composition_label])
+        codes_2d = codes if codes.ndim == 2 else codes.view(-1, 1)
+        if local_idx >= int(codes_2d.shape[0]) or column >= int(codes_2d.shape[1]):
+            return None
+
+        code = int(codes_2d[local_idx, column])
+        out.append(labels[code] if 0 <= code < len(labels) else str(code))
+    return out
+
+
 def build_instance_table(
     payload: BatchPredictionPayload,
     *,
@@ -190,6 +231,7 @@ def build_instance_table(
     score_logit_index: int = 0,
     attention_column: str = "attention",
     attention_class_index: Optional[int] = None,
+    cell_type_column: Optional[str] = "cell_type",
 ) -> pd.DataFrame:
     logits = _tensor_to_2d_cpu(payload.instance_logits)
     if logits is None:
@@ -278,6 +320,30 @@ def build_instance_table(
             comp_cols = [f"{composition_prefix}{idx}" for idx in range(int(composition.shape[1]))]
         for col_name, values in zip(comp_cols, composition.T):
             data[col_name] = values.tolist()
+
+        if cell_type_column and payload.instance_graphs is not None:
+            # The type of the cell each instance is rooted at.
+            #
+            # There is exactly one instance per cell -- an instance is that
+            # cell's k-hop ego-graph -- so the instance table is a cell table,
+            # and this column makes it one that the cell-type plugins
+            # (`filtration_curves`, `per_niche_cell_type_enrichment`) can read.
+            #
+            # It is the root cell's own type, not a summary of the
+            # neighbourhood: summarising here would silently turn cell-level
+            # statistics into statistics over neighbourhood labels. The
+            # neighbourhood composition is already exported separately as the
+            # `comp_*` columns.
+            prefix_len = len(composition_prefix)
+            labels = [
+                name[prefix_len:] if name.startswith(composition_prefix) else name
+                for name in comp_cols
+            ]
+            root_types = _resolve_instance_root_cell_types(
+                payload.instance_graphs, labels=labels, composition_label=cell_type_column
+            )
+            if root_types is not None:
+                data[cell_type_column] = root_types
     elif require_composition:
         raise ValueError(
             "Composition columns are required for interpretability export but "

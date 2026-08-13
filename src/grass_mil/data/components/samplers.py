@@ -713,6 +713,17 @@ def _normalize_shadow_batch(batch: Batch, source_data: Optional[Data] = None) ->
                 key,
                 _expand_graph_level_value(getattr(source_data, key), num_subgraphs),
             )
+    # Idempotent: this normalisation runs more than once over the same batch,
+    # and _resolve_batch_root_node_ids maps root indices through `n_id`. Applied
+    # twice, it maps already-global ids through `n_id` a second time and returns
+    # unrelated nodes -- after which a root is no longer found in its own
+    # subgraph. Convert only when the ids are not already global.
+    already_global = getattr(batch, "root_n_id_is_global", None)
+    if already_global is not None:
+        flags = torch.as_tensor(already_global).view(-1)
+        if flags.numel() > 0 and bool(flags[0]):
+            return batch
+
     root_node_ids = _resolve_batch_root_node_ids(batch)
     if isinstance(root_node_ids, torch.Tensor):
         batch.root_n_id = root_node_ids

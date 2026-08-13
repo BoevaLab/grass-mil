@@ -686,3 +686,40 @@ Outputs use the language a biologist reads, not the algorithm's:
 The *algorithm* is still clustering, so `run_clustering`, `ClusteringResult` and
 the sklearn parameters (`n_clusters`, `min_cluster_size`) keep their names. The
 distinction is deliberate: those are the method, the niches are the result.
+
+## What the tier-2 statistics are computed over
+
+Every tier-2 analysis runs on the **instance graph**, not on the cell graph.
+Confusing the two makes the results easy to over-read, so be explicit about it:
+
+- A row of `instance_table` is one **k-hop ego-graph**, rooted at one cell.
+- An edge in `spatial_table` connects two **instances**, i.e. two roots.
+- `comp_*` are the cell-type fractions among **all cells inside** that
+  ego-graph. This is the only place the full cell content survives.
+- `cell_type` is the **root cell's own type**, so that the instance graph can be
+  treated as a (sampled) cell graph.
+- `center_x`/`center_y` are the **mean position of all cells** in the ego-graph,
+  not the root cell's coordinates.
+
+What each analysis therefore measures:
+
+| Analysis | Unit | Measures |
+|---|---|---|
+| `neighborhood_enrichment` | instance pairs | how often two labels are adjacent in the instance graph, versus chance. `label_column` defaults to `niche_label`, so by default it is niche-vs-niche co-occurrence, not cell type. Point it at `cell_type` for root-cell types. |
+| `morans_i` | instances | spatial autocorrelation of a numeric column across the instance graph |
+| `ripley` | instance centroids | cross-L between point sets grouped by a label |
+| `filtration_curves` | instance pairs | counts per cell-type pair as a distance threshold grows, using root-cell types |
+| `niche_profiles` | instances | mean `comp_*` per niche -- the one summary that reflects every cell |
+
+**Roots are a weighted sample, not every cell.** With
+`data.sampler.runtime.proportional_root_sampling=true` (the default) roots are
+drawn with inverse-frequency weighting by `property_name`, so rare cell types
+are deliberately over-represented and one cell can root several instances. Any
+cell-type distribution over instances therefore reflects that sampling design
+rather than the tissue. Set `proportional_root_sampling=false` for an unweighted
+draw.
+
+None of these is a cell-level statistic in the sense of "every cell is a node
+exactly once". If you need that, the instance table is the wrong input: it would
+require exporting a cell-level table instead.
+

@@ -78,7 +78,17 @@ def split_batch_by_ptr(batch: Batch) -> List[Data]:
         )
 
         root_n_id = batch.root_n_id[i : i + 1] if "root_n_id" in batch else None
-        if root_n_id is not None and root_n_id.numel() == 1:
+        # Rebase batch-space root indices onto the subgraph. Global ids (node
+        # ids in the source graph, flagged by `root_n_id_is_global`) must be
+        # left alone: subtracting a node offset from one silently turns it into
+        # an unrelated node, which is how the root stopped being findable in its
+        # own subgraph.
+        root_is_global = False
+        flags = getattr(batch, "root_n_id_is_global", None)
+        if flags is not None:
+            flags = torch.as_tensor(flags).view(-1)
+            root_is_global = bool(flags[0]) if flags.numel() else False
+        if root_n_id is not None and root_n_id.numel() == 1 and not root_is_global:
             root_value = int(root_n_id.item())
             if node_start <= root_value < node_end:
                 root_n_id = root_n_id - node_start

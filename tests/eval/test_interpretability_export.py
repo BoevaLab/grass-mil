@@ -240,3 +240,79 @@ def test_build_instance_table_attention_class_index_is_selectable() -> None:
 
     with pytest.raises(ValueError, match="out of range"):
         build_instance_table(payload, require_composition=True, attention_class_index=5)
+
+
+def _instance_graph(codes, n_id, root_global):
+    """Minimal stand-in for a sampled ego-graph."""
+    from torch_geometric.data import Data
+
+    g = Data(x=torch.zeros(len(n_id), 1))
+    g.categorical_codes = torch.tensor(codes).view(-1, 1)
+    g.n_id = torch.tensor(n_id)
+    g.root_n_id = torch.tensor([root_global])
+    g.root_n_id_is_global = torch.tensor([True])
+    g.categorical_slices = {"cell_type": 0}
+    return g
+
+
+def test_build_instance_table_emits_the_root_cell_type() -> None:
+    """One label per instance: the type of the cell it is rooted at.
+
+    There is exactly one instance per cell -- an instance is that cell's k-hop
+    ego-graph -- so the instance table is a cell table. `filtration_curves` and
+    `per_niche_cell_type_enrichment` both need this column and raise without it.
+
+    It must be the root cell's own type. Summarising the neighbourhood instead
+    (its dominant type, say) would quietly turn cell-level statistics into
+    statistics over neighbourhood labels. The neighbourhood composition is
+    exported separately as `comp_*`.
+    """
+    # Instance 0 is rooted at global node 7, whose code is 1 ("Tcell"), even
+    # though its neighbourhood is mostly code 0 ("Epithelial").
+    graphs = [
+        _instance_graph(codes=[0, 0, 1], n_id=[5, 6, 7], root_global=7),
+        _instance_graph(codes=[0, 1, 1], n_id=[8, 9, 10], root_global=8),
+    ]
+    payload = BatchPredictionPayload(
+        bag_ids=["b0"],
+        bag_logits=torch.tensor([[1.0]]),
+        bag_targets=None,
+        bag_attention=None,
+        instance_logits=torch.tensor([[0.2], [0.5]]),
+        instance_patch_ids=["p0", "p1"],
+        instance_bag_ids=["b0", "b0"],
+        instance_region_ids=["r0", "r0"],
+        instance_sample_ids=["s0", "s0"],
+        instance_embeddings=torch.tensor([[0.1, 0.2], [0.3, 0.4]]),
+        instance_composition=torch.tensor([[0.67, 0.33], [0.33, 0.67]]),
+        instance_graphs=graphs,
+    )
+    frame = build_instance_table(
+        payload,
+        require_composition=True,
+        composition_column_names=["comp_Epithelial", "comp_Tcell"],
+    )
+    assert "cell_type" in frame.columns
+    # Root types, not the neighbourhood majority: instance 0 is majority
+    # Epithelial but rooted at a Tcell, and instance 1 the other way round.
+    assert frame["cell_type"].tolist() == ["Tcell", "Epithelial"]
+
+
+def test_instance_cell_type_column_can_be_disabled() -> None:
+    graphs = [_instance_graph(codes=[0, 1], n_id=[3, 4], root_global=3)]
+    payload = BatchPredictionPayload(
+        bag_ids=["b0"],
+        bag_logits=torch.tensor([[1.0]]),
+        bag_targets=None,
+        bag_attention=None,
+        instance_logits=torch.tensor([[0.2]]),
+        instance_patch_ids=["p0"],
+        instance_bag_ids=["b0"],
+        instance_region_ids=["r0"],
+        instance_sample_ids=["s0"],
+        instance_embeddings=torch.tensor([[0.1, 0.2]]),
+        instance_composition=torch.tensor([[0.7, 0.3]]),
+        instance_graphs=graphs,
+    )
+    frame = build_instance_table(payload, require_composition=True, cell_type_column=None)
+    assert "cell_type" not in frame.columns
