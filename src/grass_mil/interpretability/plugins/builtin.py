@@ -16,6 +16,15 @@ from grass_mil.interpretability.core.attribution import niche_attribution_summar
 from grass_mil.interpretability.core.biomarkers import niche_composition_summary
 from grass_mil.interpretability.plugins.base import InterpretabilityPlugin, PluginContext
 from grass_mil.interpretability.plugins.registry import PluginRegistry, create_plugin_registry
+from grass_mil.interpretability.tier2.cell_level import (
+    attach_niche_labels_to_cells,
+    differential_cell_type_enrichment,
+    cell_filtration_curves,
+    niche_label_moran,
+    per_niche_cell_type_enrichment,
+    per_niche_cell_type_moran,
+    per_niche_cell_type_ripley,
+)
 from grass_mil.interpretability.tier2.autocorrelation import (
     diff_morans_i_vs_reference,
     run_morans_i,
@@ -650,9 +659,275 @@ def register_builtin_plugins(registry: PluginRegistry) -> None:
     registry.register(MoransIPlugin())
     registry.register(RipleyPlugin())
     registry.register(NicheAgreementPlugin())
+    registry.register(CellTypeEnrichmentPerNichePlugin())
+    registry.register(CellTypeMoranPerNichePlugin())
+    registry.register(NicheLabelMoranPlugin())
+    registry.register(CellFiltrationCurvesPlugin())
+    registry.register(CellTypeRipleyPerNichePlugin())
 
 
 def create_builtin_registry() -> PluginRegistry:
     registry = create_plugin_registry()
     register_builtin_plugins(registry)
     return registry
+
+
+def _cells_with_niches(dataset, context: PluginContext, niche_column: str):
+    """Cell table with each cell carrying its ego-graph's niche."""
+    if dataset.cell_table is None or dataset.cell_edge_table is None:
+        raise ValueError(
+            "Cell-level analyses require cell_table and cell_edge_table. Export them "
+            "with `grass-mil-predict interpretability.cells.enabled=true`."
+        )
+    return attach_niche_labels_to_cells(
+        dataset.cell_table,
+        list(np.asarray(context.state["niche_labels"])),
+        list(dataset.instance_table[dataset.id_column]),
+        instance_id_column=dataset.id_column,
+        niche_column=niche_column,
+    )
+
+
+@dataclass
+class CellTypeEnrichmentPerNichePlugin(InterpretabilityPlugin):
+    """Cell-type x cell-type neighbourhood enrichment, within each niche.
+
+    The instance-level `neighborhood_enrichment` treats a whole ego-graph as one
+    node, so it measures how neighbourhood *labels* co-occur. This measures how
+    the *cells* inside a niche are wired to each other.
+    """
+
+    name: str = "cell_type_enrichment_per_niche"
+
+    def required_inputs(self) -> List[str]:
+        return ["cell_table", "cell_edge_table", "niche_labels"]
+
+    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
+        niche_column = str(params.get("niche_column", "niche_label"))
+        cells = _cells_with_niches(dataset, context, niche_column)
+        result = per_niche_cell_type_enrichment(
+            cells,
+            dataset.cell_edge_table,
+            cell_type_column=str(params.get("cell_type_column", "cell_type")),
+            niche_column=niche_column,
+            cell_id_column=str(params.get("cell_id_column", dataset.cell_id_column)),
+            n_perms=int(params.get("n_perms", 0)),
+            random_state=int(params.get("random_state", 42)),
+            undirected=bool(params.get("undirected", False)),
+            enrichment_mode=str(params.get("enrichment_mode", "zscore")),
+            min_cells=int(params.get("min_cells", 10)),
+            skip_background=bool(params.get("skip_background", False)),
+        )
+        tables = {
+            (f"niche_{k}" if k != -1 else "Background"): v for k, v in result.enrichment.items()
+        }
+        payload: Dict[str, Any] = {
+            "enrichment": result.enrichment,
+            "pvalues": result.pvalues,
+            "n_cells": result.n_cells,
+            "n_edges": result.n_edges,
+        }
+        if bool(params.get("differential_vs_background", True)):
+            differential = differential_cell_type_enrichment(
+                result, reference=int(params.get("reference_niche", -1))
+            )
+            payload["differential"] = differential
+            for k, v in differential.items():
+                tables[f"niche_{k}_vs_Background"] = v
+
+        sections = [
+            ReportSection(
+                title="Cell-type neighbourhood enrichment, per niche",
+                description=(
+                    "Cell-type x cell-type enrichment computed over the cells inside "
+                    "each niche, using only edges whose both endpoints lie in that "
+                    "niche. Unlike the instance-level analysis, this measures how "
+                    "cells are wired to one another rather than how neighbourhood "
+                    "labels co-occur."
+                ),
+                tables=tables,
+            )
+        ]
+        return PluginResult(name=self.name, payload=payload, sections=sections)
+
+
+@dataclass
+class CellTypeMoranPerNichePlugin(InterpretabilityPlugin):
+    """Moran's I of each cell type, within each niche."""
+
+    name: str = "cell_type_moran_per_niche"
+
+    def required_inputs(self) -> List[str]:
+        return ["cell_table", "cell_edge_table", "niche_labels"]
+
+    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
+        niche_column = str(params.get("niche_column", "niche_label"))
+        cells = _cells_with_niches(dataset, context, niche_column)
+        result = per_niche_cell_type_moran(
+            cells,
+            dataset.cell_edge_table,
+            cell_type_column=str(params.get("cell_type_column", "cell_type")),
+            niche_column=niche_column,
+            cell_id_column=str(params.get("cell_id_column", dataset.cell_id_column)),
+            n_perms=int(params.get("n_perms", 100)),
+            random_state=int(params.get("random_state", 0)),
+            min_nodes=int(params.get("min_nodes", 3)),
+        )
+        sections = [
+            ReportSection(
+                title="Cell-type spatial autocorrelation, per niche",
+                description=(
+                    "Moran's I of each cell-type indicator over the cell graph of "
+                    "each niche: whether cells of that type cluster together "
+                    "spatially inside the niche. Rows are niches, columns cell types."
+                ),
+                tables={"morans_i": result.statistic, "qvalue": result.qvalue},
+            )
+        ]
+        return PluginResult(
+            name=self.name,
+            payload={
+                "statistic": result.statistic,
+                "pvalue": result.pvalue,
+                "qvalue": result.qvalue,
+                "n_nodes": result.n_nodes,
+            },
+            sections=sections,
+        )
+
+
+@dataclass
+class NicheLabelMoranPlugin(InterpretabilityPlugin):
+    """Moran's I of the niche assignment itself, over the instance graph."""
+
+    name: str = "niche_label_moran"
+
+    def required_inputs(self) -> List[str]:
+        return ["spatial_table", "niche_labels"]
+
+    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
+        if dataset.spatial_table is None:
+            raise ValueError("Niche-label Moran's I requires a spatial table.")
+        niche_column = str(params.get("niche_column", "niche_label"))
+        table = dataset.instance_table.copy()
+        table[niche_column] = np.asarray(context.state["niche_labels"])
+        result = niche_label_moran(
+            table,
+            dataset.spatial_table,
+            niche_column=niche_column,
+            id_column=str(params.get("id_column", dataset.id_column)),
+            n_perms=int(params.get("n_perms", 100)),
+            random_state=int(params.get("random_state", 0)),
+        )
+        sections = [
+            ReportSection(
+                title="Niche spatial autocorrelation (global)",
+                description=(
+                    "Moran's I of each niche indicator across the whole instance "
+                    "graph: whether niches form contiguous territories rather than "
+                    "interleaving. The global counterpart to the per-niche "
+                    "cell-type analyses."
+                ),
+                tables={"morans_i": result.statistic, "qvalue": result.qvalue},
+            )
+        ]
+        return PluginResult(
+            name=self.name,
+            payload={
+                "statistic": result.statistic,
+                "pvalue": result.pvalue,
+                "qvalue": result.qvalue,
+            },
+            sections=sections,
+        )
+
+
+@dataclass
+class CellFiltrationCurvesPlugin(InterpretabilityPlugin):
+    """Filtration curves over cell-cell edges, counting both endpoints."""
+
+    name: str = "cell_filtration_curves"
+
+    def required_inputs(self) -> List[str]:
+        return ["cell_table", "cell_edge_table", "niche_labels"]
+
+    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
+        niche_column = str(params.get("niche_column", "niche_label"))
+        cells = _cells_with_niches(dataset, context, niche_column)
+        thresholds = np.linspace(
+            float(params.get("threshold_start", 0.0)),
+            float(params.get("threshold_stop", 55.0)),
+            int(params.get("threshold_count", 500)),
+        )
+        result = cell_filtration_curves(
+            cells,
+            dataset.cell_edge_table,
+            thresholds=thresholds,
+            cell_type_column=str(params.get("cell_type_column", "cell_type")),
+            niche_column=niche_column,
+            cell_id_column=str(params.get("cell_id_column", dataset.cell_id_column)),
+            scale_within_niche=bool(params.get("scale_within_niche", True)),
+        )
+        sections = [
+            ReportSection(
+                title="Cell-type filtration curves, per niche",
+                description=(
+                    "Cells of each type reached as the edge-distance threshold "
+                    "grows, computed over the edges inside the ego-graphs. Both "
+                    "endpoints of every edge are counted, so the curves describe "
+                    "cells rather than neighbourhoods. Distances are micrometres."
+                ),
+                metadata={"thresholds": result.thresholds.tolist()},
+            )
+        ]
+        return PluginResult(
+            name=self.name,
+            payload={"curves": result.curves, "thresholds": result.thresholds},
+            sections=sections,
+        )
+
+
+@dataclass
+class CellTypeRipleyPerNichePlugin(InterpretabilityPlugin):
+    """Ripley cross-L between cell types, with each niche as a region."""
+
+    name: str = "cell_type_ripley_per_niche"
+
+    def required_inputs(self) -> List[str]:
+        return ["cell_table", "niche_labels"]
+
+    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
+        niche_column = str(params.get("niche_column", "niche_label"))
+        cells = _cells_with_niches(dataset, context, niche_column)
+        result = per_niche_cell_type_ripley(
+            cells,
+            cell_type_column=str(params.get("cell_type_column", "cell_type")),
+            niche_column=niche_column,
+            x_column=str(params.get("x_column", "x")),
+            y_column=str(params.get("y_column", "y")),
+            n_radii=int(params.get("n_radii", 50)),
+            max_fraction=float(params.get("max_fraction", 0.25)),
+            min_count=int(params.get("min_count", 5)),
+            radius_source=str(params.get("radius_source", "median")),
+        )
+        sections = [
+            ReportSection(
+                title="Cell-type Ripley cross-L, per niche",
+                description=(
+                    "Centred cross-L curves between cell types, using the cells' "
+                    "own coordinates and treating each niche as a region. Positive "
+                    "values indicate co-aggregation at that radius, negative "
+                    "values mutual avoidance."
+                ),
+                tables={"ripley": result.to_frame()} if hasattr(result, "to_frame") else {},
+            )
+        ]
+        return PluginResult(
+            name=self.name,
+            payload={
+                "curves": result.curves,
+                "radii": result.radii,
+                "pair_counts": result.pair_counts,
+            },
+            sections=sections,
+        )

@@ -719,7 +719,21 @@ cell-type distribution over instances therefore reflects that sampling design
 rather than the tissue. Set `proportional_root_sampling=false` for an unweighted
 draw.
 
-None of these is a cell-level statistic in the sense of "every cell is a node
-exactly once". If you need that, the instance table is the wrong input: it would
-require exporting a cell-level table instead.
+### Cell-level analyses
+
+Export `cell_table` and `cell_edges` with
+`grass-mil-predict interpretability.cells.enabled=true`, pass them to the report
+as `data.cell_table` / `data.cell_edge_table`, and these become available:
+
+| Analysis | Unit | Measures |
+|---|---|---|
+| `cell_type_enrichment_per_niche` | cell pairs within a niche | cell-type x cell-type contact enrichment, using only edges whose both endpoints lie in the niche; optionally differenced against Background |
+| `cell_type_moran_per_niche` | cells within a niche | Moran's I of each cell-type indicator, as a niche x cell-type table |
+| `cell_filtration_curves` | cell pairs within a niche | cells of each type reached as the edge-distance threshold grows, counting both endpoints |
+| `cell_type_ripley_per_niche` | cells within a niche | centred cross-L between cell types, from the cells' own coordinates |
+| `niche_label_moran` | instances, globally | whether niches form contiguous territories rather than interleaving |
+
+Each cell inherits the niche of the ego-graph it was sampled into, so a cell
+appearing in several overlapping ego-graphs contributes to each. This mirrors
+the pooling the legacy NSCLC reports do.
 

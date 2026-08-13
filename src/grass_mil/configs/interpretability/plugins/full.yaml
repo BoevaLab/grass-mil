@@ -12,3 +12,9 @@ enabled:
   - filtration_curves
   - morans_i
   - ripley
+  # Cell-level: require cell_table/cell_edge_table from predict.
+  - cell_type_enrichment_per_niche
+  - cell_type_moran_per_niche
+  - niche_label_moran
+  - cell_filtration_curves
+  - cell_type_ripley_per_niche

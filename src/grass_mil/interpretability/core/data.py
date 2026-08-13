@@ -26,6 +26,8 @@ def load_interpretability_dataset(
     instance_table_path: Path,
     bag_table_path: Optional[Path] = None,
     spatial_table_path: Optional[Path] = None,
+    cell_table_path: Optional[Path] = None,
+    cell_edge_table_path: Optional[Path] = None,
     id_column: str = "instance_id",
     bag_id_column: str = "bag_id",
     cell_type_column: Optional[str] = None,
@@ -34,10 +36,14 @@ def load_interpretability_dataset(
     instance_table = load_table(instance_table_path)
     bag_table = load_table(bag_table_path) if bag_table_path else None
     spatial_table = load_table(spatial_table_path) if spatial_table_path else None
+    cell_table = load_table(cell_table_path) if cell_table_path else None
+    cell_edge_table = load_table(cell_edge_table_path) if cell_edge_table_path else None
     return InterpretabilityDataset(
         instance_table=instance_table,
         bag_table=bag_table,
         spatial_table=spatial_table,
+        cell_table=cell_table,
+        cell_edge_table=cell_edge_table,
         id_column=id_column,
         bag_id_column=bag_id_column,
         cell_type_column=cell_type_column,

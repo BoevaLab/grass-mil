@@ -49,6 +49,12 @@ class InterpretabilityDataset:
     instance_table: pd.DataFrame
     bag_table: Optional[pd.DataFrame] = None
     spatial_table: Optional[pd.DataFrame] = None
+    # Cell-level tables: one row per node of every sampled ego-graph, and one
+    # row per intra-subgraph edge. Required by the analyses that measure cells
+    # rather than neighbourhood summaries.
+    cell_table: Optional[pd.DataFrame] = None
+    cell_edge_table: Optional[pd.DataFrame] = None
+    cell_id_column: str = "cell_id"
     id_column: str = "instance_id"
     bag_id_column: str = "bag_id"
     cell_type_column: Optional[str] = None
