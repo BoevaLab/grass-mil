@@ -48,14 +48,14 @@ class AttributionResult:
 
     Attributes:
         per_instance: One row per instance with its contribution columns.
-        per_cluster: One row per niche; each statistic carries ``_lo``/``_hi``
+        per_niche: One row per niche; each statistic carries ``_lo``/``_hi``
             percentile bootstrap bounds.
         identity_residual: ``max_r |sum_i M[i,c] - L_c|``. Non-zero means the
             additive identity does not hold and the attribution is invalid.
     """
 
     per_instance: pd.DataFrame
-    per_cluster: pd.DataFrame
+    per_niche: pd.DataFrame
     identity_residual: float
 
 
@@ -264,7 +264,7 @@ def niche_attribution_summary(
     summary = pd.concat(summaries).sort_index()
     return AttributionResult(
         per_instance=per_instance,
-        per_cluster=summary,
+        per_niche=summary,
         identity_residual=identity_residual,
     )
 

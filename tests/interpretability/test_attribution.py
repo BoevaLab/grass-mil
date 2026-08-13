@@ -107,7 +107,7 @@ def test_cluster_summaries_are_bounded_and_carry_intervals() -> None:
         logit_columns=["logit_0", "logit_1"],
         n_bootstrap=50,
     )
-    summary = result.per_cluster
+    summary = result.per_niche
 
     # Indexed by (niche_label, class_index). A binary head summarises the
     # positive class only: the class-0 margin is its exact negation.
@@ -148,7 +148,7 @@ def test_attention_lift_is_neutral_when_attention_matches_abundance() -> None:
         logit_columns=["logit_0"],
         n_bootstrap=20,
     )
-    np.testing.assert_allclose(result.per_cluster["attention_lift"].to_numpy(), 1.0, atol=1e-9)
+    np.testing.assert_allclose(result.per_niche["attention_lift"].to_numpy(), 1.0, atol=1e-9)
 
 
 def test_signed_share_across_clusters_sums_to_one_per_region() -> None:
@@ -161,7 +161,7 @@ def test_signed_share_across_clusters_sums_to_one_per_region() -> None:
         logit_columns=["logit_0", "logit_1"],
         n_bootstrap=0,
     )
-    assert result.per_cluster["margin_signed_share"].sum() == pytest.approx(1.0, abs=1e-9)
+    assert result.per_niche["margin_signed_share"].sum() == pytest.approx(1.0, abs=1e-9)
 
 
 def test_bootstrap_ci_brackets_the_point_estimate() -> None:
@@ -242,7 +242,7 @@ def test_multiclass_attribution_summarises_every_class() -> None:
         n_bootstrap=20,
     )
     # One row per (niche, class): no class is silently ignored.
-    assert set(result.per_cluster.index) == {(c, k) for c in (0, 1, 2) for k in (0, 1, 2)}
+    assert set(result.per_niche.index) == {(c, k) for c in (0, 1, 2) for k in (0, 1, 2)}
     for c in range(3):
         assert f"margin_c{c}" in result.per_instance.columns
         assert f"contribution_c{c}" in result.per_instance.columns
@@ -280,7 +280,7 @@ def test_focus_classes_can_be_selected_explicitly() -> None:
         focus_classes=[2],
         n_bootstrap=10,
     )
-    assert {k for _, k in result.per_cluster.index} == {2}
+    assert {k for _, k in result.per_niche.index} == {2}
 
     with pytest.raises(ValueError, match="out of range"):
         niche_attribution_summary(
@@ -320,7 +320,7 @@ def test_multiclass_attention_lift_uses_the_matching_class_channel() -> None:
         logit_columns=["logit_0", "logit_1", "logit_2"],
         n_bootstrap=0,
     )
-    lift = result.per_cluster["attention_lift"]
+    lift = result.per_niche["attention_lift"]
     # Niche 0 is the singled-out instance: strongly lifted for class 0 only.
     assert lift.loc[(0, 0)] > 3.0
     assert lift.loc[(0, 1)] == pytest.approx(1.0, abs=1e-6)

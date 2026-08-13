@@ -10,10 +10,10 @@ from grass_mil.interpretability.core.data import (
 )
 from grass_mil.interpretability.core.reduction import run_reduction
 from grass_mil.interpretability.core.transfer import (
-    apply_cluster_transfer,
-    fit_cluster_transfer_from_report_bundle,
-    load_cluster_transfer_bundle,
-    save_cluster_transfer_bundle,
+    apply_niche_transfer,
+    fit_niche_transfer_from_report_bundle,
+    load_niche_transfer_bundle,
+    save_niche_transfer_bundle,
 )
 
 __all__ = [
@@ -24,8 +24,8 @@ __all__ = [
     "niche_survival_attention_summary",
     "load_interpretability_dataset",
     "extract_embedding_set",
-    "fit_cluster_transfer_from_report_bundle",
-    "apply_cluster_transfer",
-    "save_cluster_transfer_bundle",
-    "load_cluster_transfer_bundle",
+    "fit_niche_transfer_from_report_bundle",
+    "apply_niche_transfer",
+    "save_niche_transfer_bundle",
+    "load_niche_transfer_bundle",
 ]

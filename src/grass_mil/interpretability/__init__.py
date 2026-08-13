@@ -6,10 +6,10 @@ from grass_mil.interpretability.core.biomarkers import (
 from grass_mil.interpretability.core.clustering import run_clustering
 from grass_mil.interpretability.core.reduction import run_reduction
 from grass_mil.interpretability.core.transfer import (
-    apply_cluster_transfer,
-    fit_cluster_transfer_from_report_bundle,
-    load_cluster_transfer_bundle,
-    save_cluster_transfer_bundle,
+    apply_niche_transfer,
+    fit_niche_transfer_from_report_bundle,
+    load_niche_transfer_bundle,
+    save_niche_transfer_bundle,
 )
 from grass_mil.interpretability.pipeline import run_interpretability_pipeline
 from grass_mil.interpretability.reporting.render import render_interpretability_report
@@ -34,10 +34,10 @@ __all__ = [
     "compute_filtration_curves",
     "prepare_tissue_graph_view",
     "build_tissue_graph_figure",
-    "fit_cluster_transfer_from_report_bundle",
-    "apply_cluster_transfer",
-    "save_cluster_transfer_bundle",
-    "load_cluster_transfer_bundle",
+    "fit_niche_transfer_from_report_bundle",
+    "apply_niche_transfer",
+    "save_niche_transfer_bundle",
+    "load_niche_transfer_bundle",
     "run_interpretability_pipeline",
     "render_interpretability_report",
 ]

@@ -487,7 +487,7 @@ class MarginAttributionPlugin(InterpretabilityPlugin):
             focus_classes=params.get("focus_classes"),
         )
         payload = {
-            "per_cluster": result.per_cluster,
+            "per_niche": result.per_niche,
             "identity_residual": result.identity_residual,
         }
         sections = [
@@ -497,7 +497,7 @@ class MarginAttributionPlugin(InterpretabilityPlugin):
                     "Exact additive contributions M[i,c] = A[i,c] * l[i,c], summarised per "
                     "niche with percentile bootstrap intervals over regions."
                 ),
-                tables={"per_cluster": result.per_cluster},
+                tables={"per_niche": result.per_niche},
             )
         ]
         return PluginResult(name=self.name, payload=payload, sections=sections)

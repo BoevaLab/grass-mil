@@ -18,7 +18,7 @@ from grass_mil.interpretability.core.data import extract_embedding_set
 _TRANSFER_BUNDLE_SCHEMA_VERSION = 1
 
 
-def fit_cluster_transfer_from_report_bundle(
+def fit_niche_transfer_from_report_bundle(
     dataset: InterpretabilityDataset,
     report_bundle: ReportBundle,
     *,
@@ -99,7 +99,7 @@ def fit_cluster_transfer_from_report_bundle(
     )
 
 
-def apply_cluster_transfer(
+def apply_niche_transfer(
     bundle: NicheTransferBundle,
     instance_table: pd.DataFrame,
     *,
@@ -155,7 +155,7 @@ def apply_cluster_transfer(
     )
 
 
-def save_cluster_transfer_bundle(bundle: NicheTransferBundle, path: str | Path) -> None:
+def save_niche_transfer_bundle(bundle: NicheTransferBundle, path: str | Path) -> None:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -171,7 +171,7 @@ def save_cluster_transfer_bundle(bundle: NicheTransferBundle, path: str | Path) 
     joblib.dump(payload, output_path)
 
 
-def load_cluster_transfer_bundle(path: str | Path) -> NicheTransferBundle:
+def load_niche_transfer_bundle(path: str | Path) -> NicheTransferBundle:
     payload = joblib.load(Path(path))
     if not isinstance(payload, dict):
         raise ValueError("Invalid transfer bundle format: expected dictionary payload.")

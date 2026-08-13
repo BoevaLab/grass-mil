@@ -14,10 +14,10 @@ from grass_mil.interpretability.contracts import (
 )
 from grass_mil.interpretability.core.reduction import run_reduction
 from grass_mil.interpretability.core.transfer import (
-    apply_cluster_transfer,
-    fit_cluster_transfer_from_report_bundle,
-    load_cluster_transfer_bundle,
-    save_cluster_transfer_bundle,
+    apply_niche_transfer,
+    fit_niche_transfer_from_report_bundle,
+    load_niche_transfer_bundle,
+    save_niche_transfer_bundle,
 )
 
 
@@ -60,7 +60,7 @@ def _build_report_bundle(
     )
 
 
-def test_cluster_transfer_fit_and_apply_matches_direct_pca_knn_reference(tmp_path: Path) -> None:
+def test_niche_transfer_fit_and_apply_matches_direct_pca_knn_reference(tmp_path: Path) -> None:
     table = _sample_instance_table()
     dataset = InterpretabilityDataset(instance_table=table, id_column="instance_id")
     labels = np.array([0, 0, 0, 1, 1, 2, 2, 2, 2, 1], dtype=int)
@@ -72,9 +72,9 @@ def test_cluster_transfer_fit_and_apply_matches_direct_pca_knn_reference(tmp_pat
         pca_components=2,
     )
 
-    bundle = fit_cluster_transfer_from_report_bundle(dataset, report_bundle, n_neighbors=3)
+    bundle = fit_niche_transfer_from_report_bundle(dataset, report_bundle, n_neighbors=3)
     query = table[["instance_id", "inst_emb_1", "inst_emb_0"]].sample(frac=1.0, random_state=3)
-    out = apply_cluster_transfer(bundle, query, id_column="instance_id")
+    out = apply_niche_transfer(bundle, query, id_column="instance_id")
 
     query_matrix = query[["inst_emb_0", "inst_emb_1"]].to_numpy(dtype=float)
     ref_knn = KNeighborsClassifier(n_neighbors=3, weights="uniform", metric="minkowski")
@@ -89,7 +89,7 @@ def test_cluster_transfer_fit_and_apply_matches_direct_pca_knn_reference(tmp_pat
     assert np.allclose(out["transfer_confidence"].to_numpy(dtype=float), ref_conf)
 
 
-def test_cluster_transfer_preserves_noise_label_minus_one(tmp_path: Path) -> None:
+def test_niche_transfer_preserves_noise_label_minus_one(tmp_path: Path) -> None:
     table = _sample_instance_table()
     dataset = InterpretabilityDataset(instance_table=table, id_column="instance_id")
     labels = np.array([-1, -1, 0, 0, 0, 1, 1, 1, 2, 2], dtype=int)
@@ -99,15 +99,15 @@ def test_cluster_transfer_preserves_noise_label_minus_one(tmp_path: Path) -> Non
         artifacts_dir=tmp_path,
         cluster_on_pca=False,
     )
-    bundle = fit_cluster_transfer_from_report_bundle(dataset, report_bundle, n_neighbors=1)
-    out = apply_cluster_transfer(bundle, table[["instance_id", "inst_emb_0", "inst_emb_1"]])
+    bundle = fit_niche_transfer_from_report_bundle(dataset, report_bundle, n_neighbors=1)
+    out = apply_niche_transfer(bundle, table[["instance_id", "inst_emb_0", "inst_emb_1"]])
 
     predicted = out["transferred_cluster_label"].to_numpy(dtype=int)
     assert -1 in set(predicted.tolist())
     assert np.array_equal(predicted, labels)
 
 
-def test_cluster_transfer_bundle_serialization_roundtrip(tmp_path: Path) -> None:
+def test_niche_transfer_bundle_serialization_roundtrip(tmp_path: Path) -> None:
     table = _sample_instance_table()
     dataset = InterpretabilityDataset(instance_table=table, id_column="instance_id")
     labels = np.array([0, 0, 0, 1, 1, 2, 2, 2, 2, 1], dtype=int)
@@ -118,19 +118,19 @@ def test_cluster_transfer_bundle_serialization_roundtrip(tmp_path: Path) -> None
         cluster_on_pca=True,
         pca_components=2,
     )
-    bundle = fit_cluster_transfer_from_report_bundle(dataset, report_bundle, n_neighbors=3)
+    bundle = fit_niche_transfer_from_report_bundle(dataset, report_bundle, n_neighbors=3)
 
     bundle_path = tmp_path / "cluster_transfer_bundle.joblib"
-    save_cluster_transfer_bundle(bundle, bundle_path)
-    restored = load_cluster_transfer_bundle(bundle_path)
+    save_niche_transfer_bundle(bundle, bundle_path)
+    restored = load_niche_transfer_bundle(bundle_path)
 
     query = table[["instance_id", "inst_emb_0", "inst_emb_1"]].copy()
-    left = apply_cluster_transfer(bundle, query)
-    right = apply_cluster_transfer(restored, query)
+    left = apply_niche_transfer(bundle, query)
+    right = apply_niche_transfer(restored, query)
     assert left.equals(right)
 
 
-def test_cluster_transfer_query_column_validation_and_reordered_columns(tmp_path: Path) -> None:
+def test_niche_transfer_query_column_validation_and_reordered_columns(tmp_path: Path) -> None:
     table = _sample_instance_table()
     dataset = InterpretabilityDataset(instance_table=table, id_column="instance_id")
     labels = np.array([0, 0, 0, 1, 1, 2, 2, 2, 2, 1], dtype=int)
@@ -140,19 +140,19 @@ def test_cluster_transfer_query_column_validation_and_reordered_columns(tmp_path
         artifacts_dir=tmp_path,
         cluster_on_pca=False,
     )
-    bundle = fit_cluster_transfer_from_report_bundle(dataset, report_bundle, n_neighbors=3)
+    bundle = fit_niche_transfer_from_report_bundle(dataset, report_bundle, n_neighbors=3)
 
     ordered = table[["instance_id", "inst_emb_0", "inst_emb_1"]]
     reordered = table[["instance_id", "inst_emb_1", "inst_emb_0"]]
-    out_ordered = apply_cluster_transfer(bundle, ordered)
-    out_reordered = apply_cluster_transfer(bundle, reordered)
+    out_ordered = apply_niche_transfer(bundle, ordered)
+    out_reordered = apply_niche_transfer(bundle, reordered)
     assert out_ordered.equals(out_reordered)
 
     with pytest.raises(ValueError, match="missing embedding columns"):
-        apply_cluster_transfer(bundle, table[["instance_id", "inst_emb_0"]])
+        apply_niche_transfer(bundle, table[["instance_id", "inst_emb_0"]])
 
 
-def test_cluster_transfer_fit_fails_fast_for_missing_inputs(tmp_path: Path) -> None:
+def test_niche_transfer_fit_fails_fast_for_missing_inputs(tmp_path: Path) -> None:
     table = _sample_instance_table()
     dataset = InterpretabilityDataset(instance_table=table, id_column="instance_id")
     labels = np.array([0, 0, 0, 1, 1, 2, 2, 2, 2, 1], dtype=int)
@@ -175,7 +175,7 @@ def test_cluster_transfer_fit_fails_fast_for_missing_inputs(tmp_path: Path) -> N
         metadata={"cluster_on_pca": True},
     )
     with pytest.raises(ValueError, match="missing clustering result"):
-        fit_cluster_transfer_from_report_bundle(dataset, missing_clustering, n_neighbors=3)
+        fit_niche_transfer_from_report_bundle(dataset, missing_clustering, n_neighbors=3)
 
     missing_cluster_pca = ReportBundle(
         dataset=dataset,
@@ -188,13 +188,13 @@ def test_cluster_transfer_fit_fails_fast_for_missing_inputs(tmp_path: Path) -> N
         metadata={"cluster_on_pca": True},
     )
     with pytest.raises(ValueError, match="missing niche_feature_reduction"):
-        fit_cluster_transfer_from_report_bundle(dataset, missing_cluster_pca, n_neighbors=3)
+        fit_niche_transfer_from_report_bundle(dataset, missing_cluster_pca, n_neighbors=3)
 
     with pytest.raises(ValueError, match="n_neighbors cannot exceed"):
-        fit_cluster_transfer_from_report_bundle(dataset, valid, n_neighbors=len(table) + 1)
+        fit_niche_transfer_from_report_bundle(dataset, valid, n_neighbors=len(table) + 1)
 
 
-def test_cluster_transfer_apply_fails_for_empty_input(tmp_path: Path) -> None:
+def test_niche_transfer_apply_fails_for_empty_input(tmp_path: Path) -> None:
     table = _sample_instance_table()
     dataset = InterpretabilityDataset(instance_table=table, id_column="instance_id")
     labels = np.array([0, 0, 0, 1, 1, 2, 2, 2, 2, 1], dtype=int)
@@ -204,7 +204,7 @@ def test_cluster_transfer_apply_fails_for_empty_input(tmp_path: Path) -> None:
         artifacts_dir=tmp_path,
         cluster_on_pca=False,
     )
-    bundle = fit_cluster_transfer_from_report_bundle(dataset, report_bundle, n_neighbors=3)
+    bundle = fit_niche_transfer_from_report_bundle(dataset, report_bundle, n_neighbors=3)
     empty = pd.DataFrame(columns=["instance_id", "inst_emb_0", "inst_emb_1"])
     with pytest.raises(ValueError, match="empty instance table"):
-        apply_cluster_transfer(bundle, empty)
+        apply_niche_transfer(bundle, empty)

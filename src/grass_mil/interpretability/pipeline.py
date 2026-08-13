@@ -184,7 +184,7 @@ def run_interpretability_pipeline(
     base_instance = dataset.instance_table.copy()
     if labels is not None:
         base_instance["niche_label"] = labels
-    _write_table(base_instance, artifacts_dir / "instance_with_clusters.csv")
+    _write_table(base_instance, artifacts_dir / "instance_with_niches.csv")
     if reduction_result is not None:
         red_df = pd.DataFrame(reduction_result.embedding)
         red_df.columns = [f"reduced_{i}" for i in range(red_df.shape[1])]
@@ -193,13 +193,13 @@ def run_interpretability_pipeline(
         )
         _write_table(red_df, artifacts_dir / "reduction.csv")
     if clustering_result is not None:
-        cluster_df = pd.DataFrame(
+        niche_df = pd.DataFrame(
             {
                 dataset.id_column: dataset.instance_table[dataset.id_column].astype(str).tolist(),
                 "niche_label": clustering_result.labels,
             }
         )
-        _write_table(cluster_df, artifacts_dir / "niche_labels.csv")
+        _write_table(niche_df, artifacts_dir / "niche_labels.csv")
 
     summary_payload: Dict[str, Any] = {
         "rows": int(len(dataset.instance_table)),

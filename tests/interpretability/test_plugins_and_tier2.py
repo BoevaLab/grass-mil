@@ -842,7 +842,7 @@ def test_filtration_runtime_sanity() -> None:
     assert elapsed < 8.0
 
 
-def test_builtin_per_cluster_cell_type_enrichment_plugin_execution() -> None:
+def test_builtin_per_niche_cell_type_enrichment_plugin_execution() -> None:
     registry = create_builtin_registry()
     ds = _sample_dataset()
     labels = np.array([0, 0, 0, 1, 1, 1])
@@ -863,7 +863,7 @@ def test_builtin_per_cluster_cell_type_enrichment_plugin_execution() -> None:
     assert all(section.title.startswith("Cell-Type Enrichment") for section in out.sections)
 
 
-def test_per_cluster_cell_type_enrichment_skips_noise_cluster() -> None:
+def test_per_niche_cell_type_enrichment_skips_noise_cluster() -> None:
     registry = create_builtin_registry()
     ds = _sample_dataset()
     labels = np.array([-1, -1, -1, 1, 1, 1])
@@ -904,7 +904,7 @@ def _attribution_dataset() -> InterpretabilityDataset:
     )
 
 
-def test_margin_attribution_plugin_reports_per_cluster_intervals() -> None:
+def test_margin_attribution_plugin_reports_per_niche_intervals() -> None:
     registry = create_builtin_registry()
     ds = _attribution_dataset()
     labels = np.array([0, 0, 1, 1, 0, 1])
@@ -913,7 +913,7 @@ def test_margin_attribution_plugin_reports_per_cluster_intervals() -> None:
         ds, PluginContext(state={"niche_labels": labels}), n_bootstrap=25
     )
     assert out.name == "margin_attribution"
-    summary = out.payload["per_cluster"]
+    summary = out.payload["per_niche"]
     # (niche_label, class_index); a binary head summarises the positive class.
     assert set(summary.index) == {(0, 1), (1, 1)}
     for column in ("margin_signed_share", "attention_lift", "prevalence"):

@@ -146,10 +146,10 @@ Public exports:
 - `compute_filtration_curves(...)`
 - `prepare_tissue_graph_view(...)`
 - `build_tissue_graph_figure(...)`
-- `fit_cluster_transfer_from_report_bundle(...)`
-- `apply_cluster_transfer(...)`
-- `save_cluster_transfer_bundle(...)`
-- `load_cluster_transfer_bundle(...)`
+- `fit_niche_transfer_from_report_bundle(...)`
+- `apply_niche_transfer(...)`
+- `save_niche_transfer_bundle(...)`
+- `load_niche_transfer_bundle(...)`
 - `run_interpretability_pipeline(...)`
 - `render_interpretability_report(...)`
 
@@ -161,8 +161,8 @@ from src.interpretability import (
     run_clustering,
     prepare_tissue_graph_view,
     build_tissue_graph_figure,
-    fit_cluster_transfer_from_report_bundle,
-    apply_cluster_transfer,
+    fit_niche_transfer_from_report_bundle,
+    apply_niche_transfer,
     run_interpretability_pipeline,
     render_interpretability_report,
 )
@@ -305,7 +305,7 @@ Workflow:
 4. Build core niche summaries.
 5. Execute enabled plugins in order.
 6. Persist canonical artifacts:
-- `artifacts/instance_with_clusters.csv`
+- `artifacts/instance_with_niches.csv`
 - `artifacts/reduction.csv` (if enabled)
 - `artifacts/niche_labels.csv` (if enabled)
 - `artifacts/pipeline_summary.json`
@@ -340,10 +340,10 @@ import pandas as pd
 
 from grass_mil.interpretability.core.data import load_interpretability_dataset
 from grass_mil.interpretability.core.transfer import (
-    apply_cluster_transfer,
-    fit_cluster_transfer_from_report_bundle,
-    load_cluster_transfer_bundle,
-    save_cluster_transfer_bundle,
+    apply_niche_transfer,
+    fit_niche_transfer_from_report_bundle,
+    load_niche_transfer_bundle,
+    save_niche_transfer_bundle,
 )
 from grass_mil.interpretability.pipeline import run_interpretability_pipeline
 
@@ -363,12 +363,12 @@ bundle = run_interpretability_pipeline(
     },
     artifacts_dir=Path("/abs/source_artifacts"),
 )
-transfer = fit_cluster_transfer_from_report_bundle(dataset, bundle, n_neighbors=15)
-save_cluster_transfer_bundle(transfer, "/abs/cluster_transfer_bundle.joblib")
+transfer = fit_niche_transfer_from_report_bundle(dataset, bundle, n_neighbors=15)
+save_niche_transfer_bundle(transfer, "/abs/cluster_transfer_bundle.joblib")
 
-loaded = load_cluster_transfer_bundle("/abs/cluster_transfer_bundle.joblib")
+loaded = load_niche_transfer_bundle("/abs/cluster_transfer_bundle.joblib")
 query_table = pd.read_csv("/abs/query_instance_table.csv")
-transferred = apply_cluster_transfer(loaded, query_table)
+transferred = apply_niche_transfer(loaded, query_table)
 ```
 
 Notebook helper example for single tissue graph:
