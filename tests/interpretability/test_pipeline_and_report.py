@@ -8,7 +8,7 @@ import pytest
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, open_dict
 
-from grass_mil.interpretability.contracts import ClusteringResult
+from grass_mil.contracts import ClusteringResult
 from grass_mil.interpretability.core.data import load_interpretability_dataset
 from grass_mil.interpretability.pipeline import run_interpretability_pipeline
 from grass_mil.interpretability.report_cli import run_report

@@ -11,7 +11,7 @@ from sklearn.cluster import (
     SpectralClustering,
 )
 
-from grass_mil.interpretability.contracts import ClusteringResult
+from grass_mil.contracts import ClusteringResult
 
 
 def run_clustering(

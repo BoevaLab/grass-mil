@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict
 
-from grass_mil.interpretability.contracts import ReportBundle
+from grass_mil.contracts import ReportBundle
 from grass_mil.interpretability.reporting.html import render_html_report
 from grass_mil.interpretability.reporting.pdf import render_pdf_via_playwright
 from grass_mil.interpretability.reporting.plotly_builders import bundle_figures

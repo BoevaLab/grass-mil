@@ -6,7 +6,7 @@ import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 
-from grass_mil.interpretability.contracts import ReductionResult
+from grass_mil.contracts import ReductionResult
 
 
 def run_reduction(

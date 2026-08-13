@@ -2,4 +2,6 @@ _target_: grass_mil.models.components.attention.AttnNetGated
 input_dim: 128
 hidden_dim: 64
 dropout: false
+# Attention is per-class: n_classes must equal the graph head's output_dim.
+# The task preset sets both together (finetune_mil uses 2 for binary).
 n_classes: 1

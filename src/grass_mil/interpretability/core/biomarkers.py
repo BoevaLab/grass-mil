@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from grass_mil.interpretability.contracts import NicheSummary
+from grass_mil.contracts import NicheSummary
 from grass_mil.interpretability.core.niches import (
     order_niches_by_composition,
     sort_by_niche_order,

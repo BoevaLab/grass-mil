@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 from sklearn.neighbors import KNeighborsClassifier
 
-from grass_mil.interpretability.contracts import (
+from grass_mil.contracts import (
     NicheTransferBundle,
     InterpretabilityDataset,
     ReportBundle,

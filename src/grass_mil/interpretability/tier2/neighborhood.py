@@ -7,7 +7,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-from grass_mil.interpretability.contracts import NeighborhoodEnrichmentResult
+from grass_mil.contracts import NeighborhoodEnrichmentResult
 
 
 def _coerce_edges(spatial_table: pd.DataFrame) -> pd.DataFrame:

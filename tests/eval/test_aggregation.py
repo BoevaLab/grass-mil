@@ -51,15 +51,16 @@ def test_aggregate_group_logits_mean_drops_non_aggregable_attention_rows() -> No
 
 
 def test_aggregate_group_logits_attention_weighted_uses_instance_softmax() -> None:
+    """Per-class attention: identical columns reproduce a shared weighting."""
     payload = BatchPredictionPayload(
         bag_ids=["r1", "r1", "r2"],
         bag_logits=torch.tensor([[1.0, 10.0], [3.0, 30.0], [2.0, 20.0]]),
         bag_targets=None,
-        bag_attention=[torch.tensor([1.0]), torch.tensor([9.0]), torch.tensor([1.0])],
+        bag_attention=None,
         row_region_ids=["region_a", "region_a", "region_b"],
         row_sample_ids=["sample_x", "sample_x", "sample_y"],
         instance_logits=torch.tensor([[1.0, 10.0], [3.0, 30.0], [2.0, 20.0]]),
-        instance_attention_logits=torch.tensor([[1.0], [9.0], [1.0]]),
+        instance_attention_logits=torch.tensor([[1.0, 1.0], [9.0, 9.0], [1.0, 1.0]]),
         instance_patch_ids=["r1", "r1", "r2"],
         instance_region_ids=["region_a", "region_a", "region_b"],
         instance_sample_ids=["sample_x", "sample_x", "sample_y"],
@@ -71,9 +72,13 @@ def test_aggregate_group_logits_attention_weighted_uses_instance_softmax() -> No
     assert out.bag_attention is not None
     assert len(out.bag_attention) == 2
     assert out.bag_attention[0] is not None
-    # Attention is [n_instances, n_channels]; a shared channel keeps one column.
-    assert out.bag_attention[0].shape == (2, 1)
-    assert torch.allclose(out.bag_attention[0], torch.tensor([[0.000335], [0.999665]]), atol=1e-4)
+    # Attention is [n_instances, n_classes], one column per class.
+    assert out.bag_attention[0].shape == (2, 2)
+    assert torch.allclose(
+        out.bag_attention[0],
+        torch.tensor([[0.000335, 0.000335], [0.999665, 0.999665]]),
+        atol=1e-4,
+    )
 
 
 def test_aggregate_group_logits_attention_weighted_supports_per_class_attention() -> None:

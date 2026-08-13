@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from sklearn.neighbors import KNeighborsClassifier
 
-from grass_mil.interpretability.contracts import (
+from grass_mil.contracts import (
     ClusteringResult,
     InterpretabilityDataset,
     ReportBundle,

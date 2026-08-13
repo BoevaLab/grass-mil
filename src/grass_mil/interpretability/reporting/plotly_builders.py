@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Dict, List
 import numpy as np
 import pandas as pd
 
-from grass_mil.interpretability.contracts import ReportBundle
+from grass_mil.contracts import ReportBundle
 from grass_mil.interpretability.core.niches import (
     BACKGROUND_NICHE_ID,
     niche_display_name,

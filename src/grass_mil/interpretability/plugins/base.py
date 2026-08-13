@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Protocol
 
-from grass_mil.interpretability.contracts import InterpretabilityDataset, PluginResult
+from grass_mil.contracts import InterpretabilityDataset, PluginResult
 
 
 @dataclass

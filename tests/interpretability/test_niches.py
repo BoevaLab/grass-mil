@@ -115,7 +115,7 @@ def test_composition_ordering_can_be_disabled() -> None:
 
 def test_report_heatmap_labels_niches_by_name() -> None:
     pytest.importorskip("plotly.graph_objects")
-    from grass_mil.interpretability.contracts import NicheSummary, ReportBundle
+    from grass_mil.contracts import NicheSummary, ReportBundle
     from grass_mil.interpretability.core.data import InterpretabilityDataset
     from grass_mil.interpretability.reporting.plotly_builders import (
         build_niche_enrichment_heatmap,

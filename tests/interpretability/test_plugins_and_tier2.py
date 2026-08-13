@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from grass_mil.interpretability.contracts import NicheSummary, InterpretabilityDataset
+from grass_mil.contracts import NicheSummary, InterpretabilityDataset
 from grass_mil.interpretability.plugins.base import PluginContext
 from grass_mil.interpretability.plugins.builtin import create_builtin_registry
 from grass_mil.interpretability.plugins.registry import create_plugin_registry

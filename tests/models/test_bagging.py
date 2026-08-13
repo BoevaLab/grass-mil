@@ -78,30 +78,29 @@ def test_per_class_attention_can_select_different_instances_per_class() -> None:
     assert bag_logits[0, 1] == pytest.approx(200.0, abs=1e-2)
 
 
-def test_shared_attention_channel_broadcasts_across_classes() -> None:
-    """n_classes=1 keeps the previous single-channel behaviour."""
-    logits = torch.tensor([[1.0, 10.0], [3.0, 30.0]])
-    attn_logits = torch.tensor([[1.0], [9.0]])
+def test_pooling_rejects_a_shared_attention_channel() -> None:
+    """One channel broadcast across classes cannot express opposing evidence.
 
-    bag_logits, _, bag_attention, _ = _pool(logits=logits, attn_logits=attn_logits)
-
-    attention = bag_attention["bag"]
-    assert attention.shape == (2, 1)
-    expected = (logits * attention).sum(dim=0, keepdim=True)
-    torch.testing.assert_close(bag_logits, expected, rtol=0, atol=1e-12)
+    A niche that pushes toward one class and away from the other needs two
+    independent attention distributions, so a binary head requires two
+    channels rather than one.
+    """
+    with pytest.raises(ValueError, match="Attention emits 1 channel"):
+        _pool(logits=torch.randn(4, 2), attn_logits=torch.randn(4, 1))
 
 
-def test_pooling_rejects_attention_width_that_is_neither_shared_nor_per_class() -> None:
+def test_pooling_rejects_attention_width_that_does_not_match_the_head() -> None:
     with pytest.raises(ValueError, match="Attention emits 3 channel"):
         _pool(logits=torch.randn(4, 2), attn_logits=torch.randn(4, 3))
 
 
-@pytest.mark.parametrize("width", [1, 4])
-def test_validate_attention_width_accepts_shared_and_per_class(width: int) -> None:
-    validate_attention_width(attention_width=width, num_classes=4)
+def test_validate_attention_width_accepts_one_channel_per_class() -> None:
+    validate_attention_width(attention_width=4, num_classes=4)
+    # A scalar head (regression, Cox log-hazard) is one class, one channel.
+    validate_attention_width(attention_width=1, num_classes=1)
 
 
-@pytest.mark.parametrize("width", [0, 2, 5])
+@pytest.mark.parametrize("width", [0, 1, 2, 5])
 def test_validate_attention_width_rejects_other_widths(width: int) -> None:
     with pytest.raises(ValueError):
         validate_attention_width(attention_width=width, num_classes=4)

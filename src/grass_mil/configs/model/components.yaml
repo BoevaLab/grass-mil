@@ -34,7 +34,8 @@ model:
     projection_dim: 64
     hidden_dim: 16
     dropout: false
-    n_classes: 1
+    # Must equal graph_head.output_dim: attention is per-class.
+  n_classes: 1
 
   ssl:
     method: bgrl

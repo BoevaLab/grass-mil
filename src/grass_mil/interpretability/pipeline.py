@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
-from grass_mil.interpretability.contracts import (
+from grass_mil.contracts import (
     NicheSummary,
     InterpretabilityDataset,
     PluginResult,

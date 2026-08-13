@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List
 
-from grass_mil.interpretability.contracts import ReportBundle, ReportSection
+from grass_mil.contracts import ReportBundle, ReportSection
 
 
 def build_report_sections(bundle: ReportBundle) -> List[ReportSection]:

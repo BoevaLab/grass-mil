@@ -33,6 +33,7 @@ attention:
   projection_dim: 64
   hidden_dim: 16
   dropout: false
+  # Must equal graph_head.output_dim: attention is per-class.
   n_classes: 1
 
 graph_head:

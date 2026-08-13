@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from grass_mil.interpretability.contracts import FiltrationCurvesResult
+from grass_mil.contracts import FiltrationCurvesResult
 
 
 def compute_filtration_curves(

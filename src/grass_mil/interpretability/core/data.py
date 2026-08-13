@@ -6,7 +6,7 @@ from typing import Iterable, Optional
 import numpy as np
 import pandas as pd
 
-from grass_mil.interpretability.contracts import EmbeddingSet, InterpretabilityDataset
+from grass_mil.contracts import EmbeddingSet, InterpretabilityDataset
 
 
 def load_table(path: Path) -> pd.DataFrame:

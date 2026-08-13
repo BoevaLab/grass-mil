@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 import pandas as pd
 
-from grass_mil.interpretability.contracts import ReportSection
+from grass_mil.contracts import ReportSection
 
 
 def _render_table(title: str, table: pd.DataFrame) -> str:
