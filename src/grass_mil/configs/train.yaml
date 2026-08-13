@@ -5,10 +5,14 @@
 defaults:
   - _self_
   - data: spatial_omics
-  - task: finetune_mean
   - model: supervised_module
   - optim: adamw
   - scheduler: cosine_epoch
+  # `task` is merged after `model`, `optim` and `scheduler` so that a task
+  # preset can override them. finetune_mil sets the per-class head and
+  # attention widths, and pretrain_bgrl overrides the scheduler; both are
+  # silently discarded if `task` is listed first.
+  - task: finetune_mean
   - callbacks: default
   - logger: null # set logger here or use command line (e.g. `python train.py logger=tensorboard`)
   - trainer: default

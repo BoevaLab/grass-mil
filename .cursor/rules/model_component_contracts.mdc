@@ -19,7 +19,7 @@ alwaysApply: false
 
 Optional fields:
 
-- `edge_attr`, `batch`, `pos`, `graph_y`, `graph_w`, `categorical_index`.
+- `edge_attr`, `batch`, `pos`, `graph_y`, `graph_w`, `categorical_codes`.
 
 ## Encoder Rules
 
