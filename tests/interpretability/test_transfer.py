@@ -51,9 +51,9 @@ def _build_report_bundle(
     return ReportBundle(
         dataset=dataset,
         reduction=pca_result,
-        cluster_feature_reduction=pca_result if cluster_on_pca else None,
+        niche_feature_reduction=pca_result if cluster_on_pca else None,
         clustering=clustering,
-        cluster_summary=None,
+        niche_summary=None,
         plugin_results={},
         artifacts_dir=artifacts_dir,
         metadata={"cluster_on_pca": cluster_on_pca},
@@ -78,8 +78,8 @@ def test_cluster_transfer_fit_and_apply_matches_direct_pca_knn_reference(tmp_pat
 
     query_matrix = query[["inst_emb_0", "inst_emb_1"]].to_numpy(dtype=float)
     ref_knn = KNeighborsClassifier(n_neighbors=3, weights="uniform", metric="minkowski")
-    ref_knn.fit(report_bundle.cluster_feature_reduction.embedding, labels)  # type: ignore[union-attr]
-    ref_features = report_bundle.cluster_feature_reduction.fitted_object.transform(  # type: ignore[union-attr]
+    ref_knn.fit(report_bundle.niche_feature_reduction.embedding, labels)  # type: ignore[union-attr]
+    ref_features = report_bundle.niche_feature_reduction.fitted_object.transform(  # type: ignore[union-attr]
         query_matrix
     )
     ref_labels = ref_knn.predict(ref_features)
@@ -167,9 +167,9 @@ def test_cluster_transfer_fit_fails_fast_for_missing_inputs(tmp_path: Path) -> N
     missing_clustering = ReportBundle(
         dataset=dataset,
         reduction=valid.reduction,
-        cluster_feature_reduction=valid.cluster_feature_reduction,
+        niche_feature_reduction=valid.niche_feature_reduction,
         clustering=None,
-        cluster_summary=None,
+        niche_summary=None,
         plugin_results={},
         artifacts_dir=tmp_path,
         metadata={"cluster_on_pca": True},
@@ -180,14 +180,14 @@ def test_cluster_transfer_fit_fails_fast_for_missing_inputs(tmp_path: Path) -> N
     missing_cluster_pca = ReportBundle(
         dataset=dataset,
         reduction=valid.reduction,
-        cluster_feature_reduction=None,
+        niche_feature_reduction=None,
         clustering=valid.clustering,
-        cluster_summary=None,
+        niche_summary=None,
         plugin_results={},
         artifacts_dir=tmp_path,
         metadata={"cluster_on_pca": True},
     )
-    with pytest.raises(ValueError, match="missing cluster_feature_reduction"):
+    with pytest.raises(ValueError, match="missing niche_feature_reduction"):
         fit_cluster_transfer_from_report_bundle(dataset, missing_cluster_pca, n_neighbors=3)
 
     with pytest.raises(ValueError, match="n_neighbors cannot exceed"):

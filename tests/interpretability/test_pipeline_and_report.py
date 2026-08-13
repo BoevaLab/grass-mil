@@ -69,7 +69,7 @@ def test_pipeline_and_report_render(monkeypatch, tmp_path: Path) -> None:
             "params": {"n_clusters": 2, "linkage": "ward"},
         },
         "plugins": {
-            "enabled": ["cluster_profiles", "attention_attribution"],
+            "enabled": ["niche_profiles", "attention_attribution"],
             "params": {
                 "attention_attribution": {"attention_column": "attention", "score_column": "score"}
             },
@@ -116,7 +116,7 @@ def test_report_render_tolerates_snapshot_export_failure_when_pdf_disabled(
             "params": {"n_clusters": 2, "linkage": "ward"},
         },
         "plugins": {
-            "enabled": ["cluster_profiles"],
+            "enabled": ["niche_profiles"],
             "params": {},
         },
     }
@@ -248,9 +248,9 @@ def test_pipeline_fails_fast_when_plugin_required_inputs_missing_cluster_labels(
     cfg = {
         "reduction": {"enabled": True, "method": "pca", "params": {"n_components": 2}},
         "clustering": {"enabled": False},
-        "plugins": {"enabled": ["cluster_profiles"], "params": {}},
+        "plugins": {"enabled": ["niche_profiles"], "params": {}},
     }
-    with pytest.raises(ValueError, match="missing required inputs: cluster_labels"):
+    with pytest.raises(ValueError, match="missing required inputs: niche_labels"):
         run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
 
 
@@ -316,7 +316,7 @@ def test_pipeline_clusters_on_raw_embeddings_when_cluster_on_pca_disabled(
     assert "x" in captured
     assert captured["x"].shape == expected_raw.shape
     assert np.allclose(captured["x"], expected_raw)
-    assert bundle.cluster_feature_reduction is None
+    assert bundle.niche_feature_reduction is None
 
 
 def test_pipeline_exposes_cluster_feature_reduction_when_cluster_on_pca_enabled(
@@ -341,9 +341,9 @@ def test_pipeline_exposes_cluster_feature_reduction_when_cluster_on_pca_enabled(
         "plugins": {"enabled": [], "params": {}},
     }
     bundle = run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
-    assert bundle.cluster_feature_reduction is not None
-    assert bundle.cluster_feature_reduction.method == "pca"
-    assert bundle.cluster_feature_reduction.embedding.shape[1] == 1
+    assert bundle.niche_feature_reduction is not None
+    assert bundle.niche_feature_reduction.method == "pca"
+    assert bundle.niche_feature_reduction.embedding.shape[1] == 1
 
 
 def test_report_cli_smoke(
@@ -367,7 +367,7 @@ def test_report_cli_smoke(
         cfg_interpret.reduction.method = "pca"
         cfg_interpret.reduction.params = {"n_components": 2, "random_state": 42}
         cfg_interpret.plugins.enabled = [
-            "cluster_profiles",
+            "niche_profiles",
             "attention_attribution",
             "neighborhood_enrichment",
             "diff_neighborhood_enrichment",

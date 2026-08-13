@@ -33,7 +33,7 @@ def prepare_tissue_graph_view(
     id_column: str,
     x_column: str = "center_x",
     y_column: str = "center_y",
-    label_column: str = "cluster_label",
+    label_column: str = "niche_label",
     coerce_ids_to_str: bool = True,
     include_edge_distances: bool = True,
 ) -> TissueGraphView:
@@ -91,7 +91,7 @@ def prepare_tissue_graph_view(
         edge_cols.append("distance")
     edges = edges[edge_cols].reset_index(drop=True)
 
-    cluster_counts = (
+    niche_counts = (
         nodes[str(label_column)].astype(str).value_counts().sort_index().astype(int).to_dict()
     )
     metadata: Dict[str, Any] = {
@@ -103,7 +103,7 @@ def prepare_tissue_graph_view(
         "label_column": str(label_column),
         "node_count": int(len(nodes)),
         "edge_count": int(len(edges)),
-        "cluster_counts": cluster_counts,
+        "niche_counts": niche_counts,
     }
     return TissueGraphView(nodes=nodes.reset_index(drop=True), edges=edges, metadata=metadata)
 
@@ -130,7 +130,7 @@ def build_tissue_graph_figure(
     nodes = view.nodes.copy()
     metadata = dict(view.metadata)
 
-    label_column = str(metadata.get("label_column", "cluster_label"))
+    label_column = str(metadata.get("label_column", "niche_label"))
     id_column = str(metadata.get("id_column", "instance_id"))
     x_column = str(metadata.get("x_column", "center_x"))
     y_column = str(metadata.get("y_column", "center_y"))
@@ -178,7 +178,7 @@ def build_tissue_graph_figure(
                 "color": label_codes,
                 "colorscale": colorscale,
                 "showscale": True,
-                "colorbar": {"title": "cluster"},
+                "colorbar": {"title": "niche"},
             },
             customdata=np.stack(
                 [

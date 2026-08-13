@@ -3,7 +3,11 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from grass_mil.interpretability.contracts import ClusterSummary
+from grass_mil.interpretability.contracts import NicheSummary
+from grass_mil.interpretability.core.niches import (
+    order_niches_by_composition,
+    sort_by_niche_order,
+)
 
 
 def _resolve_variance_estimator(variance_estimator: str) -> int:
@@ -30,18 +34,26 @@ def _infer_composition_matrix(
     )
 
 
-def cluster_biomarker_summary(
+def niche_composition_summary(
     table: pd.DataFrame,
-    cluster_labels: np.ndarray,
+    niche_labels: np.ndarray,
     *,
     composition_prefix: str = "comp_",
     variance_estimator: str = "unbiased",
-) -> ClusterSummary:
-    if len(table) != int(cluster_labels.shape[0]):
-        raise ValueError("table rows and cluster_labels length mismatch.")
+    order_by_composition: bool = True,
+) -> NicheSummary:
+    """Mean composition and z-scored enrichment per niche.
+
+    Niches are ordered by a dendrogram over their composition profiles, so
+    compositionally similar niches are adjacent in every downstream table and
+    heatmap. Background is pinned last. Set ``order_by_composition=False`` for
+    plain numeric order.
+    """
+    if len(table) != int(niche_labels.shape[0]):
+        raise ValueError("table rows and niche_labels length mismatch.")
 
     comp = _infer_composition_matrix(table, composition_prefix=composition_prefix)
-    labels = pd.Series(cluster_labels, name="cluster_label")
+    labels = pd.Series(niche_labels, name="niche_label")
 
     ddof = _resolve_variance_estimator(variance_estimator)
     comp_mean = comp.mean(axis=0)
@@ -52,17 +64,23 @@ def cluster_biomarker_summary(
     enrichment = z_comp.groupby(labels).mean().sort_index()
     counts = labels.value_counts().sort_index()
 
-    return ClusterSummary(
-        cluster_labels=np.asarray(cluster_labels),
+    if order_by_composition:
+        order = order_niches_by_composition(composition)
+        composition = sort_by_niche_order(composition, order)
+        enrichment = sort_by_niche_order(enrichment, order)
+        counts = counts.reindex(composition.index)
+
+    return NicheSummary(
+        niche_labels=np.asarray(niche_labels),
         composition=composition,
         enrichment=enrichment,
-        cluster_counts=counts,
+        niche_counts=counts,
     )
 
 
-def cluster_attention_summary(
+def niche_attention_summary(
     table: pd.DataFrame,
-    cluster_labels: np.ndarray,
+    niche_labels: np.ndarray,
     *,
     attention_column: str = "attention",
     score_column: str = "score",
@@ -70,15 +88,15 @@ def cluster_attention_summary(
     composition_prefix: str = "comp_",
     variance_estimator: str = "unbiased",
     eps: float = 1e-8,
-) -> ClusterSummary:
-    summary = cluster_biomarker_summary(
+) -> NicheSummary:
+    summary = niche_composition_summary(
         table,
-        cluster_labels,
+        niche_labels,
         composition_prefix=composition_prefix,
         variance_estimator=variance_estimator,
     )
     frame = table.copy()
-    frame["cluster_label"] = cluster_labels
+    frame["niche_label"] = niche_labels
     for col in (attention_column, score_column, bag_id_column):
         if col not in frame.columns:
             raise ValueError(f"Missing required column {col!r} for attention summary.")
@@ -87,19 +105,19 @@ def cluster_attention_summary(
 
     weighted_frame = frame.assign(weighted=frame[attention_column] * frame[score_column])
     weighted = (
-        weighted_frame.groupby("cluster_label")
+        weighted_frame.groupby("niche_label")
         .apply(lambda g: float(g["weighted"].sum() / max(g[attention_column].sum(), eps)))
         .sort_index()
     )
-    mean_scores = frame.groupby("cluster_label")[score_column].mean().sort_index()
+    mean_scores = frame.groupby("niche_label")[score_column].mean().sort_index()
 
     cluster_attn_in_bag = (
-        frame.groupby([bag_id_column, "cluster_label"])[attention_column]
+        frame.groupby([bag_id_column, "niche_label"])[attention_column]
         .sum()
         .unstack(fill_value=0.0)
     )
     cluster_count_in_bag = (
-        frame.groupby([bag_id_column, "cluster_label"]).size().unstack(fill_value=0)
+        frame.groupby([bag_id_column, "niche_label"]).size().unstack(fill_value=0)
     )
     present_mask = cluster_count_in_bag > 0
 
@@ -110,11 +128,11 @@ def cluster_attention_summary(
     lift = cluster_attn_in_bag / abundance.clip(lower=eps)
     lift_present = lift.where(present_mask).mean(axis=0, skipna=True).sort_index()
 
-    return ClusterSummary(
-        cluster_labels=summary.cluster_labels,
+    return NicheSummary(
+        niche_labels=summary.niche_labels,
         composition=summary.composition,
         enrichment=summary.enrichment,
-        cluster_counts=summary.cluster_counts,
+        niche_counts=summary.niche_counts,
         weighted_scores=weighted,
         mean_scores=mean_scores,
         attention_present=attn_present,
@@ -122,9 +140,9 @@ def cluster_attention_summary(
     )
 
 
-def cluster_survival_attention_summary(
+def niche_survival_attention_summary(
     table: pd.DataFrame,
-    cluster_labels: np.ndarray,
+    niche_labels: np.ndarray,
     *,
     attention_column: str = "attention",
     hazard_column: str = "hazard",
@@ -132,14 +150,14 @@ def cluster_survival_attention_summary(
     composition_prefix: str = "comp_",
     variance_estimator: str = "unbiased",
     eps: float = 1e-8,
-) -> ClusterSummary:
+) -> NicheSummary:
     renamed = table.copy()
     if hazard_column not in renamed.columns:
         raise ValueError(f"Missing hazard column {hazard_column!r}.")
     renamed["score"] = renamed[hazard_column]
-    return cluster_attention_summary(
+    return niche_attention_summary(
         renamed,
-        cluster_labels,
+        niche_labels,
         attention_column=attention_column,
         score_column="score",
         bag_id_column=bag_id_column,

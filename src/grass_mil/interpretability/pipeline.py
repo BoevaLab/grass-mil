@@ -8,12 +8,12 @@ import numpy as np
 import pandas as pd
 
 from grass_mil.interpretability.contracts import (
-    ClusterSummary,
+    NicheSummary,
     InterpretabilityDataset,
     PluginResult,
     ReportBundle,
 )
-from grass_mil.interpretability.core.biomarkers import cluster_biomarker_summary
+from grass_mil.interpretability.core.biomarkers import niche_composition_summary
 from grass_mil.interpretability.core.clustering import run_clustering
 from grass_mil.interpretability.core.data import extract_embedding_set
 from grass_mil.interpretability.core.reduction import run_reduction
@@ -131,7 +131,7 @@ def run_interpretability_pipeline(
     if clustering_enabled:
         method = str(clustering_cfg.get("method", "kmeans"))
         params = dict(clustering_cfg.get("params", {}))
-        # Contract: when cluster_on_pca is disabled, cluster on raw embeddings.
+        # Contract: when cluster_on_pca is disabled, niche on raw embeddings.
         # Reduction remains available for visualization/reporting, but does not
         # change the clustering feature space.
         clustering_input = emb_set.matrix
@@ -147,9 +147,9 @@ def run_interpretability_pipeline(
         clustering_result = run_clustering(method, clustering_input, **params)
         labels = clustering_result.labels
 
-    cluster_summary: Optional[ClusterSummary] = None
+    niche_summary: Optional[NicheSummary] = None
     if labels is not None:
-        cluster_summary = cluster_biomarker_summary(
+        niche_summary = niche_composition_summary(
             dataset.instance_table,
             labels,
             composition_prefix=str(config.get("composition_prefix", "comp_")),
@@ -160,8 +160,8 @@ def run_interpretability_pipeline(
         state={
             "reduction": reduction_result,
             "clustering": clustering_result,
-            "cluster_labels": labels,
-            "cluster_summary": cluster_summary,
+            "niche_labels": labels,
+            "niche_summary": niche_summary,
         }
     )
     plugin_results: Dict[str, PluginResult] = {}
@@ -183,7 +183,7 @@ def run_interpretability_pipeline(
     # Persist core artifacts
     base_instance = dataset.instance_table.copy()
     if labels is not None:
-        base_instance["cluster_label"] = labels
+        base_instance["niche_label"] = labels
     _write_table(base_instance, artifacts_dir / "instance_with_clusters.csv")
     if reduction_result is not None:
         red_df = pd.DataFrame(reduction_result.embedding)
@@ -196,10 +196,10 @@ def run_interpretability_pipeline(
         cluster_df = pd.DataFrame(
             {
                 dataset.id_column: dataset.instance_table[dataset.id_column].astype(str).tolist(),
-                "cluster_label": clustering_result.labels,
+                "niche_label": clustering_result.labels,
             }
         )
-        _write_table(cluster_df, artifacts_dir / "cluster_labels.csv")
+        _write_table(cluster_df, artifacts_dir / "niche_labels.csv")
 
     summary_payload: Dict[str, Any] = {
         "rows": int(len(dataset.instance_table)),
@@ -214,9 +214,9 @@ def run_interpretability_pipeline(
     return ReportBundle(
         dataset=dataset,
         reduction=reduction_result,
-        cluster_feature_reduction=combo_pca_result if cluster_on_pca else None,
+        niche_feature_reduction=combo_pca_result if cluster_on_pca else None,
         clustering=clustering_result,
-        cluster_summary=cluster_summary,
+        niche_summary=niche_summary,
         plugin_results=plugin_results,
         artifacts_dir=artifacts_dir,
         metadata=summary_payload,

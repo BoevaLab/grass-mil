@@ -5,8 +5,8 @@ import pandas as pd
 import pytest
 
 from grass_mil.interpretability.core.biomarkers import (
-    cluster_attention_summary,
-    cluster_biomarker_summary,
+    niche_attention_summary,
+    niche_composition_summary,
 )
 from grass_mil.interpretability.core.clustering import run_clustering
 from grass_mil.interpretability.core.reduction import run_reduction
@@ -37,11 +37,11 @@ def test_cluster_biomarker_and_attention_summary() -> None:
         }
     )
     labels = np.array([0, 0, 1, 1, 1, 0])
-    bio = cluster_biomarker_summary(table, labels)
+    bio = niche_composition_summary(table, labels)
     assert "comp_A" in bio.composition.columns
-    assert bio.cluster_counts.sum() == len(table)
+    assert bio.niche_counts.sum() == len(table)
 
-    att = cluster_attention_summary(
+    att = niche_attention_summary(
         table,
         labels,
         attention_column="attention",
@@ -61,7 +61,7 @@ def test_cluster_biomarker_requires_composition_columns() -> None:
     )
     labels = np.array([0, 1])
     with pytest.raises(ValueError, match="No composition columns found"):
-        cluster_biomarker_summary(table, labels)
+        niche_composition_summary(table, labels)
 
 
 def test_cluster_biomarker_variance_estimator_is_tunable() -> None:
@@ -74,8 +74,8 @@ def test_cluster_biomarker_variance_estimator_is_tunable() -> None:
     )
     labels = np.array([0, 1, 1])
 
-    unbiased = cluster_biomarker_summary(table, labels, variance_estimator="unbiased")
-    biased = cluster_biomarker_summary(table, labels, variance_estimator="biased")
+    unbiased = niche_composition_summary(table, labels, variance_estimator="unbiased")
+    biased = niche_composition_summary(table, labels, variance_estimator="biased")
 
     assert unbiased.enrichment.loc[0, "comp_A"] == pytest.approx(-1.0)
     assert biased.enrichment.loc[0, "comp_A"] == pytest.approx(-1.224744871391589)
@@ -92,7 +92,7 @@ def test_cluster_biomarker_variance_estimator_rejects_unknown_values() -> None:
     )
     labels = np.array([0, 1])
     with pytest.raises(ValueError, match="Unsupported variance_estimator"):
-        cluster_biomarker_summary(table, labels, variance_estimator="invalid_mode")
+        niche_composition_summary(table, labels, variance_estimator="invalid_mode")
 
 
 def test_hdbscan_clustering_forwards_selection_and_density_knobs(monkeypatch) -> None:

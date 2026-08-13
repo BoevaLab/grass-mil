@@ -77,8 +77,8 @@ def _analytical_expected_and_std(
     if n_nodes == 0 or n_edges == 0:
         zeros = pd.DataFrame(0.0, index=categories, columns=categories)
         return zeros, zeros
-    cluster_counts = node_labels.value_counts().reindex(categories, fill_value=0.0).astype(float)
-    probs = cluster_counts.values / float(n_nodes)
+    niche_counts = node_labels.value_counts().reindex(categories, fill_value=0.0).astype(float)
+    probs = niche_counts.values / float(n_nodes)
     pair_probs = np.outer(probs, probs)
     expected = float(n_edges) * pair_probs
     var = float(n_edges) * pair_probs * (1.0 - pair_probs)

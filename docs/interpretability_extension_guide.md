@@ -52,7 +52,7 @@ def compute_spatial_entropy(
     node_table: pd.DataFrame,
     spatial_table: pd.DataFrame,
     *,
-    label_column: str = "cluster_label",
+    label_column: str = "niche_label",
 ) -> pd.DataFrame:
     if label_column not in node_table.columns:
         raise ValueError(f"Missing label column {label_column!r}.")
@@ -69,7 +69,7 @@ Add plugin class in:
 
 Plugin responsibilities:
 
-1. Read context state (e.g., cluster labels).
+1. Read context state (e.g., niche labels).
 2. Call your pure analysis function.
 3. Return `PluginResult` with:
 - `payload` for machine consumption
@@ -83,15 +83,15 @@ class SpatialEntropyPlugin(InterpretabilityPlugin):
     name: str = "spatial_entropy"
 
     def required_inputs(self) -> list[str]:
-        return ["spatial_table", "cluster_labels"]
+        return ["spatial_table", "niche_labels"]
 
     def run(self, dataset, context: PluginContext, **params):
         table = dataset.instance_table.copy()
-        table["cluster_label"] = context.state["cluster_labels"]
+        table["niche_label"] = context.state["niche_labels"]
         entropy_df = compute_spatial_entropy(
             table,
             dataset.spatial_table,
-            label_column=str(params.get("label_column", "cluster_label")),
+            label_column=str(params.get("label_column", "niche_label")),
         )
         return PluginResult(
             name=self.name,
@@ -99,7 +99,7 @@ class SpatialEntropyPlugin(InterpretabilityPlugin):
             sections=[
                 ReportSection(
                     title="Spatial Entropy",
-                    description="Entropy by cluster.",
+                    description="Entropy by niche.",
                     tables={"entropy": entropy_df},
                 )
             ],
@@ -141,11 +141,11 @@ Example:
 
 ```yaml
 enabled:
-  - cluster_profiles
+  - niche_profiles
   - spatial_entropy
 params:
   spatial_entropy:
-    label_column: cluster_label
+    label_column: niche_label
     radius: 50.0
 ```
 

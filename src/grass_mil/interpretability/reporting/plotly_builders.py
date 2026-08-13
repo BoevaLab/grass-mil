@@ -6,6 +6,11 @@ import numpy as np
 import pandas as pd
 
 from grass_mil.interpretability.contracts import ReportBundle
+from grass_mil.interpretability.core.niches import (
+    BACKGROUND_NICHE_ID,
+    niche_display_name,
+    niche_display_names,
+)
 from grass_mil.interpretability.tier2.tissue_graph import (
     TissueGraphView,
     build_tissue_graph_figure,
@@ -69,26 +74,27 @@ def build_reduction_scatter(bundle: ReportBundle) -> "go.Figure":
     return fig
 
 
-def build_cluster_enrichment_heatmap(bundle: ReportBundle) -> "go.Figure":
+def build_niche_enrichment_heatmap(bundle: ReportBundle) -> "go.Figure":
     go = _require_plotly()
-    if bundle.cluster_summary is None:
-        raise ValueError("Cluster summary is missing.")
-    enr = bundle.cluster_summary.enrichment
+    if bundle.niche_summary is None:
+        raise ValueError("Niche summary is missing.")
+    enr = bundle.niche_summary.enrichment
     fig = go.Figure(
         data=[
             go.Heatmap(
                 z=enr.to_numpy(),
                 x=[str(c) for c in enr.columns],
-                y=[str(i) for i in enr.index],
+                # Rows are already in dendrogram order from the niche summary.
+                y=niche_display_names(enr.index),
                 colorscale="RdBu",
                 zmid=0.0,
             )
         ]
     )
     fig.update_layout(
-        title="Cluster Enrichment Heatmap",
+        title="Niche Enrichment Heatmap",
         xaxis_title="Features",
-        yaxis_title="Cluster",
+        yaxis_title="Niche",
         template="plotly_white",
     )
     return fig
@@ -102,14 +108,14 @@ def build_plugin_figures(bundle: ReportBundle) -> Dict[str, "go.Figure"]:
             thresholds = np.asarray(result.payload["thresholds"])
             curves = result.payload["curves"]
             fig = go.Figure()
-            for cluster, ct_map in curves.items():
+            for niche, ct_map in curves.items():
                 for cell_type, values in ct_map.items():
                     fig.add_trace(
                         go.Scatter(
                             x=thresholds,
                             y=np.asarray(values),
                             mode="lines",
-                            name=f"{cluster}:{cell_type}",
+                            name=f"{niche}:{cell_type}",
                         )
                     )
             fig.update_layout(
@@ -158,10 +164,10 @@ def build_plugin_figures(bundle: ReportBundle) -> Dict[str, "go.Figure"]:
                     template="plotly_white",
                 )
                 figures[f"{name}_{pair}"] = fig
-        elif "enrichment_by_cluster" in result.payload and isinstance(
-            result.payload["enrichment_by_cluster"], dict
+        elif "enrichment_by_niche" in result.payload and isinstance(
+            result.payload["enrichment_by_niche"], dict
         ):
-            for cluster_id, enr in result.payload["enrichment_by_cluster"].items():
+            for niche_id, enr in result.payload["enrichment_by_niche"].items():
                 if not isinstance(enr, pd.DataFrame):
                     continue
                 fig = go.Figure(
@@ -176,10 +182,10 @@ def build_plugin_figures(bundle: ReportBundle) -> Dict[str, "go.Figure"]:
                     ]
                 )
                 fig.update_layout(
-                    title=f"{name} — Cluster {cluster_id}",
+                    title=f"{name} — {niche_display_name(niche_id)}",
                     template="plotly_white",
                 )
-                figures[f"{name}_cluster_{_safe_slug(cluster_id)}"] = fig
+                figures[f"{name}_niche_{_safe_slug(niche_id)}"] = fig
         elif "tissue_graph_view" in result.payload and isinstance(
             result.payload["tissue_graph_view"], TissueGraphView
         ):
@@ -235,12 +241,12 @@ def build_multi_attribute_scatters(
 ) -> List[tuple[str, "go.Figure"]]:
     """Build scatter plots from reduction embeddings colored by multiple attributes.
 
-    Creates scatters for both PCA (from cluster_feature_reduction) and the main
-    reduction (e.g. UMAP), each colored by cluster labels and any extra columns
+    Creates scatters for both PCA (from niche_feature_reduction) and the main
+    reduction (e.g. UMAP), each colored by niche labels and any extra columns
     found in the instance_table.
 
     Args:
-        bundle: ReportBundle with reduction and optionally cluster_feature_reduction.
+        bundle: ReportBundle with reduction and optionally niche_feature_reduction.
         extra_columns: mapping of {column_name: colorscale}. Defaults to common
             attributes: condition, score, attention.
 
@@ -267,13 +273,14 @@ def build_multi_attribute_scatters(
         else np.zeros((len(table),), dtype=int)
     )
 
-    noise_mask = labels != -1 if -1 in labels else None
+    # True for real niches; Background (-1) is excluded from the filtered views.
+    background_mask = labels != BACKGROUND_NICHE_ID if BACKGROUND_NICHE_ID in labels else None
 
     reductions: List[tuple[str, np.ndarray, str, str]] = []
-    if bundle.cluster_feature_reduction is not None:
-        emb = np.asarray(bundle.cluster_feature_reduction.embedding)
+    if bundle.niche_feature_reduction is not None:
+        emb = np.asarray(bundle.niche_feature_reduction.embedding)
         if emb.shape[1] >= 2:
-            fitted = bundle.cluster_feature_reduction.fitted_object
+            fitted = bundle.niche_feature_reduction.fitted_object
             if fitted is not None and hasattr(fitted, "explained_variance_ratio_"):
                 ev = fitted.explained_variance_ratio_
                 x_label = f"PC1 ({ev[0] * 100:.1f}% var)"
@@ -295,7 +302,7 @@ def build_multi_attribute_scatters(
             )
 
     for red_name, emb, x_label, y_label in reductions:
-        # Cluster scatter (all points)
+        # Niche scatter (all points)
         fig = go.Figure(
             data=[
                 go.Scattergl(
@@ -312,24 +319,24 @@ def build_multi_attribute_scatters(
             ]
         )
         fig.update_layout(
-            title=f"{red_name.upper()} — Cluster Labels",
+            title=f"{red_name.upper()} — Niche Labels",
             xaxis_title=x_label,
             yaxis_title=y_label,
             template="plotly_white",
         )
-        figures.append((f"{red_name}_cluster_all", fig))
+        figures.append((f"{red_name}_niche_all", fig))
 
-        # Cluster scatter (no noise)
-        if noise_mask is not None:
+        # Niche scatter (excluding Background)
+        if background_mask is not None:
             fig = go.Figure(
                 data=[
                     go.Scattergl(
-                        x=emb[noise_mask, 0],
-                        y=emb[noise_mask, 1],
+                        x=emb[background_mask, 0],
+                        y=emb[background_mask, 1],
                         mode="markers",
                         marker={
                             "size": 3,
-                            "color": labels[noise_mask],
+                            "color": labels[background_mask],
                             "colorscale": "Viridis",
                             "showscale": True,
                         },
@@ -337,12 +344,12 @@ def build_multi_attribute_scatters(
                 ]
             )
             fig.update_layout(
-                title=f"{red_name.upper()} — Cluster Labels (no noise)",
+                title=f"{red_name.upper()} — Niche Labels (excluding Background)",
                 xaxis_title=x_label,
                 yaxis_title=y_label,
                 template="plotly_white",
             )
-            figures.append((f"{red_name}_cluster_filtered", fig))
+            figures.append((f"{red_name}_niche_filtered", fig))
 
         # Extra column scatters
         for col, cscale in extra_columns.items():
@@ -372,16 +379,16 @@ def build_multi_attribute_scatters(
             )
             figures.append((f"{red_name}_{_safe_slug(col)}", fig))
 
-            if noise_mask is not None:
+            if background_mask is not None:
                 fig = go.Figure(
                     data=[
                         go.Scattergl(
-                            x=emb[noise_mask, 0],
-                            y=emb[noise_mask, 1],
+                            x=emb[background_mask, 0],
+                            y=emb[background_mask, 1],
                             mode="markers",
                             marker={
                                 "size": 3,
-                                "color": values[noise_mask],
+                                "color": values[background_mask],
                                 "colorscale": cscale,
                                 "showscale": True,
                                 "colorbar": colorbar,
@@ -390,7 +397,7 @@ def build_multi_attribute_scatters(
                     ]
                 )
                 fig.update_layout(
-                    title=f"{red_name.upper()} — {col} (no noise)",
+                    title=f"{red_name.upper()} — {col} (excluding Background)",
                     xaxis_title=x_label,
                     yaxis_title=y_label,
                     template="plotly_white",
@@ -400,7 +407,7 @@ def build_multi_attribute_scatters(
     return figures
 
 
-def build_composite_cluster_heatmap(bundle: ReportBundle) -> "go.Figure":
+def build_composite_niche_heatmap(bundle: ReportBundle) -> "go.Figure":
     """Build a composite heatmap with enrichment + predictions + attention lift + abundance.
 
     Replicates the notebook's 4-panel biomarker summary figure using Plotly subplots.
@@ -408,12 +415,13 @@ def build_composite_cluster_heatmap(bundle: ReportBundle) -> "go.Figure":
     go = _require_plotly()
     from plotly.subplots import make_subplots
 
-    summary = bundle.cluster_summary
+    summary = bundle.niche_summary
     if summary is None:
-        raise ValueError("Cluster summary is missing.")
+        raise ValueError("Niche summary is missing.")
 
     enr = summary.enrichment
-    cluster_ids = [str(i) for i in enr.index]
+    # Dendrogram order comes from the niche summary; Background is named.
+    niche_ids = niche_display_names(enr.index)
     feature_names = [str(c) for c in enr.columns]
 
     has_attention = summary.mean_scores is not None and summary.attention_lift_present is not None
@@ -434,7 +442,7 @@ def build_composite_cluster_heatmap(bundle: ReportBundle) -> "go.Figure":
         go.Heatmap(
             z=enr.to_numpy(),
             x=feature_names,
-            y=cluster_ids,
+            y=niche_ids,
             colorscale="RdBu",
             zmid=0.0,
             colorbar={"title": "Enrichment", "x": 0.65, "len": 0.9},
@@ -447,12 +455,12 @@ def build_composite_cluster_heatmap(bundle: ReportBundle) -> "go.Figure":
     if summary.mean_scores is not None:
         preds = summary.mean_scores.reindex(enr.index).to_numpy().reshape(-1, 1)
     else:
-        preds = summary.cluster_counts.reindex(enr.index).to_numpy().reshape(-1, 1).astype(float)
+        preds = summary.niche_counts.reindex(enr.index).to_numpy().reshape(-1, 1).astype(float)
     fig.add_trace(
         go.Heatmap(
             z=preds,
             x=["Predictions"],
-            y=cluster_ids,
+            y=niche_ids,
             colorscale="RdBu_r",
             colorbar={"title": "Pred", "x": 0.78, "len": 0.9},
         ),
@@ -467,7 +475,7 @@ def build_composite_cluster_heatmap(bundle: ReportBundle) -> "go.Figure":
             go.Heatmap(
                 z=lift,
                 x=["Attn Lift"],
-                y=cluster_ids,
+                y=niche_ids,
                 colorscale="RdGy",
                 zmid=1.0,
                 zmin=0.7,
@@ -479,13 +487,13 @@ def build_composite_cluster_heatmap(bundle: ReportBundle) -> "go.Figure":
         )
 
         # Panel 4: Log abundance
-        counts = summary.cluster_counts.reindex(enr.index).to_numpy().astype(float)
+        counts = summary.niche_counts.reindex(enr.index).to_numpy().astype(float)
         log_counts = np.log(np.clip(counts, 1, None)).reshape(-1, 1)
         fig.add_trace(
             go.Heatmap(
                 z=log_counts,
                 x=["Log Abund."],
-                y=cluster_ids,
+                y=niche_ids,
                 colorscale="Viridis",
                 colorbar={"title": "Log N", "x": 1.02, "len": 0.9},
             ),
@@ -494,9 +502,9 @@ def build_composite_cluster_heatmap(bundle: ReportBundle) -> "go.Figure":
         )
 
     fig.update_layout(
-        title="Cluster Summary: Enrichment + Predictions + Attention + Abundance",
+        title="Niche Summary: Enrichment + Predictions + Attention + Abundance",
         template="plotly_white",
-        height=max(400, 50 * len(cluster_ids) + 200),
+        height=max(400, 50 * len(niche_ids) + 200),
     )
     return fig
 
@@ -505,17 +513,17 @@ def bundle_figures(bundle: ReportBundle) -> List[tuple[str, "go.Figure"]]:
     figures: List[tuple[str, go.Figure]] = []
     if bundle.reduction is not None:
         figures.append(("reduction_scatter", build_reduction_scatter(bundle)))
-    if bundle.cluster_summary is not None:
-        figures.append(("cluster_enrichment", build_cluster_enrichment_heatmap(bundle)))
+    if bundle.niche_summary is not None:
+        figures.append(("niche_enrichment", build_niche_enrichment_heatmap(bundle)))
 
     # Multi-attribute scatters (PCA + UMAP colored by various attributes)
-    if bundle.reduction is not None or bundle.cluster_feature_reduction is not None:
+    if bundle.reduction is not None or bundle.niche_feature_reduction is not None:
         figures.extend(build_multi_attribute_scatters(bundle))
 
-    # Composite cluster heatmap (enrichment + predictions + attention + abundance)
-    if bundle.cluster_summary is not None:
+    # Composite niche heatmap (enrichment + predictions + attention + abundance)
+    if bundle.niche_summary is not None:
         try:
-            figures.append(("composite_cluster_summary", build_composite_cluster_heatmap(bundle)))
+            figures.append(("composite_niche_summary", build_composite_niche_heatmap(bundle)))
         except (ValueError, KeyError):
             pass
 

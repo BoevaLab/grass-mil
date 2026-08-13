@@ -7,15 +7,15 @@ import numpy as np
 import pandas as pd
 
 from grass_mil.interpretability.contracts import (
-    ClusterSummary,
+    NicheSummary,
     PluginResult,
     ReportSection,
 )
-from grass_mil.interpretability.core.agreement import compute_cluster_agreement
-from grass_mil.interpretability.core.attribution import cluster_attribution_summary
+from grass_mil.interpretability.core.agreement import compute_niche_agreement
+from grass_mil.interpretability.core.attribution import niche_attribution_summary
 from grass_mil.interpretability.core.biomarkers import (
-    cluster_attention_summary,
-    cluster_biomarker_summary,
+    niche_attention_summary,
+    niche_composition_summary,
 )
 from grass_mil.interpretability.plugins.base import InterpretabilityPlugin, PluginContext
 from grass_mil.interpretability.plugins.registry import PluginRegistry, create_plugin_registry
@@ -52,29 +52,29 @@ def _context_cluster_summary(
     context: PluginContext,
     *,
     labels: np.ndarray,
-) -> ClusterSummary | None:
-    summary = context.state.get("cluster_summary")
-    if not isinstance(summary, ClusterSummary):
+) -> NicheSummary | None:
+    summary = context.state.get("niche_summary")
+    if not isinstance(summary, NicheSummary):
         return None
-    if summary.cluster_labels.shape != labels.shape:
+    if summary.niche_labels.shape != labels.shape:
         return None
-    if not np.array_equal(summary.cluster_labels, labels):
+    if not np.array_equal(summary.niche_labels, labels):
         return None
     return summary
 
 
 @dataclass
-class ClusterProfilesPlugin(InterpretabilityPlugin):
-    name: str = "cluster_profiles"
+class NicheProfilesPlugin(InterpretabilityPlugin):
+    name: str = "niche_profiles"
 
     def required_inputs(self) -> List[str]:
-        return ["cluster_labels"]
+        return ["niche_labels"]
 
     def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
-        labels = np.asarray(context.state["cluster_labels"])
+        labels = np.asarray(context.state["niche_labels"])
         summary = _context_cluster_summary(context, labels=labels)
         if summary is None:
-            summary = cluster_biomarker_summary(
+            summary = niche_composition_summary(
                 dataset.instance_table,
                 labels,
                 composition_prefix=str(params.get("composition_prefix", "comp_")),
@@ -83,12 +83,12 @@ class ClusterProfilesPlugin(InterpretabilityPlugin):
         payload = {
             "composition": summary.composition,
             "enrichment": summary.enrichment,
-            "counts": summary.cluster_counts,
+            "counts": summary.niche_counts,
         }
         sections = [
             ReportSection(
-                title="Cluster Profiles",
-                description="Cluster-level composition and enrichment summary.",
+                title="Niche Profiles",
+                description="Niche-level composition and enrichment summary.",
                 tables={
                     "composition": summary.composition,
                     "enrichment": summary.enrichment,
@@ -103,11 +103,11 @@ class AttentionAttributionPlugin(InterpretabilityPlugin):
     name: str = "attention_attribution"
 
     def required_inputs(self) -> List[str]:
-        return ["cluster_labels"]
+        return ["niche_labels"]
 
     def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
-        labels = np.asarray(context.state["cluster_labels"])
-        attn_summary = cluster_attention_summary(
+        labels = np.asarray(context.state["niche_labels"])
+        attn_summary = niche_attention_summary(
             dataset.instance_table,
             labels,
             attention_column=str(params.get("attention_column", "attention")),
@@ -118,11 +118,11 @@ class AttentionAttributionPlugin(InterpretabilityPlugin):
         )
         base_summary = _context_cluster_summary(context, labels=labels)
         if base_summary is not None:
-            summary = ClusterSummary(
-                cluster_labels=base_summary.cluster_labels,
+            summary = NicheSummary(
+                niche_labels=base_summary.niche_labels,
                 composition=base_summary.composition,
                 enrichment=base_summary.enrichment,
-                cluster_counts=base_summary.cluster_counts,
+                niche_counts=base_summary.niche_counts,
                 weighted_scores=attn_summary.weighted_scores,
                 mean_scores=attn_summary.mean_scores,
                 attention_present=attn_summary.attention_present,
@@ -143,7 +143,7 @@ class AttentionAttributionPlugin(InterpretabilityPlugin):
         sections = [
             ReportSection(
                 title="Attention Attribution",
-                description="Attention-weighted and abundance-corrected cluster scores.",
+                description="Attention-weighted and abundance-corrected niche scores.",
                 tables=section_tables,
             )
         ]
@@ -155,17 +155,17 @@ class NeighborhoodEnrichmentPlugin(InterpretabilityPlugin):
     name: str = "neighborhood_enrichment"
 
     def required_inputs(self) -> List[str]:
-        return ["spatial_table", "cluster_labels"]
+        return ["spatial_table", "niche_labels"]
 
     def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
         if dataset.spatial_table is None:
             raise ValueError("Spatial table is required for neighborhood enrichment plugin.")
         table = dataset.instance_table.copy()
-        table["cluster_label"] = np.asarray(context.state["cluster_labels"])
+        table["niche_label"] = np.asarray(context.state["niche_labels"])
         result = run_neighborhood_enrichment(
             table,
             dataset.spatial_table,
-            label_column=str(params.get("label_column", "cluster_label")),
+            label_column=str(params.get("label_column", "niche_label")),
             id_column=str(params.get("id_column", dataset.id_column)),
             n_perms=int(params.get("n_perms", 0)),
             random_state=int(params.get("random_state", 42)),
@@ -188,7 +188,7 @@ class NeighborhoodEnrichmentPlugin(InterpretabilityPlugin):
         sections = [
             ReportSection(
                 title="Neighborhood Enrichment",
-                description="Cluster adjacency enrichment relative to expected connectivity.",
+                description="Niche adjacency enrichment relative to expected connectivity.",
                 tables=section_tables,
             )
         ]
@@ -200,20 +200,20 @@ class DiffNeighborhoodEnrichmentPlugin(InterpretabilityPlugin):
     name: str = "diff_neighborhood_enrichment"
 
     def required_inputs(self) -> List[str]:
-        return ["spatial_table", "cluster_labels"]
+        return ["spatial_table", "niche_labels"]
 
     def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
         if dataset.spatial_table is None:
             raise ValueError("Spatial table is required for differential neighborhood enrichment.")
         table = dataset.instance_table.copy()
-        table["cluster_label"] = np.asarray(context.state["cluster_labels"])
+        table["niche_label"] = np.asarray(context.state["niche_labels"])
         condition_column = str(
             params.get("condition_column", dataset.condition_column or "condition")
         )
         pairwise = run_diff_neighborhood_enrichment(
             table,
             dataset.spatial_table,
-            label_column=str(params.get("label_column", "cluster_label")),
+            label_column=str(params.get("label_column", "niche_label")),
             condition_column=condition_column,
             permutation_group_column=str(params.get("permutation_group_column", "sample_id")),
             id_column=str(params.get("id_column", dataset.id_column)),
@@ -257,19 +257,19 @@ class FiltrationCurvesPlugin(InterpretabilityPlugin):
     name: str = "filtration_curves"
 
     def required_inputs(self) -> List[str]:
-        return ["spatial_table", "cluster_labels"]
+        return ["spatial_table", "niche_labels"]
 
     def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
         if dataset.spatial_table is None:
             raise ValueError("Spatial table is required for filtration curves plugin.")
         table = dataset.instance_table.copy()
-        table["cluster_label"] = np.asarray(context.state["cluster_labels"])
+        table["niche_label"] = np.asarray(context.state["niche_labels"])
         thresholds = _resolve_filtration_thresholds(dict(params))
         result = compute_filtration_curves(
             table,
             dataset.spatial_table,
             thresholds=thresholds,
-            cluster_column=str(params.get("cluster_column", "cluster_label")),
+            niche_column=str(params.get("niche_column", "niche_label")),
             cell_type_column=str(params.get("cell_type_column", "cell_type")),
             id_column=str(params.get("id_column", dataset.id_column)),
             distance_column=str(params.get("distance_column", "distance")),
@@ -279,7 +279,7 @@ class FiltrationCurvesPlugin(InterpretabilityPlugin):
         sections = [
             ReportSection(
                 title="Filtration Curves",
-                description="Distance-threshold accumulation by cluster and cell type.",
+                description="Distance-threshold accumulation by niche and cell type.",
                 metadata={"thresholds": result.thresholds.tolist()},
             )
         ]
@@ -291,7 +291,7 @@ class TissueGraphPlugin(InterpretabilityPlugin):
     name: str = "tissue_graph"
 
     def required_inputs(self) -> List[str]:
-        return ["spatial_table", "cluster_labels"]
+        return ["spatial_table", "niche_labels"]
 
     def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
         if dataset.spatial_table is None:
@@ -301,12 +301,12 @@ class TissueGraphPlugin(InterpretabilityPlugin):
             raise ValueError("tissue_graph plugin requires a non-empty sample_value parameter.")
 
         table = dataset.instance_table.copy()
-        table["cluster_label"] = np.asarray(context.state["cluster_labels"])
+        table["niche_label"] = np.asarray(context.state["niche_labels"])
         sample_column = str(params.get("sample_column", "sample_id"))
         id_column = str(params.get("id_column", dataset.id_column))
         x_column = str(params.get("x_column", "center_x"))
         y_column = str(params.get("y_column", "center_y"))
-        label_column = str(params.get("label_column", "cluster_label"))
+        label_column = str(params.get("label_column", "niche_label"))
 
         view = prepare_tissue_graph_view(
             table,
@@ -321,7 +321,7 @@ class TissueGraphPlugin(InterpretabilityPlugin):
             include_edge_distances=True,
         )
         meta = dict(view.metadata)
-        cluster_counts = meta.get("cluster_counts", {})
+        niche_counts = meta.get("niche_counts", {})
         section_summary = pd.DataFrame(
             [
                 {
@@ -329,9 +329,7 @@ class TissueGraphPlugin(InterpretabilityPlugin):
                     "sample_value": meta.get("sample_value"),
                     "node_count": meta.get("node_count"),
                     "edge_count": meta.get("edge_count"),
-                    "cluster_count": len(cluster_counts)
-                    if isinstance(cluster_counts, dict)
-                    else 0,
+                    "cluster_count": len(niche_counts) if isinstance(niche_counts, dict) else 0,
                 }
             ]
         )
@@ -352,7 +350,7 @@ class TissueGraphPlugin(InterpretabilityPlugin):
         sections = [
             ReportSection(
                 title=f"Tissue Graph ({sample_column}={sample_value})",
-                description="Single tissue/sample graph with cluster-colored cells.",
+                description="Single tissue/sample graph with niche-colored cells.",
                 tables={"summary": section_summary},
                 metadata=meta,
             )
@@ -361,58 +359,58 @@ class TissueGraphPlugin(InterpretabilityPlugin):
 
 
 @dataclass
-class PerClusterCellTypeEnrichmentPlugin(InterpretabilityPlugin):
-    """Compute cell-type neighborhood enrichment within each cluster separately.
+class PerNicheCellTypeEnrichmentPlugin(InterpretabilityPlugin):
+    """Compute cell-type neighborhood enrichment within each niche separately.
 
-    For each cluster, subsets the node table and spatial table to nodes belonging
-    to that cluster, then runs neighborhood enrichment with label_column=cell_type.
-    This answers: "within cluster C, which cell types are spatially co-located?"
+    For each niche, subsets the node table and spatial table to nodes belonging
+    to that niche, then runs neighborhood enrichment with label_column=cell_type.
+    This answers: "within niche C, which cell types are spatially co-located?"
     """
 
-    name: str = "per_cluster_cell_type_enrichment"
+    name: str = "per_niche_cell_type_enrichment"
 
     def required_inputs(self) -> List[str]:
-        return ["spatial_table", "cluster_labels"]
+        return ["spatial_table", "niche_labels"]
 
     def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
         if dataset.spatial_table is None:
-            raise ValueError("Spatial table is required for per-cluster cell-type enrichment.")
+            raise ValueError("Spatial table is required for per-niche cell-type enrichment.")
         cell_type_column = str(
             params.get("cell_type_column", dataset.cell_type_column or "cell_type")
         )
-        cluster_column = str(params.get("cluster_column", "cluster_label"))
+        niche_column = str(params.get("niche_column", "niche_label"))
         id_column = str(params.get("id_column", dataset.id_column))
 
         table = dataset.instance_table.copy()
-        table[cluster_column] = np.asarray(context.state["cluster_labels"])
+        table[niche_column] = np.asarray(context.state["niche_labels"])
 
-        unique_clusters = sorted(set(table[cluster_column]))
-        skip_noise = bool(params.get("skip_noise", True))
+        unique_niches = sorted(set(table[niche_column]))
+        skip_background = bool(params.get("skip_background", True))
 
-        enrichment_by_cluster: Dict[str, pd.DataFrame] = {}
+        enrichment_by_niche: Dict[str, pd.DataFrame] = {}
         sections: List[ReportSection] = []
 
-        for cluster_id in unique_clusters:
-            if skip_noise and cluster_id == -1:
+        for niche_id in unique_niches:
+            if skip_background and niche_id == -1:
                 continue
-            cluster_mask = table[cluster_column] == cluster_id
-            cluster_table = table[cluster_mask].copy()
-            if len(cluster_table) < 2:
+            niche_mask = table[niche_column] == niche_id
+            niche_table = table[niche_mask].copy()
+            if len(niche_table) < 2:
                 continue
 
-            cluster_node_ids = set(cluster_table[id_column].astype(str))
+            niche_node_ids = set(niche_table[id_column].astype(str))
             spatial = dataset.spatial_table.copy()
-            cluster_spatial = spatial[
-                spatial["source_id"].astype(str).isin(cluster_node_ids)
-                & spatial["target_id"].astype(str).isin(cluster_node_ids)
+            niche_spatial = spatial[
+                spatial["source_id"].astype(str).isin(niche_node_ids)
+                & spatial["target_id"].astype(str).isin(niche_node_ids)
             ]
-            if cluster_spatial.empty:
+            if niche_spatial.empty:
                 continue
 
             try:
                 result = run_neighborhood_enrichment(
-                    cluster_table,
-                    cluster_spatial,
+                    niche_table,
+                    niche_spatial,
                     label_column=cell_type_column,
                     id_column=id_column,
                     n_perms=int(params.get("n_perms", 0)),
@@ -420,12 +418,12 @@ class PerClusterCellTypeEnrichmentPlugin(InterpretabilityPlugin):
                     undirected=bool(params.get("undirected", False)),
                     enrichment_mode=str(params.get("enrichment_mode", "obs-exp")),
                 )
-                enrichment_by_cluster[str(cluster_id)] = result.enrichment
+                enrichment_by_niche[str(niche_id)] = result.enrichment
                 sections.append(
                     ReportSection(
-                        title=f"Cell-Type Enrichment — Cluster {cluster_id}",
+                        title=f"Cell-Type Enrichment — Niche {niche_id}",
                         description=(
-                            f"Cell-type neighborhood enrichment within cluster {cluster_id}."
+                            f"Cell-type neighborhood enrichment within niche {niche_id}."
                         ),
                         tables={"enrichment": result.enrichment},
                     )
@@ -433,7 +431,7 @@ class PerClusterCellTypeEnrichmentPlugin(InterpretabilityPlugin):
             except (ValueError, KeyError):
                 continue
 
-        payload: Dict[str, Any] = {"enrichment_by_cluster": enrichment_by_cluster}
+        payload: Dict[str, Any] = {"enrichment_by_niche": enrichment_by_niche}
         return PluginResult(name=self.name, payload=payload, sections=sections)
 
 
@@ -445,7 +443,7 @@ def _resolve_columns(table: pd.DataFrame, prefix: str, explicit) -> List[str]:
 
 @dataclass
 class MarginAttributionPlugin(InterpretabilityPlugin):
-    """Exact additive attribution of bag decisions to instance clusters.
+    """Exact additive attribution of bag decisions to instance niches.
 
     Requires per-class attention columns, which only exist when the head emits
     one attention channel per class.
@@ -454,11 +452,11 @@ class MarginAttributionPlugin(InterpretabilityPlugin):
     name: str = "margin_attribution"
 
     def required_inputs(self) -> List[str]:
-        return ["cluster_labels"]
+        return ["niche_labels"]
 
     def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
         table = dataset.instance_table
-        labels = np.asarray(context.state["cluster_labels"])
+        labels = np.asarray(context.state["niche_labels"])
 
         attention_columns = _resolve_columns(
             table,
@@ -476,7 +474,7 @@ class MarginAttributionPlugin(InterpretabilityPlugin):
                 "Enable the interpretability export in the predict step."
             )
 
-        result = cluster_attribution_summary(
+        result = niche_attribution_summary(
             table,
             labels,
             attention_columns=attention_columns,
@@ -497,7 +495,7 @@ class MarginAttributionPlugin(InterpretabilityPlugin):
                 title="Margin Attribution",
                 description=(
                     "Exact additive contributions M[i,c] = A[i,c] * l[i,c], summarised per "
-                    "cluster with percentile bootstrap intervals over regions."
+                    "niche with percentile bootstrap intervals over regions."
                 ),
                 tables={"per_cluster": result.per_cluster},
             )
@@ -507,19 +505,19 @@ class MarginAttributionPlugin(InterpretabilityPlugin):
 
 @dataclass
 class MoransIPlugin(InterpretabilityPlugin):
-    """Spatial autocorrelation per cluster, with a permutation null."""
+    """Spatial autocorrelation per niche, with a permutation null."""
 
     name: str = "morans_i"
 
     def required_inputs(self) -> List[str]:
-        return ["spatial_table", "cluster_labels"]
+        return ["spatial_table", "niche_labels"]
 
     def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
         if dataset.spatial_table is None:
             raise ValueError("Moran's I requires a spatial table.")
         table = dataset.instance_table.copy()
-        cluster_column = str(params.get("cluster_column", "cluster_label"))
-        table[cluster_column] = np.asarray(context.state["cluster_labels"])
+        niche_column = str(params.get("niche_column", "niche_label"))
+        table[niche_column] = np.asarray(context.state["niche_labels"])
 
         feature_columns = _resolve_columns(
             table,
@@ -533,7 +531,7 @@ class MoransIPlugin(InterpretabilityPlugin):
             table,
             dataset.spatial_table,
             feature_columns=feature_columns,
-            group_column=cluster_column,
+            group_column=niche_column,
             id_column=str(params.get("id_column", dataset.id_column)),
             n_perms=int(params.get("n_perms", 100)),
             random_state=int(params.get("random_state", 0)),
@@ -557,7 +555,7 @@ class MoransIPlugin(InterpretabilityPlugin):
             ReportSection(
                 title="Spatial Autocorrelation (Moran's I)",
                 description=(
-                    "Global Moran's I per cluster over the instance graph, with a "
+                    "Global Moran's I per niche over the instance graph, with a "
                     "permutation null and BH-FDR adjustment."
                 ),
                 tables=tables,
@@ -573,13 +571,13 @@ class RipleyPlugin(InterpretabilityPlugin):
     name: str = "ripley"
 
     def required_inputs(self) -> List[str]:
-        return ["cluster_labels"]
+        return ["niche_labels"]
 
     def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
         table = dataset.instance_table.copy()
-        label_column = str(params.get("label_column", "cluster_label"))
-        if label_column == "cluster_label":
-            table[label_column] = np.asarray(context.state["cluster_labels"])
+        label_column = str(params.get("label_column", "niche_label"))
+        if label_column == "niche_label":
+            table[label_column] = np.asarray(context.state["niche_labels"])
 
         pairs = params.get("pairs")
         if pairs is not None:
@@ -617,37 +615,37 @@ class RipleyPlugin(InterpretabilityPlugin):
 
 
 @dataclass
-class ClusterAgreementPlugin(InterpretabilityPlugin):
+class NicheAgreementPlugin(InterpretabilityPlugin):
     """Agreement between the active partition and previously stored ones.
 
     Extra labelings are read from columns of the instance table, so a user
-    joins a prior run's cluster_labels.csv rather than re-running clustering.
+    joins a prior run's niche_labels.csv rather than re-running clustering.
     """
 
-    name: str = "cluster_agreement"
+    name: str = "niche_agreement"
 
     def required_inputs(self) -> List[str]:
-        return ["cluster_labels"]
+        return ["niche_labels"]
 
     def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
         table = dataset.instance_table
         labelings: Dict[str, Any] = {
-            str(params.get("active_name", "active")): np.asarray(context.state["cluster_labels"])
+            str(params.get("active_name", "active")): np.asarray(context.state["niche_labels"])
         }
         for column in params.get("label_columns", []) or []:
             if column not in table.columns:
                 raise ValueError(
-                    f"cluster_agreement label column {column!r} is not in the instance table."
+                    f"niche_agreement label column {column!r} is not in the instance table."
                 )
             labelings[str(column)] = table[column].to_numpy()
 
         if len(labelings) < 2:
             raise ValueError(
-                "cluster_agreement needs at least one additional labeling; set "
-                "params.cluster_agreement.label_columns."
+                "niche_agreement needs at least one additional labeling; set "
+                "params.niche_agreement.label_columns."
             )
 
-        result = compute_cluster_agreement(
+        result = compute_niche_agreement(
             labelings,
             metrics=tuple(params.get("metrics", ("ari", "ami", "nmi"))),
             include_jaccard=bool(params.get("include_jaccard", True)),
@@ -658,7 +656,7 @@ class ClusterAgreementPlugin(InterpretabilityPlugin):
         }
         sections = [
             ReportSection(
-                title="Cross-Space Cluster Agreement",
+                title="Cross-Space Niche Agreement",
                 description=(
                     "Chance-corrected agreement between partitions of the same instances."
                 ),
@@ -669,17 +667,17 @@ class ClusterAgreementPlugin(InterpretabilityPlugin):
 
 
 def register_builtin_plugins(registry: PluginRegistry) -> None:
-    registry.register(ClusterProfilesPlugin())
+    registry.register(NicheProfilesPlugin())
     registry.register(AttentionAttributionPlugin())
     registry.register(NeighborhoodEnrichmentPlugin())
     registry.register(DiffNeighborhoodEnrichmentPlugin())
     registry.register(FiltrationCurvesPlugin())
     registry.register(TissueGraphPlugin())
-    registry.register(PerClusterCellTypeEnrichmentPlugin())
+    registry.register(PerNicheCellTypeEnrichmentPlugin())
     registry.register(MarginAttributionPlugin())
     registry.register(MoransIPlugin())
     registry.register(RipleyPlugin())
-    registry.register(ClusterAgreementPlugin())
+    registry.register(NicheAgreementPlugin())
 
 
 def create_builtin_registry() -> PluginRegistry:

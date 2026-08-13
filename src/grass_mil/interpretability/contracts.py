@@ -43,11 +43,11 @@ class ClusteringResult:
 
 
 @dataclass(frozen=True)
-class ClusterSummary:
-    cluster_labels: np.ndarray
+class NicheSummary:
+    niche_labels: np.ndarray
     composition: pd.DataFrame
     enrichment: pd.DataFrame
-    cluster_counts: pd.Series
+    niche_counts: pd.Series
     weighted_scores: Optional[pd.Series] = None
     mean_scores: Optional[pd.Series] = None
     attention_present: Optional[pd.Series] = None
@@ -85,7 +85,7 @@ class PluginResult:
 
 
 @dataclass(frozen=True)
-class ClusterTransferBundle:
+class NicheTransferBundle:
     embedding_columns: List[str]
     id_column: str
     cluster_on_pca: bool
@@ -99,9 +99,9 @@ class ClusterTransferBundle:
 class ReportBundle:
     dataset: InterpretabilityDataset
     reduction: Optional[ReductionResult]
-    cluster_feature_reduction: Optional[ReductionResult]
+    niche_feature_reduction: Optional[ReductionResult]
     clustering: Optional[ClusteringResult]
-    cluster_summary: Optional[ClusterSummary]
+    niche_summary: Optional[NicheSummary]
     plugin_results: Dict[str, PluginResult]
     artifacts_dir: Path
     metadata: Dict[str, Any] = field(default_factory=dict)

@@ -27,7 +27,7 @@ listed at the bottom.
 ## Attribution
 
 The interpretability claim rests on one identity. If `identity_residual` is not
-~0, every cluster-level attribution derived from it is invalid.
+~0, every niche-level attribution derived from it is invalid.
 
 | Quantity | Definition | Implementation | Test |
 |---|---|---|---|
@@ -44,7 +44,7 @@ The interpretability claim rests on one identity. If `identity_residual` is not
 | Moran's I + permutation null + BH-FDR | `interpretability/tier2/autocorrelation.py` | `test_spatial_statistics.py::test_morans_i_*` |
 | Ripley cross-L, centred `L(r) − r` | `interpretability/tier2/ripley.py` | `test_ripley_l_is_near_zero_for_a_poisson_pattern` |
 | Neighbourhood enrichment | `interpretability/tier2/neighborhood.py` | `test_plugins_and_tier2.py` |
-| Cross-space agreement (ARI/AMI/NMI) | `interpretability/core/agreement.py` | `test_cluster_agreement_*` |
+| Cross-space agreement (ARI/AMI/NMI) | `interpretability/core/agreement.py` | `test_niche_agreement_*` |
 
 ## Known divergences from `methods.tex`
 
@@ -58,7 +58,7 @@ The manuscript is stale on these points. Each is deliberate.
    mean-max (`(v − mean)/(max − mean)`, clamped at 0), which maps every
    below-average-degree node to zero importance. Implemented as in the code.
 3. **Signed margin share bounds.** `methods.tex` states this is bounded in
-   `[-1, 1]`. It is not: it is a fraction of the bag margin, so one cluster can
+   `[-1, 1]`. It is not: it is a fraction of the bag margin, so one niche can
    exceed 1 when another opposes it. The real invariant is that a full
    partition sums to 1.
 4. **Moran's I scope.** The legacy report computes Moran's I over *cells* inside

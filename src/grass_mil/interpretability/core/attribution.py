@@ -8,7 +8,7 @@ added bias,
 each instance carries an exact additive contribution
 :math:`M_{i,c} = A_{i,c} \\ell_{i,c}`. This is an identity, not an
 approximation: it needs no baseline, no integration path, and no surrogate
-model. :func:`cluster_attribution_summary` reports ``identity_residual`` so the
+model. :func:`niche_attribution_summary` reports ``identity_residual`` so the
 assumption is checked rather than trusted.
 
 The reported margin removes the head's per-class bias, so it reflects the
@@ -19,7 +19,7 @@ one-vs-rest contrast, which for a binary head is exactly
 
 and generalises to any number of classes (see :func:`instance_ovr_margins`).
 
-Cluster-level summaries aggregate within cluster x region cells and are
+Niche-level summaries aggregate within niche x region cells and are
 reported region-equal with percentile bootstrap intervals over regions, because
 regions differ enormously in instance count and pooling over instances would
 let one large region dominate.
@@ -35,7 +35,7 @@ import pandas as pd
 
 __all__ = [
     "AttributionResult",
-    "cluster_attribution_summary",
+    "niche_attribution_summary",
     "instance_margin_contributions",
     "instance_ovr_margins",
     "percentile_bootstrap_ci",
@@ -44,11 +44,11 @@ __all__ = [
 
 @dataclass(frozen=True)
 class AttributionResult:
-    """Per-instance contributions and their cluster-level summaries.
+    """Per-instance contributions and their niche-level summaries.
 
     Attributes:
         per_instance: One row per instance with its contribution columns.
-        per_cluster: One row per cluster; each statistic carries ``_lo``/``_hi``
+        per_cluster: One row per niche; each statistic carries ``_lo``/``_hi``
             percentile bootstrap bounds.
         identity_residual: ``max_r |sum_i M[i,c] - L_c|``. Non-zero means the
             additive identity does not hold and the attribution is invalid.
@@ -174,7 +174,7 @@ def instance_ovr_margins(contributions: np.ndarray) -> np.ndarray:
 
 
 def _resolve_focus_classes(n_classes: int, focus_classes) -> List[int]:
-    """Which classes get a cluster-level summary.
+    """Which classes get a niche-level summary.
 
     Binary tasks summarise the positive class only: the class-0 margin is its
     exact negation, so reporting both is redundant. Multi-class tasks summarise
@@ -191,9 +191,9 @@ def _resolve_focus_classes(n_classes: int, focus_classes) -> List[int]:
     return list(range(n_classes))
 
 
-def cluster_attribution_summary(
+def niche_attribution_summary(
     table: pd.DataFrame,
-    cluster_labels: np.ndarray,
+    niche_labels: np.ndarray,
     *,
     attention_columns: Sequence[str],
     logit_columns: Sequence[str],
@@ -205,11 +205,11 @@ def cluster_attribution_summary(
     bag_logits: Optional[Dict[str, Sequence[float]]] = None,
     focus_classes: Optional[Sequence[int]] = None,
 ) -> AttributionResult:
-    """Summarise each cluster's contribution to the bag decisions.
+    """Summarise each niche's contribution to the bag decisions.
 
     Args:
         table: Instance table; must carry the attention, logit and bag columns.
-        cluster_labels: One cluster id per row of ``table``.
+        niche_labels: One niche id per row of ``table``.
         attention_columns: Per-class attention columns, or a single shared one.
         logit_columns: Per-class instance logit columns.
         bag_id_column: Column grouping instances into bags.
@@ -223,10 +223,8 @@ def cluster_attribution_summary(
     for column in (*attention_columns, *logit_columns, bag_id_column):
         if column not in table.columns:
             raise ValueError(f"Missing required column {column!r} for attribution.")
-    if len(cluster_labels) != len(table):
-        raise ValueError(
-            f"cluster_labels has {len(cluster_labels)} entries for {len(table)} rows."
-        )
+    if len(niche_labels) != len(table):
+        raise ValueError(f"niche_labels has {len(niche_labels)} entries for {len(table)} rows.")
 
     attention = table.loc[:, list(attention_columns)].to_numpy(dtype=float)
     logits = table.loc[:, list(logit_columns)].to_numpy(dtype=float)
@@ -236,7 +234,7 @@ def cluster_attribution_summary(
     per_instance = pd.DataFrame(
         {
             bag_id_column: table[bag_id_column].astype(str).to_numpy(),
-            "cluster_label": np.asarray(cluster_labels),
+            "niche_label": np.asarray(niche_labels),
         }
     )
     margins = instance_ovr_margins(contributions)
@@ -319,16 +317,16 @@ def _summarise_clusters(
     bag_margin = frame.groupby(bag_id_column)["margin"].sum()
     bag_size = frame.groupby(bag_id_column).size()
 
-    cell_margin = frame.groupby([bag_id_column, "cluster_label"])["margin"].sum()
-    cell_count = frame.groupby([bag_id_column, "cluster_label"]).size()
-    cell_attention = frame.groupby([bag_id_column, "cluster_label"])["__attention"].sum()
+    cell_margin = frame.groupby([bag_id_column, "niche_label"])["margin"].sum()
+    cell_count = frame.groupby([bag_id_column, "niche_label"]).size()
+    cell_attention = frame.groupby([bag_id_column, "niche_label"])["__attention"].sum()
 
     rng = np.random.default_rng(random_state)
     rows = []
-    for cluster in sorted(frame["cluster_label"].unique()):
-        cluster_margin = cell_margin.xs(cluster, level="cluster_label")
-        cluster_count = cell_count.xs(cluster, level="cluster_label")
-        cluster_attn = cell_attention.xs(cluster, level="cluster_label")
+    for niche in sorted(frame["niche_label"].unique()):
+        cluster_margin = cell_margin.xs(niche, level="niche_label")
+        cluster_count = cell_count.xs(niche, level="niche_label")
+        cluster_attn = cell_attention.xs(niche, level="niche_label")
         bags = cluster_margin.index
 
         totals = bag_margin.loc[bags].to_numpy(dtype=float)
@@ -339,19 +337,19 @@ def _summarise_clusters(
 
         prevalence = counts / np.maximum(sizes, 1.0)
         # Abundance-corrected attention lift: 1 is neutral, >1 preferentially
-        # attended relative to how common the cluster is in that bag.
+        # attended relative to how common the niche is in that bag.
         lift = np.divide(attn, prevalence, out=np.full_like(attn, np.nan), where=prevalence > 0)
 
         # Shares are fractions of the bag margin and sum to 1 across a full
-        # partition, but an individual cluster is NOT bounded to [-1, 1]: it can
-        # exceed 1 when another cluster pushes the opposite way. Regions whose
+        # partition, but an individual niche is NOT bounded to [-1, 1]: it can
+        # exceed 1 when another niche pushes the opposite way. Regions whose
         # margin is near zero are excluded rather than clipped, since the ratio
         # is meaningless there.
         decisive = np.abs(totals) > margin_eps
         share = np.divide(margins, totals, out=np.full_like(margins, np.nan), where=decisive)
         consistency = np.where(decisive, np.sign(margins) == np.sign(totals), np.nan)
 
-        row: Dict[str, object] = {"cluster_label": cluster, "n_regions": int(len(bags))}
+        row: Dict[str, object] = {"niche_label": niche, "n_regions": int(len(bags))}
         for name, values, weights in (
             ("margin_signed_share", share, None),
             ("margin_weighted", margins, np.abs(totals)),
@@ -368,4 +366,4 @@ def _summarise_clusters(
         row["n_instances"] = int(counts.sum())
         rows.append(row)
 
-    return pd.DataFrame(rows).set_index("cluster_label").sort_index()
+    return pd.DataFrame(rows).set_index("niche_label").sort_index()

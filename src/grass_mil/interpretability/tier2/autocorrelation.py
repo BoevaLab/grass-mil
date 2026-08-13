@@ -221,7 +221,7 @@ def diff_morans_i_vs_reference(
     """Differential autocorrelation against a reference group.
 
     ``z = (I_k - I_ref) / sqrt(var_k + var_ref)``, using the permutation-null
-    variances. The reference is typically the HDBSCAN noise cluster.
+    variances. The reference is typically the Background niche.
     """
     if reference_group not in result.statistic.index:
         raise ValueError(

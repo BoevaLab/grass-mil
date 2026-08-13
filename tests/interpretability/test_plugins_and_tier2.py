@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from grass_mil.interpretability.contracts import ClusterSummary, InterpretabilityDataset
+from grass_mil.interpretability.contracts import NicheSummary, InterpretabilityDataset
 from grass_mil.interpretability.plugins.base import PluginContext
 from grass_mil.interpretability.plugins.builtin import create_builtin_registry
 from grass_mil.interpretability.plugins.registry import create_plugin_registry
@@ -55,13 +55,13 @@ def _sample_dataset() -> InterpretabilityDataset:
 
 def test_plugin_registry_and_builtin_execution() -> None:
     registry = create_builtin_registry()
-    assert "cluster_profiles" in registry.list()
+    assert "niche_profiles" in registry.list()
     assert "tissue_graph" in registry.list()
     ds = _sample_dataset()
     labels = np.array([0, 0, 1, 1, 1, 0])
-    plugin = registry.get("cluster_profiles")
-    out = plugin.run(ds, PluginContext(state={"cluster_labels": labels}))
-    assert out.name == "cluster_profiles"
+    plugin = registry.get("niche_profiles")
+    out = plugin.run(ds, PluginContext(state={"niche_labels": labels}))
+    assert out.name == "niche_profiles"
     assert "composition" in out.payload
 
 
@@ -72,7 +72,7 @@ def test_builtin_tissue_graph_plugin_execution() -> None:
     plugin = registry.get("tissue_graph")
     out = plugin.run(
         ds,
-        PluginContext(state={"cluster_labels": labels}),
+        PluginContext(state={"niche_labels": labels}),
         sample_column="sample_id",
         sample_value="sx",
         id_column="instance_id",
@@ -93,7 +93,7 @@ def test_builtin_tissue_graph_plugin_requires_sample_value() -> None:
     with pytest.raises(ValueError, match="requires a non-empty sample_value"):
         plugin.run(
             ds,
-            PluginContext(state={"cluster_labels": labels}),
+            PluginContext(state={"niche_labels": labels}),
             sample_column="sample_id",
             id_column="instance_id",
         )
@@ -114,7 +114,7 @@ def test_builtin_tissue_graph_plugin_fails_when_coords_missing() -> None:
     with pytest.raises(ValueError, match="missing required columns"):
         plugin.run(
             missing_coords_ds,
-            PluginContext(state={"cluster_labels": labels}),
+            PluginContext(state={"niche_labels": labels}),
             sample_column="sample_id",
             sample_value="sx",
             id_column="instance_id",
@@ -128,7 +128,7 @@ def test_builtin_diff_neighborhood_plugin_execution() -> None:
     plugin = registry.get("diff_neighborhood_enrichment")
     out = plugin.run(
         ds,
-        PluginContext(state={"cluster_labels": labels}),
+        PluginContext(state={"niche_labels": labels}),
         condition_column="condition",
         permutation_group_column="sample_id",
         n_perms=0,
@@ -147,23 +147,23 @@ def test_cluster_profiles_reuses_context_cluster_summary(monkeypatch) -> None:
     registry = create_builtin_registry()
     ds = _sample_dataset()
     labels = np.array([0, 0, 1, 1, 1, 0])
-    summary = ClusterSummary(
-        cluster_labels=labels.copy(),
+    summary = NicheSummary(
+        niche_labels=labels.copy(),
         composition=pd.DataFrame({"comp_A": [0.1, 0.2]}, index=[0, 1]),
         enrichment=pd.DataFrame({"comp_A": [1.0, -1.0]}, index=[0, 1]),
-        cluster_counts=pd.Series({0: 2, 1: 4}),
+        niche_counts=pd.Series({0: 2, 1: 4}),
     )
 
     def _should_not_run(*args, **kwargs):  # type: ignore[no-untyped-def]
-        raise AssertionError("cluster_biomarker_summary should not be recomputed")
+        raise AssertionError("niche_composition_summary should not be recomputed")
 
     monkeypatch.setattr(
-        "grass_mil.interpretability.plugins.builtin.cluster_biomarker_summary", _should_not_run
+        "grass_mil.interpretability.plugins.builtin.niche_composition_summary", _should_not_run
     )
-    plugin = registry.get("cluster_profiles")
+    plugin = registry.get("niche_profiles")
     out = plugin.run(
         ds,
-        PluginContext(state={"cluster_labels": labels, "cluster_summary": summary}),
+        PluginContext(state={"niche_labels": labels, "niche_summary": summary}),
     )
     assert out.payload["composition"].equals(summary.composition)
     assert out.payload["enrichment"].equals(summary.enrichment)
@@ -173,17 +173,17 @@ def test_attention_attribution_reuses_context_base_summary(monkeypatch) -> None:
     registry = create_builtin_registry()
     ds = _sample_dataset()
     labels = np.array([0, 0, 1, 1, 1, 0])
-    base_summary = ClusterSummary(
-        cluster_labels=labels.copy(),
+    base_summary = NicheSummary(
+        niche_labels=labels.copy(),
         composition=pd.DataFrame({"comp_A": [0.6, 0.4]}, index=[0, 1]),
         enrichment=pd.DataFrame({"comp_A": [0.2, -0.2]}, index=[0, 1]),
-        cluster_counts=pd.Series({0: 3, 1: 3}),
+        niche_counts=pd.Series({0: 3, 1: 3}),
     )
-    attn_summary = ClusterSummary(
-        cluster_labels=labels.copy(),
+    attn_summary = NicheSummary(
+        niche_labels=labels.copy(),
         composition=pd.DataFrame({"comp_A": [0.9, 0.1]}, index=[0, 1]),
         enrichment=pd.DataFrame({"comp_A": [1.2, -1.2]}, index=[0, 1]),
-        cluster_counts=pd.Series({0: 2, 1: 4}),
+        niche_counts=pd.Series({0: 2, 1: 4}),
         weighted_scores=pd.Series({0: 0.3, 1: 0.7}),
         mean_scores=pd.Series({0: 0.2, 1: 0.8}),
         attention_present=pd.Series({0: 0.4, 1: 0.6}),
@@ -191,13 +191,13 @@ def test_attention_attribution_reuses_context_base_summary(monkeypatch) -> None:
     )
 
     monkeypatch.setattr(
-        "grass_mil.interpretability.plugins.builtin.cluster_attention_summary",
+        "grass_mil.interpretability.plugins.builtin.niche_attention_summary",
         lambda *args, **kwargs: attn_summary,  # type: ignore[no-untyped-def]
     )
     plugin = registry.get("attention_attribution")
     out = plugin.run(
         ds,
-        PluginContext(state={"cluster_labels": labels, "cluster_summary": base_summary}),
+        PluginContext(state={"niche_labels": labels, "niche_summary": base_summary}),
     )
     assert out.payload["weighted_scores"].equals(attn_summary.weighted_scores)
     assert out.payload["mean_scores"].equals(attn_summary.mean_scores)
@@ -277,11 +277,11 @@ def test_tier2_neighborhood_and_filtration() -> None:
     ds = _sample_dataset()
     labels = np.array([0, 0, 1, 1, 1, 0])
     frame = ds.instance_table.copy()
-    frame["cluster_label"] = labels
+    frame["niche_label"] = labels
     enr = run_neighborhood_enrichment(
         frame,
         ds.spatial_table,  # type: ignore[arg-type]
-        label_column="cluster_label",
+        label_column="niche_label",
         id_column="instance_id",
         n_perms=4,
         random_state=2,
@@ -291,7 +291,7 @@ def test_tier2_neighborhood_and_filtration() -> None:
         frame,
         ds.spatial_table,  # type: ignore[arg-type]
         thresholds=np.array([0.2, 0.5, 1.0]),
-        cluster_column="cluster_label",
+        niche_column="niche_label",
         cell_type_column="cell_type",
         id_column="instance_id",
         distance_column="distance",
@@ -303,7 +303,7 @@ def test_filtration_subgraph_centric_counts_both_edge_endpoints() -> None:
     node_table = pd.DataFrame(
         {
             "instance_id": ["n0", "n1", "n2"],
-            "cluster_label": [0, 0, 1],
+            "niche_label": [0, 0, 1],
             "cell_type": ["A", "B", "A"],
         }
     )
@@ -318,17 +318,17 @@ def test_filtration_subgraph_centric_counts_both_edge_endpoints() -> None:
         node_table,
         spatial_table,
         thresholds=np.array([0.15, 0.25]),
-        cluster_column="cluster_label",
+        niche_column="niche_label",
         cell_type_column="cell_type",
         id_column="instance_id",
         distance_column="distance",
         scale_within_cluster=False,
     )
-    # At 0.15 only n0->n1 contributes in cluster 0: A=1 (n0), B=1 (n1).
+    # At 0.15 only n0->n1 contributes in niche 0: A=1 (n0), B=1 (n1).
     # At 0.25:
     # - subgraph n0 contributes unique nodes {n0,n1,n2}: A=2, B=1
     # - subgraph n1 contributes unique nodes {n1,n2}: A=1, B=1
-    # Total for cluster 0: A=3, B=2.
+    # Total for niche 0: A=3, B=2.
     assert np.allclose(curves.curves["0"]["A"], np.array([1.0, 3.0]))
     assert np.allclose(curves.curves["0"]["B"], np.array([1.0, 2.0]))
 
@@ -337,7 +337,7 @@ def test_neighborhood_undirected_option_adds_reverse_direction() -> None:
     node_table = pd.DataFrame(
         {
             "instance_id": ["n0", "n1"],
-            "cluster_label": ["A", "B"],
+            "niche_label": ["A", "B"],
         }
     )
     spatial_table = pd.DataFrame(
@@ -350,7 +350,7 @@ def test_neighborhood_undirected_option_adds_reverse_direction() -> None:
     directed = run_neighborhood_enrichment(
         node_table,
         spatial_table,
-        label_column="cluster_label",
+        label_column="niche_label",
         id_column="instance_id",
         n_perms=0,
         undirected=False,
@@ -359,7 +359,7 @@ def test_neighborhood_undirected_option_adds_reverse_direction() -> None:
     undirected = run_neighborhood_enrichment(
         node_table,
         spatial_table,
-        label_column="cluster_label",
+        label_column="niche_label",
         id_column="instance_id",
         n_perms=0,
         undirected=True,
@@ -375,7 +375,7 @@ def test_neighborhood_undirected_deduplicates_already_bidirectional_edges() -> N
     node_table = pd.DataFrame(
         {
             "instance_id": ["n0", "n1"],
-            "cluster_label": ["A", "B"],
+            "niche_label": ["A", "B"],
         }
     )
     spatial_table = pd.DataFrame(
@@ -387,7 +387,7 @@ def test_neighborhood_undirected_deduplicates_already_bidirectional_edges() -> N
     out = run_neighborhood_enrichment(
         node_table,
         spatial_table,
-        label_column="cluster_label",
+        label_column="niche_label",
         id_column="instance_id",
         n_perms=0,
         undirected=True,
@@ -401,7 +401,7 @@ def test_neighborhood_ignores_weight_semantics() -> None:
     node_table = pd.DataFrame(
         {
             "instance_id": ["n0", "n1", "n2"],
-            "cluster_label": ["A", "B", "B"],
+            "niche_label": ["A", "B", "B"],
         }
     )
     spatial_table = pd.DataFrame(
@@ -414,7 +414,7 @@ def test_neighborhood_ignores_weight_semantics() -> None:
     out = run_neighborhood_enrichment(
         node_table,
         spatial_table,
-        label_column="cluster_label",
+        label_column="niche_label",
         id_column="instance_id",
         n_perms=0,
         undirected=False,
@@ -428,7 +428,7 @@ def test_neighborhood_enrichment_mode_is_tunable() -> None:
     node_table = pd.DataFrame(
         {
             "instance_id": ["n0", "n1"],
-            "cluster_label": ["A", "B"],
+            "niche_label": ["A", "B"],
         }
     )
     spatial_table = pd.DataFrame(
@@ -440,7 +440,7 @@ def test_neighborhood_enrichment_mode_is_tunable() -> None:
     zscore = run_neighborhood_enrichment(
         node_table,
         spatial_table,
-        label_column="cluster_label",
+        label_column="niche_label",
         id_column="instance_id",
         n_perms=0,
         undirected=False,
@@ -450,7 +450,7 @@ def test_neighborhood_enrichment_mode_is_tunable() -> None:
     difference = run_neighborhood_enrichment(
         node_table,
         spatial_table,
-        label_column="cluster_label",
+        label_column="niche_label",
         id_column="instance_id",
         n_perms=0,
         undirected=False,
@@ -460,7 +460,7 @@ def test_neighborhood_enrichment_mode_is_tunable() -> None:
     log2fc = run_neighborhood_enrichment(
         node_table,
         spatial_table,
-        label_column="cluster_label",
+        label_column="niche_label",
         id_column="instance_id",
         n_perms=0,
         undirected=False,
@@ -476,7 +476,7 @@ def test_neighborhood_enrichment_mode_rejects_unknown_values() -> None:
     node_table = pd.DataFrame(
         {
             "instance_id": ["n0", "n1"],
-            "cluster_label": ["A", "B"],
+            "niche_label": ["A", "B"],
         }
     )
     spatial_table = pd.DataFrame(
@@ -489,7 +489,7 @@ def test_neighborhood_enrichment_mode_rejects_unknown_values() -> None:
         run_neighborhood_enrichment(
             node_table,
             spatial_table,
-            label_column="cluster_label",
+            label_column="niche_label",
             id_column="instance_id",
             n_perms=0,
             warn_analytical=False,
@@ -501,7 +501,7 @@ def test_diff_neighborhood_returns_pairwise_differences_with_pvalues() -> None:
     node_table = pd.DataFrame(
         {
             "instance_id": ["x0", "x1", "y0", "y1"],
-            "cluster_label": ["A", "B", "A", "B"],
+            "niche_label": ["A", "B", "A", "B"],
             "sample_id": ["sx", "sx", "sy", "sy"],
             "condition": ["X", "X", "Y", "Y"],
         }
@@ -516,7 +516,7 @@ def test_diff_neighborhood_returns_pairwise_differences_with_pvalues() -> None:
     out = run_diff_neighborhood_enrichment(
         node_table,
         spatial_table,
-        label_column="cluster_label",
+        label_column="niche_label",
         condition_column="condition",
         id_column="instance_id",
         n_perms=8,
@@ -556,7 +556,7 @@ def test_diff_neighborhood_pvalues_are_centered_on_permutation_mean(monkeypatch)
     node_table = pd.DataFrame(
         {
             "instance_id": ["x0", "x1", "y0", "y1"],
-            "cluster_label": ["A", "A", "A", "A"],
+            "niche_label": ["A", "A", "A", "A"],
             "sample_id": ["sx0", "sx1", "sy0", "sy1"],
             "condition": ["X", "X", "Y", "Y"],
         }
@@ -565,7 +565,7 @@ def test_diff_neighborhood_pvalues_are_centered_on_permutation_mean(monkeypatch)
     out = run_diff_neighborhood_enrichment(
         node_table,
         spatial_table,
-        label_column="cluster_label",
+        label_column="niche_label",
         condition_column="condition",
         permutation_group_column="sample_id",
         n_perms=4,
@@ -580,7 +580,7 @@ def test_diff_neighborhood_respects_enrichment_mode() -> None:
     node_table = pd.DataFrame(
         {
             "instance_id": ["x0", "x1", "y0", "y1"],
-            "cluster_label": ["A", "B", "A", "B"],
+            "niche_label": ["A", "B", "A", "B"],
             "condition": ["X", "X", "Y", "Y"],
         }
     )
@@ -593,7 +593,7 @@ def test_diff_neighborhood_respects_enrichment_mode() -> None:
     zscore_out = run_diff_neighborhood_enrichment(
         node_table,
         spatial_table,
-        label_column="cluster_label",
+        label_column="niche_label",
         condition_column="condition",
         id_column="instance_id",
         n_perms=0,
@@ -604,7 +604,7 @@ def test_diff_neighborhood_respects_enrichment_mode() -> None:
     diff_out = run_diff_neighborhood_enrichment(
         node_table,
         spatial_table,
-        label_column="cluster_label",
+        label_column="niche_label",
         condition_column="condition",
         id_column="instance_id",
         n_perms=0,
@@ -620,7 +620,7 @@ def test_diff_neighborhood_requires_permutation_group_column_for_permutation_mod
     node_table = pd.DataFrame(
         {
             "instance_id": ["x0", "x1", "y0", "y1"],
-            "cluster_label": ["A", "B", "A", "B"],
+            "niche_label": ["A", "B", "A", "B"],
             "condition": ["X", "X", "Y", "Y"],
         }
     )
@@ -634,7 +634,7 @@ def test_diff_neighborhood_requires_permutation_group_column_for_permutation_mod
         run_diff_neighborhood_enrichment(
             node_table,
             spatial_table,
-            label_column="cluster_label",
+            label_column="niche_label",
             condition_column="condition",
             n_perms=4,
             warn_analytical=False,
@@ -645,7 +645,7 @@ def test_diff_neighborhood_rejects_mixed_condition_groups() -> None:
     node_table = pd.DataFrame(
         {
             "instance_id": ["x0", "x1", "y0", "y1"],
-            "cluster_label": ["A", "B", "A", "B"],
+            "niche_label": ["A", "B", "A", "B"],
             "sample_id": ["s0", "s0", "s1", "s1"],
             "condition": ["X", "Y", "X", "Y"],
         }
@@ -660,7 +660,7 @@ def test_diff_neighborhood_rejects_mixed_condition_groups() -> None:
         run_diff_neighborhood_enrichment(
             node_table,
             spatial_table,
-            label_column="cluster_label",
+            label_column="niche_label",
             condition_column="condition",
             permutation_group_column="sample_id",
             n_perms=4,
@@ -672,7 +672,7 @@ def test_neighborhood_warns_in_analytical_mode() -> None:
     node_table = pd.DataFrame(
         {
             "instance_id": ["n0", "n1"],
-            "cluster_label": ["A", "B"],
+            "niche_label": ["A", "B"],
         }
     )
     spatial_table = pd.DataFrame(
@@ -685,7 +685,7 @@ def test_neighborhood_warns_in_analytical_mode() -> None:
         run_neighborhood_enrichment(
             node_table,
             spatial_table,
-            label_column="cluster_label",
+            label_column="niche_label",
             id_column="instance_id",
             n_perms=0,
         )
@@ -695,7 +695,7 @@ def test_diff_neighborhood_warns_about_analytical_baseline() -> None:
     node_table = pd.DataFrame(
         {
             "instance_id": ["x0", "x1", "y0", "y1"],
-            "cluster_label": ["A", "B", "A", "B"],
+            "niche_label": ["A", "B", "A", "B"],
             "condition": ["X", "X", "Y", "Y"],
         }
     )
@@ -709,7 +709,7 @@ def test_diff_neighborhood_warns_about_analytical_baseline() -> None:
         run_diff_neighborhood_enrichment(
             node_table,
             spatial_table,
-            label_column="cluster_label",
+            label_column="niche_label",
             condition_column="condition",
             id_column="instance_id",
             n_perms=0,
@@ -721,26 +721,26 @@ def _legacy_filtration_curves(
     spatial_table: pd.DataFrame,
     *,
     thresholds: np.ndarray,
-    cluster_column: str,
+    niche_column: str,
     cell_type_column: str,
     id_column: str,
     distance_column: str,
 ) -> dict[str, dict[str, np.ndarray]]:
     node_to_cell_type = node_table.set_index(id_column)[cell_type_column].astype(str).to_dict()
-    node_to_cluster = node_table.set_index(id_column)[cluster_column].astype(str).to_dict()
+    node_to_cluster = node_table.set_index(id_column)[niche_column].astype(str).to_dict()
     edges = spatial_table.copy()
     edges["source_id"] = edges["source_id"].astype(str)
     edges["target_id"] = edges["target_id"].astype(str)
     edges = edges[edges["source_id"].isin(node_to_cluster.keys())].copy()
     edges["source_cluster"] = edges["source_id"].map(node_to_cluster)
 
-    clusters = sorted(node_table[cluster_column].astype(str).unique())
+    niches = sorted(node_table[niche_column].astype(str).unique())
     cell_types = sorted(node_table[cell_type_column].astype(str).unique())
     curves: dict[str, dict[str, np.ndarray]] = {
-        c: {ct: np.zeros_like(thresholds, dtype=float) for ct in cell_types} for c in clusters
+        c: {ct: np.zeros_like(thresholds, dtype=float) for ct in cell_types} for c in niches
     }
-    for cluster in clusters:
-        c_edges = edges[edges["source_cluster"] == str(cluster)]
+    for niche in niches:
+        c_edges = edges[edges["source_cluster"] == str(niche)]
         by_subgraph = {
             str(sub_id): frame for sub_id, frame in c_edges.groupby("source_id", sort=False)
         }
@@ -758,7 +758,7 @@ def _legacy_filtration_curves(
                     if ct is not None:
                         threshold_counts[ct] += 1.0
             for ct in cell_types:
-                curves[cluster][ct][i] = float(threshold_counts.get(ct, 0.0))
+                curves[niche][ct][i] = float(threshold_counts.get(ct, 0.0))
     return curves
 
 
@@ -769,7 +769,7 @@ def test_filtration_vectorized_matches_legacy_counts() -> None:
     node_table = pd.DataFrame(
         {
             "instance_id": node_ids,
-            "cluster_label": rng.choice(["0", "1", "2"], size=n_nodes),
+            "niche_label": rng.choice(["0", "1", "2"], size=n_nodes),
             "cell_type": rng.choice(["A", "B", "C"], size=n_nodes),
         }
     )
@@ -787,7 +787,7 @@ def test_filtration_vectorized_matches_legacy_counts() -> None:
         node_table,
         spatial_table,
         thresholds=thresholds,
-        cluster_column="cluster_label",
+        niche_column="niche_label",
         cell_type_column="cell_type",
         id_column="instance_id",
         distance_column="distance",
@@ -796,15 +796,15 @@ def test_filtration_vectorized_matches_legacy_counts() -> None:
         node_table,
         spatial_table,
         thresholds=thresholds,
-        cluster_column="cluster_label",
+        niche_column="niche_label",
         cell_type_column="cell_type",
         id_column="instance_id",
         distance_column="distance",
         scale_within_cluster=False,
     )
-    for cluster, ct_map in legacy.items():
+    for niche, ct_map in legacy.items():
         for cell_type, values in ct_map.items():
-            assert np.allclose(out.curves[cluster][cell_type], values)
+            assert np.allclose(out.curves[niche][cell_type], values)
 
 
 def test_filtration_runtime_sanity() -> None:
@@ -814,7 +814,7 @@ def test_filtration_runtime_sanity() -> None:
     node_table = pd.DataFrame(
         {
             "instance_id": node_ids,
-            "cluster_label": rng.choice(["0", "1", "2", "3"], size=n_nodes),
+            "niche_label": rng.choice(["0", "1", "2", "3"], size=n_nodes),
             "cell_type": rng.choice(["A", "B", "C", "D"], size=n_nodes),
         }
     )
@@ -832,7 +832,7 @@ def test_filtration_runtime_sanity() -> None:
         node_table,
         spatial_table,
         thresholds=thresholds,
-        cluster_column="cluster_label",
+        niche_column="niche_label",
         cell_type_column="cell_type",
         id_column="instance_id",
         distance_column="distance",
@@ -846,16 +846,16 @@ def test_builtin_per_cluster_cell_type_enrichment_plugin_execution() -> None:
     registry = create_builtin_registry()
     ds = _sample_dataset()
     labels = np.array([0, 0, 0, 1, 1, 1])
-    plugin = registry.get("per_cluster_cell_type_enrichment")
+    plugin = registry.get("per_niche_cell_type_enrichment")
     out = plugin.run(
         ds,
-        PluginContext(state={"cluster_labels": labels}),
+        PluginContext(state={"niche_labels": labels}),
         n_perms=0,
         enrichment_mode="obs-exp",
     )
-    assert out.name == "per_cluster_cell_type_enrichment"
-    enrichment = out.payload["enrichment_by_cluster"]
-    # Both clusters are internally connected in the sample spatial table.
+    assert out.name == "per_niche_cell_type_enrichment"
+    enrichment = out.payload["enrichment_by_niche"]
+    # Both niches are internally connected in the sample spatial table.
     assert set(enrichment) == {"0", "1"}
     for frame in enrichment.values():
         # Enrichment is a square cell-type x cell-type matrix.
@@ -867,23 +867,23 @@ def test_per_cluster_cell_type_enrichment_skips_noise_cluster() -> None:
     registry = create_builtin_registry()
     ds = _sample_dataset()
     labels = np.array([-1, -1, -1, 1, 1, 1])
-    plugin = registry.get("per_cluster_cell_type_enrichment")
+    plugin = registry.get("per_niche_cell_type_enrichment")
 
     skipped = plugin.run(
         ds,
-        PluginContext(state={"cluster_labels": labels}),
-        skip_noise=True,
+        PluginContext(state={"niche_labels": labels}),
+        skip_background=True,
         n_perms=0,
     )
-    assert set(skipped.payload["enrichment_by_cluster"]) == {"1"}
+    assert set(skipped.payload["enrichment_by_niche"]) == {"1"}
 
     retained = plugin.run(
         ds,
-        PluginContext(state={"cluster_labels": labels}),
-        skip_noise=False,
+        PluginContext(state={"niche_labels": labels}),
+        skip_background=False,
         n_perms=0,
     )
-    assert set(retained.payload["enrichment_by_cluster"]) == {"-1", "1"}
+    assert set(retained.payload["enrichment_by_niche"]) == {"-1", "1"}
 
 
 def _attribution_dataset() -> InterpretabilityDataset:
@@ -910,11 +910,11 @@ def test_margin_attribution_plugin_reports_per_cluster_intervals() -> None:
     labels = np.array([0, 0, 1, 1, 0, 1])
 
     out = registry.get("margin_attribution").run(
-        ds, PluginContext(state={"cluster_labels": labels}), n_bootstrap=25
+        ds, PluginContext(state={"niche_labels": labels}), n_bootstrap=25
     )
     assert out.name == "margin_attribution"
     summary = out.payload["per_cluster"]
-    # (cluster_label, class_index); a binary head summarises the positive class.
+    # (niche_label, class_index); a binary head summarises the positive class.
     assert set(summary.index) == {(0, 1), (1, 1)}
     for column in ("margin_signed_share", "attention_lift", "prevalence"):
         assert column in summary.columns
@@ -926,7 +926,7 @@ def test_margin_attribution_requires_instance_logits() -> None:
     ds = _sample_dataset()  # has no logit_* columns
     with pytest.raises(ValueError, match="instance logit columns"):
         registry.get("margin_attribution").run(
-            ds, PluginContext(state={"cluster_labels": np.zeros(6, dtype=int)})
+            ds, PluginContext(state={"niche_labels": np.zeros(6, dtype=int)})
         )
 
 
@@ -936,7 +936,7 @@ def test_morans_i_plugin_runs_over_the_instance_graph() -> None:
     labels = np.array([0, 0, 0, 1, 1, 1])
 
     out = registry.get("morans_i").run(
-        ds, PluginContext(state={"cluster_labels": labels}), n_perms=10, min_nodes=2
+        ds, PluginContext(state={"niche_labels": labels}), n_perms=10, min_nodes=2
     )
     assert out.name == "morans_i"
     assert set(out.payload["statistic"].index) == {0, 1}
@@ -950,7 +950,7 @@ def test_ripley_plugin_produces_centred_curves() -> None:
     labels = np.array([0, 0, 1, 1, 0, 1])
 
     out = registry.get("ripley").run(
-        ds, PluginContext(state={"cluster_labels": labels}), n_radii=6, min_count=2
+        ds, PluginContext(state={"niche_labels": labels}), n_radii=6, min_count=2
     )
     assert out.name == "ripley"
     curves = out.payload["curves"]
@@ -971,9 +971,9 @@ def test_cluster_agreement_plugin_compares_stored_labelings() -> None:
         cell_type_column=ds.cell_type_column,
     )
 
-    out = registry.get("cluster_agreement").run(
+    out = registry.get("niche_agreement").run(
         ds,
-        PluginContext(state={"cluster_labels": np.array([0, 0, 0, 1, 1, 1])}),
+        PluginContext(state={"niche_labels": np.array([0, 0, 0, 1, 1, 1])}),
         label_columns=["prior_labels"],
     )
     metrics = out.payload["pairwise_metrics"]
@@ -984,6 +984,6 @@ def test_cluster_agreement_plugin_compares_stored_labelings() -> None:
 def test_cluster_agreement_plugin_requires_a_second_labeling() -> None:
     registry = create_builtin_registry()
     with pytest.raises(ValueError, match="at least one additional labeling"):
-        registry.get("cluster_agreement").run(
-            _sample_dataset(), PluginContext(state={"cluster_labels": np.zeros(6, dtype=int)})
+        registry.get("niche_agreement").run(
+            _sample_dataset(), PluginContext(state={"niche_labels": np.zeros(6, dtype=int)})
         )

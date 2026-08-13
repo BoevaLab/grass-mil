@@ -1,7 +1,7 @@
 """Contracts for the exact additive attribution.
 
 The load-bearing property is the identity sum_i A[i,c] * l[i,c] == L_c. If it
-does not hold exactly, every cluster-level attribution built on it is invalid,
+does not hold exactly, every niche-level attribution built on it is invalid,
 so it is asserted directly rather than inferred.
 """
 
@@ -12,7 +12,7 @@ import pandas as pd
 import pytest
 
 from grass_mil.interpretability.core.attribution import (
-    cluster_attribution_summary,
+    niche_attribution_summary,
     instance_margin_contributions,
     instance_ovr_margins,
     percentile_bootstrap_ci,
@@ -50,7 +50,7 @@ def test_contributions_sum_exactly_to_the_bag_logit() -> None:
         logits = group[["logit_0", "logit_1"]].to_numpy()
         bag_logits[bag_id] = (attention * logits).sum(axis=0)
 
-    result = cluster_attribution_summary(
+    result = niche_attribution_summary(
         table,
         labels,
         attention_columns=["attention_c0", "attention_c1"],
@@ -66,7 +66,7 @@ def test_identity_residual_detects_a_broken_bag_logit() -> None:
     table, labels = _instance_table(n_bags=2)
     bad = {bag_id: np.array([99.0, -99.0]) for bag_id in table["bag_id"].unique()}
 
-    result = cluster_attribution_summary(
+    result = niche_attribution_summary(
         table,
         labels,
         attention_columns=["attention_c0", "attention_c1"],
@@ -100,7 +100,7 @@ def test_margin_contributions_reject_mismatched_shapes() -> None:
 
 def test_cluster_summaries_are_bounded_and_carry_intervals() -> None:
     table, labels = _instance_table(n_bags=6, per_bag=8)
-    result = cluster_attribution_summary(
+    result = niche_attribution_summary(
         table,
         labels,
         attention_columns=["attention_c0", "attention_c1"],
@@ -109,12 +109,12 @@ def test_cluster_summaries_are_bounded_and_carry_intervals() -> None:
     )
     summary = result.per_cluster
 
-    # Indexed by (cluster_label, class_index). A binary head summarises the
+    # Indexed by (niche_label, class_index). A binary head summarises the
     # positive class only: the class-0 margin is its exact negation.
     assert set(summary.index) == {(0, 1), (1, 1), (2, 1)}
     # Note: margin_signed_share is NOT bounded to [-1, 1]. It is a fraction of
-    # the bag margin, so a cluster pushing hard in one direction can exceed 1
-    # when another cluster opposes it. The real invariant is that a full
+    # the bag margin, so a niche pushing hard in one direction can exceed 1
+    # when another niche opposes it. The real invariant is that a full
     # partition sums to 1, covered separately below.
     assert np.isfinite(summary["margin_signed_share"]).all()
     assert summary["margin_sign_consistency"].between(0.0, 1.0).all()
@@ -126,7 +126,7 @@ def test_cluster_summaries_are_bounded_and_carry_intervals() -> None:
 
 
 def test_attention_lift_is_neutral_when_attention_matches_abundance() -> None:
-    """Uniform attention over a bag gives every cluster a lift of 1."""
+    """Uniform attention over a bag gives every niche a lift of 1."""
     per_bag = 6
     rows = []
     for bag in range(4):
@@ -141,7 +141,7 @@ def test_attention_lift_is_neutral_when_attention_matches_abundance() -> None:
     table = pd.DataFrame(rows)
     labels = np.array([i % 2 for i in range(len(table))])
 
-    result = cluster_attribution_summary(
+    result = niche_attribution_summary(
         table,
         labels,
         attention_columns=["attention_c0"],
@@ -154,7 +154,7 @@ def test_attention_lift_is_neutral_when_attention_matches_abundance() -> None:
 def test_signed_share_across_clusters_sums_to_one_per_region() -> None:
     """Shares are fractions of the bag margin, so a full partition sums to 1."""
     table, labels = _instance_table(n_bags=1, per_bag=9)
-    result = cluster_attribution_summary(
+    result = niche_attribution_summary(
         table,
         labels,
         attention_columns=["attention_c0", "attention_c1"],
@@ -234,14 +234,14 @@ def test_multiclass_attribution_summarises_every_class() -> None:
     attention_columns = [f"attention_c{c}" for c in range(3)]
     logit_columns = [f"logit_{c}" for c in range(3)]
 
-    result = cluster_attribution_summary(
+    result = niche_attribution_summary(
         table,
         labels,
         attention_columns=attention_columns,
         logit_columns=logit_columns,
         n_bootstrap=20,
     )
-    # One row per (cluster, class): no class is silently ignored.
+    # One row per (niche, class): no class is silently ignored.
     assert set(result.per_cluster.index) == {(c, k) for c in (0, 1, 2) for k in (0, 1, 2)}
     for c in range(3):
         assert f"margin_c{c}" in result.per_instance.columns
@@ -259,7 +259,7 @@ def test_multiclass_identity_holds_for_every_class() -> None:
         logits = group[logit_columns].to_numpy()
         bag_logits[bag_id] = (attention * logits).sum(axis=0)
 
-    result = cluster_attribution_summary(
+    result = niche_attribution_summary(
         table,
         labels,
         attention_columns=attention_columns,
@@ -272,7 +272,7 @@ def test_multiclass_identity_holds_for_every_class() -> None:
 
 def test_focus_classes_can_be_selected_explicitly() -> None:
     table, labels = _multiclass_table(n_classes=3)
-    result = cluster_attribution_summary(
+    result = niche_attribution_summary(
         table,
         labels,
         attention_columns=[f"attention_c{c}" for c in range(3)],
@@ -283,7 +283,7 @@ def test_focus_classes_can_be_selected_explicitly() -> None:
     assert {k for _, k in result.per_cluster.index} == {2}
 
     with pytest.raises(ValueError, match="out of range"):
-        cluster_attribution_summary(
+        niche_attribution_summary(
             table,
             labels,
             attention_columns=[f"attention_c{c}" for c in range(3)],
@@ -313,7 +313,7 @@ def test_multiclass_attention_lift_uses_the_matching_class_channel() -> None:
     table = pd.DataFrame(rows)
     labels = np.array([0 if i % per_bag == 0 else 1 for i in range(len(table))])
 
-    result = cluster_attribution_summary(
+    result = niche_attribution_summary(
         table,
         labels,
         attention_columns=["attention_c0", "attention_c1", "attention_c2"],
@@ -321,6 +321,6 @@ def test_multiclass_attention_lift_uses_the_matching_class_channel() -> None:
         n_bootstrap=0,
     )
     lift = result.per_cluster["attention_lift"]
-    # Cluster 0 is the singled-out instance: strongly lifted for class 0 only.
+    # Niche 0 is the singled-out instance: strongly lifted for class 0 only.
     assert lift.loc[(0, 0)] > 3.0
     assert lift.loc[(0, 1)] == pytest.approx(1.0, abs=1e-6)

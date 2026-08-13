@@ -15,14 +15,14 @@ def build_report_sections(bundle: ReportBundle) -> List[ReportSection]:
             metadata=bundle.metadata,
         )
     )
-    if bundle.cluster_summary is not None:
+    if bundle.niche_summary is not None:
         sections.append(
             ReportSection(
-                title="Cluster Summary",
-                description="Cluster counts and enrichment tables.",
+                title="Niche Summary",
+                description="Niche counts and enrichment tables.",
                 tables={
-                    "cluster_counts": bundle.cluster_summary.cluster_counts.to_frame(name="count"),
-                    "enrichment": bundle.cluster_summary.enrichment,
+                    "niche_counts": bundle.niche_summary.niche_counts.to_frame(name="count"),
+                    "enrichment": bundle.niche_summary.enrichment,
                 },
             )
         )

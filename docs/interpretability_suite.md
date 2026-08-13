@@ -102,7 +102,7 @@ Common optional columns:
 - `instance_attention_logits` export requires shape `(N, 1)`; multi-column attention logits are
   rejected as ambiguous.
 
-Note: `cluster_profiles` and `attention_attribution` require `comp_*` columns.
+Note: `niche_profiles` and `attention_attribution` require `comp_*` columns.
 There is no fallback to one-hot `cell_type` composition.
 
 `variance_estimator` convention (biomarker z-scoring):
@@ -245,7 +245,7 @@ Common parameters:
 
 Returns a `ClusteringResult` dataclass with:
 
-- cluster labels
+- niche labels
 - resolved parameters
 - fitted object
 
@@ -271,7 +271,7 @@ Plugin registration is per pipeline run (fresh `PluginRegistry`).
 
 Built-in plugins:
 
-- `cluster_profiles`
+- `niche_profiles`
 - `attention_attribution`
 - `neighborhood_enrichment`
 - `diff_neighborhood_enrichment`
@@ -288,7 +288,7 @@ Built-in plugins:
 - disabled by default in `plugins.enabled`
 - requires explicit `sample_value` selection (no auto-pick)
 - requires `center_x` and `center_y` coordinates in `instance_table`
-- colors nodes by pipeline `cluster_labels` context
+- colors nodes by pipeline `niche_labels` context
 - uses `spatial_table` edges filtered to selected sample nodes
 
 ## 7) Pipeline Orchestration
@@ -300,14 +300,14 @@ Workflow:
 1. Load embedding matrix from `instance_table`.
 2. Run configured reduction.
 3. Run configured clustering:
-- `cluster_on_pca=true`: cluster on PCA projection used for clustering.
-- `cluster_on_pca=false`: cluster on raw embedding columns.
-4. Build core cluster summaries.
+- `cluster_on_pca=true`: niche on PCA projection used for clustering.
+- `cluster_on_pca=false`: niche on raw embedding columns.
+4. Build core niche summaries.
 5. Execute enabled plugins in order.
 6. Persist canonical artifacts:
 - `artifacts/instance_with_clusters.csv`
 - `artifacts/reduction.csv` (if enabled)
-- `artifacts/cluster_labels.csv` (if enabled)
+- `artifacts/niche_labels.csv` (if enabled)
 - `artifacts/pipeline_summary.json`
 7. Return `ReportBundle`.
 
@@ -316,11 +316,11 @@ Workflow:
 - populated with clustering PCA result when `cluster_on_pca=true`
 - `None` when clustering runs on raw embeddings
 
-## 8) Cluster Transfer Workflow (Library API)
+## 8) Niche Transfer Workflow (Library API)
 
-Notebook-parity cluster transfer is available as a library workflow:
+Notebook-parity niche transfer is available as a library workflow:
 
-1. Fit transfer bundle on a source interpretability run (cluster labels + clustering feature space).
+1. Fit transfer bundle on a source interpretability run (niche labels + clustering feature space).
 2. Persist bundle (`.joblib`) for deterministic reuse.
 3. Apply bundle to a query `instance_table` to obtain transferred labels.
 
@@ -387,7 +387,7 @@ view = prepare_tissue_graph_view(
     id_column="instance_id",
     x_column="center_x",
     y_column="center_y",
-    label_column="cluster_label",
+    label_column="niche_label",
 )
 fig = build_tissue_graph_figure(view, show_edges=True)
 fig.show()
@@ -448,10 +448,10 @@ With spatial plugins:
 grass-mil-report \
   data.instance_table=/abs/path/instance_table.csv \
   data.spatial_table=/abs/path/spatial_table.csv \
-  plugins.enabled="[cluster_profiles,attention_attribution,neighborhood_enrichment,diff_neighborhood_enrichment,filtration_curves]"
+  plugins.enabled="[niche_profiles,attention_attribution,neighborhood_enrichment,diff_neighborhood_enrichment,filtration_curves]"
 ```
 
-Render a single selected tissue graph colored by cluster labels:
+Render a single selected tissue graph colored by niche labels:
 
 ```bash
 grass-mil-report \
@@ -616,3 +616,26 @@ Fix:
 - prediction/inference payload generation: `docs/inference_utility_suite.md`
 - training/eval workflows: `docs/workflows_train_infer.md`
 - extension instructions: `docs/interpretability_extension_guide.md`
+
+## Niche vocabulary
+
+Outputs use the language a biologist reads, not the algorithm's:
+
+- The groups are **niches** — recurring local tissue neighbourhoods — not
+  "clusters". Tables carry a `niche_label` column and figures name niches
+  `Niche 3`, keeping the numeric id so a figure joins back to the table.
+- Label `-1` is **Background**, not "noise". Density-based clustering assigns it
+  to neighbourhoods that fit no dense group; those are usually transitional or
+  sparsely populated tissue, which is a meaningful category rather than a
+  failure. Set `skip_background: false` on the per-niche plugins to include it.
+- Niches are ordered by a **dendrogram over their cellular composition**
+  (`core/niches.py::order_niches_by_composition`), so compositionally similar
+  niches sit next to each other in every table and heatmap instead of appearing
+  in arbitrary label order. Background is pinned last: it is a catch-all, and
+  letting it join the tree distorts the ordering. Correlation distance is the
+  default, so two niches with the same makeup at different densities read as
+  similar. Pass `order_by_composition=False` for plain numeric order.
+
+The *algorithm* is still clustering, so `run_clustering`, `ClusteringResult` and
+the sklearn parameters (`n_clusters`, `min_cluster_size`) keep their names. The
+distinction is deliberate: those are the method, the niches are the result.

@@ -9,7 +9,7 @@ import pandas as pd
 from sklearn.neighbors import KNeighborsClassifier
 
 from grass_mil.interpretability.contracts import (
-    ClusterTransferBundle,
+    NicheTransferBundle,
     InterpretabilityDataset,
     ReportBundle,
 )
@@ -26,55 +26,53 @@ def fit_cluster_transfer_from_report_bundle(
     n_neighbors: int = 15,
     weights: str = "uniform",
     metric: str = "minkowski",
-) -> ClusterTransferBundle:
+) -> NicheTransferBundle:
     if report_bundle.clustering is None:
-        raise ValueError(
-            "Cannot fit cluster transfer: report bundle is missing clustering result."
-        )
+        raise ValueError("Cannot fit niche transfer: report bundle is missing clustering result.")
 
     emb_set = extract_embedding_set(dataset, embedding_prefixes=tuple(embedding_prefixes))
     labels = np.asarray(report_bundle.clustering.labels)
     if labels.ndim != 1:
-        raise ValueError("Cannot fit cluster transfer: clustering labels must be 1D.")
+        raise ValueError("Cannot fit niche transfer: clustering labels must be 1D.")
     if emb_set.matrix.shape[0] != labels.shape[0]:
         raise ValueError(
-            "Cannot fit cluster transfer: embedding rows and clustering labels length mismatch."
+            "Cannot fit niche transfer: embedding rows and clustering labels length mismatch."
         )
     if emb_set.matrix.shape[0] == 0:
-        raise ValueError("Cannot fit cluster transfer on an empty instance table.")
+        raise ValueError("Cannot fit niche transfer on an empty instance table.")
 
     n_neighbors = int(n_neighbors)
     if n_neighbors < 1:
-        raise ValueError("Cannot fit cluster transfer: n_neighbors must be >= 1.")
+        raise ValueError("Cannot fit niche transfer: n_neighbors must be >= 1.")
     if n_neighbors > int(labels.shape[0]):
         raise ValueError(
-            "Cannot fit cluster transfer: n_neighbors cannot exceed number of training rows."
+            "Cannot fit niche transfer: n_neighbors cannot exceed number of training rows."
         )
 
     cluster_on_pca = bool(report_bundle.metadata.get("cluster_on_pca", False))
     pca_model: Any = None
     train_features = np.asarray(emb_set.matrix)
     if cluster_on_pca:
-        if report_bundle.cluster_feature_reduction is None:
+        if report_bundle.niche_feature_reduction is None:
             raise ValueError(
-                "Cannot fit cluster transfer: cluster_on_pca=true but "
-                "report bundle is missing cluster_feature_reduction."
+                "Cannot fit niche transfer: cluster_on_pca=true but "
+                "report bundle is missing niche_feature_reduction."
             )
-        pca_result = report_bundle.cluster_feature_reduction
+        pca_result = report_bundle.niche_feature_reduction
         pca_model = pca_result.fitted_object
         if pca_model is None or not hasattr(pca_model, "transform"):
             raise ValueError(
-                "Cannot fit cluster transfer: cluster_feature_reduction fitted object "
+                "Cannot fit niche transfer: niche_feature_reduction fitted object "
                 "is missing a transform(...) method."
             )
         train_features = np.asarray(pca_result.embedding)
         if train_features.ndim != 2:
             raise ValueError(
-                "Cannot fit cluster transfer: cluster_feature_reduction embedding must be 2D."
+                "Cannot fit niche transfer: niche_feature_reduction embedding must be 2D."
             )
         if train_features.shape[0] != labels.shape[0]:
             raise ValueError(
-                "Cannot fit cluster transfer: cluster_feature_reduction rows and clustering "
+                "Cannot fit niche transfer: niche_feature_reduction rows and clustering "
                 "labels length mismatch."
             )
 
@@ -90,7 +88,7 @@ def fit_cluster_transfer_from_report_bundle(
         "cluster_on_pca": bool(cluster_on_pca),
         "cluster_method": report_bundle.clustering.method,
     }
-    return ClusterTransferBundle(
+    return NicheTransferBundle(
         embedding_columns=list(emb_set.feature_columns),
         id_column=str(dataset.id_column),
         cluster_on_pca=cluster_on_pca,
@@ -102,7 +100,7 @@ def fit_cluster_transfer_from_report_bundle(
 
 
 def apply_cluster_transfer(
-    bundle: ClusterTransferBundle,
+    bundle: NicheTransferBundle,
     instance_table: pd.DataFrame,
     *,
     id_column: str | None = None,
@@ -110,13 +108,11 @@ def apply_cluster_transfer(
     output_confidence_column: str = "transfer_confidence",
 ) -> pd.DataFrame:
     if len(instance_table) == 0:
-        raise ValueError("Cannot apply cluster transfer to an empty instance table.")
+        raise ValueError("Cannot apply niche transfer to an empty instance table.")
 
     resolved_id_column = str(id_column or bundle.id_column)
     if resolved_id_column not in instance_table.columns:
-        raise ValueError(
-            f"Cannot apply cluster transfer: missing id column {resolved_id_column!r}."
-        )
+        raise ValueError(f"Cannot apply niche transfer: missing id column {resolved_id_column!r}.")
 
     missing_embeddings = [
         col for col in bundle.embedding_columns if str(col) not in instance_table.columns
@@ -124,13 +120,13 @@ def apply_cluster_transfer(
     if missing_embeddings:
         preview = ", ".join(sorted(missing_embeddings)[:8])
         raise ValueError(
-            "Cannot apply cluster transfer: instance table is missing embedding columns: "
+            "Cannot apply niche transfer: instance table is missing embedding columns: "
             f"{preview}."
         )
 
     if bundle.knn_model is None or not hasattr(bundle.knn_model, "predict"):
         raise ValueError(
-            "Cannot apply cluster transfer: transfer bundle is missing a fitted kNN model."
+            "Cannot apply niche transfer: transfer bundle is missing a fitted kNN model."
         )
 
     query_matrix = instance_table[bundle.embedding_columns].to_numpy(dtype=float)
@@ -138,7 +134,7 @@ def apply_cluster_transfer(
     if bundle.pca_model is not None:
         if not hasattr(bundle.pca_model, "transform"):
             raise ValueError(
-                "Cannot apply cluster transfer: transfer bundle PCA model is missing "
+                "Cannot apply niche transfer: transfer bundle PCA model is missing "
                 "transform(...)."
             )
         query_features = np.asarray(bundle.pca_model.transform(query_features))
@@ -159,7 +155,7 @@ def apply_cluster_transfer(
     )
 
 
-def save_cluster_transfer_bundle(bundle: ClusterTransferBundle, path: str | Path) -> None:
+def save_cluster_transfer_bundle(bundle: NicheTransferBundle, path: str | Path) -> None:
     output_path = Path(path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -175,7 +171,7 @@ def save_cluster_transfer_bundle(bundle: ClusterTransferBundle, path: str | Path
     joblib.dump(payload, output_path)
 
 
-def load_cluster_transfer_bundle(path: str | Path) -> ClusterTransferBundle:
+def load_cluster_transfer_bundle(path: str | Path) -> NicheTransferBundle:
     payload = joblib.load(Path(path))
     if not isinstance(payload, dict):
         raise ValueError("Invalid transfer bundle format: expected dictionary payload.")
@@ -210,7 +206,7 @@ def load_cluster_transfer_bundle(path: str | Path) -> ClusterTransferBundle:
     if knn_model is None or not hasattr(knn_model, "predict"):
         raise ValueError("Invalid transfer bundle format: missing or invalid knn_model.")
 
-    return ClusterTransferBundle(
+    return NicheTransferBundle(
         embedding_columns=[str(col) for col in payload["embedding_columns"]],
         id_column=str(payload["id_column"]),
         cluster_on_pca=bool(payload["cluster_on_pca"]),

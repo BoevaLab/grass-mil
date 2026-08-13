@@ -11,8 +11,8 @@ import pandas as pd
 import pytest
 
 from grass_mil.interpretability.core.agreement import (
-    cluster_jaccard_matrix,
-    compute_cluster_agreement,
+    niche_jaccard_matrix,
+    compute_niche_agreement,
 )
 from grass_mil.interpretability.tier2.autocorrelation import (
     diff_morans_i_vs_reference,
@@ -65,7 +65,7 @@ def _autocorrelation_tables(n_per_group: int = 30):
             node = f"{group}_{i}"
             # Group a carries a smooth gradient; group b alternates.
             value = float(i) if group == "a" else float(i % 2)
-            rows.append({"instance_id": node, "cluster_label": group, "feature": value})
+            rows.append({"instance_id": node, "niche_label": group, "feature": value})
             if i + 1 < n_per_group:
                 edges.append({"source_id": node, "target_id": f"{group}_{i + 1}"})
     return pd.DataFrame(rows), pd.DataFrame(edges)
@@ -77,7 +77,7 @@ def test_run_morans_i_separates_smooth_from_alternating_groups() -> None:
         nodes,
         edges,
         feature_columns=["feature"],
-        group_column="cluster_label",
+        group_column="niche_label",
         n_perms=50,
         random_state=0,
     )
@@ -93,25 +93,25 @@ def test_run_morans_i_skips_groups_below_the_size_threshold() -> None:
     nodes = pd.DataFrame(
         {
             "instance_id": ["n0", "n1", "n2"],
-            "cluster_label": ["small", "small", "other"],
+            "niche_label": ["small", "small", "other"],
             "feature": [1.0, 2.0, 3.0],
         }
     )
     edges = pd.DataFrame({"source_id": ["n0"], "target_id": ["n1"]})
     result = run_morans_i(
-        nodes, edges, feature_columns=["feature"], group_column="cluster_label", n_perms=5
+        nodes, edges, feature_columns=["feature"], group_column="niche_label", n_perms=5
     )
     assert np.isnan(result.statistic.loc["small", "feature"])
 
 
 def test_diff_morans_i_reports_a_z_statistic_against_the_reference() -> None:
     nodes, edges = _autocorrelation_tables()
-    nodes["cluster_label"] = nodes["cluster_label"].map({"a": 0, "b": -1})
+    nodes["niche_label"] = nodes["niche_label"].map({"a": 0, "b": -1})
     result = run_morans_i(
         nodes,
         edges,
         feature_columns=["feature"],
-        group_column="cluster_label",
+        group_column="niche_label",
         n_perms=50,
         random_state=0,
     )
@@ -227,36 +227,36 @@ def test_cluster_agreement_is_one_for_identical_and_near_zero_for_independent() 
     labels = rng.integers(0, 4, size=300)
     independent = rng.integers(0, 4, size=300)
 
-    result = compute_cluster_agreement(
+    result = compute_niche_agreement(
         {"encoder": labels, "same": labels.copy(), "random": independent}
     )
     metrics = result.pairwise_metrics
     assert metrics.loc[("encoder", "same"), "ari"] == pytest.approx(1.0)
     assert abs(metrics.loc[("encoder", "random"), "ari"]) < 0.1
     # A relabelled partition IS the same partition: these indices are
-    # chance-corrected and invariant to how the clusters are numbered.
-    relabelled = compute_cluster_agreement({"a": labels, "b": (labels + 1) % 4})
+    # chance-corrected and invariant to how the niches are numbered.
+    relabelled = compute_niche_agreement({"a": labels, "b": (labels + 1) % 4})
     assert relabelled.pairwise_metrics.loc[("a", "b"), "ari"] == pytest.approx(1.0)
 
 
 def test_cluster_agreement_validates_its_inputs() -> None:
     with pytest.raises(ValueError, match="at least two labelings"):
-        compute_cluster_agreement({"only": [0, 1, 2]})
+        compute_niche_agreement({"only": [0, 1, 2]})
     with pytest.raises(ValueError, match="same instances"):
-        compute_cluster_agreement({"a": [0, 1, 2], "b": [0, 1]})
+        compute_niche_agreement({"a": [0, 1, 2], "b": [0, 1]})
     with pytest.raises(ValueError, match="Unsupported agreement metric"):
-        compute_cluster_agreement({"a": [0, 1], "b": [1, 0]}, metrics=["nonsense"])
+        compute_niche_agreement({"a": [0, 1], "b": [1, 0]}, metrics=["nonsense"])
 
 
 def test_cluster_jaccard_matrix_reports_overlap_fractions() -> None:
     a = np.array([0, 0, 1, 1])
     b = np.array([0, 1, 1, 1])
-    matrix = cluster_jaccard_matrix(a, b)
+    matrix = niche_jaccard_matrix(a, b)
 
-    # Cluster 0 of `a` = {0,1}; cluster 1 of `b` = {1,2,3}; overlap {1}, union 4.
+    # Niche 0 of `a` = {0,1}; niche 1 of `b` = {1,2,3}; overlap {1}, union 4.
     assert matrix.loc[0, 1] == pytest.approx(0.25)
-    # Cluster 1 of `a` = {2,3} is fully inside cluster 1 of `b`.
+    # Niche 1 of `a` = {2,3} is fully inside niche 1 of `b`.
     assert matrix.loc[1, 1] == pytest.approx(2 / 3)
 
     with pytest.raises(ValueError, match="must align"):
-        cluster_jaccard_matrix(np.array([0, 1]), np.array([0, 1, 2]))
+        niche_jaccard_matrix(np.array([0, 1]), np.array([0, 1, 2]))

@@ -18,7 +18,7 @@ def _sample_tables() -> tuple[pd.DataFrame, pd.DataFrame]:
             "sample_id": ["sx", "sx", "sx", "sy", "sy"],
             "center_x": [0.0, 1.0, 2.0, 10.0, 11.0],
             "center_y": [0.0, 1.0, 0.5, 10.0, 11.0],
-            "cluster_label": [0, 1, 1, 0, 2],
+            "niche_label": [0, 1, 1, 0, 2],
         }
     )
     spatial_table = pd.DataFrame(
@@ -41,7 +41,7 @@ def test_prepare_tissue_graph_view_happy_path_filters_to_selected_sample() -> No
         id_column="instance_id",
         x_column="center_x",
         y_column="center_y",
-        label_column="cluster_label",
+        label_column="niche_label",
     )
 
     assert len(view.nodes) == 3
@@ -52,7 +52,7 @@ def test_prepare_tissue_graph_view_happy_path_filters_to_selected_sample() -> No
     assert view.metadata["sample_value"] == "sx"
     assert view.metadata["node_count"] == 3
     assert view.metadata["edge_count"] == 2
-    assert view.metadata["cluster_counts"] == {"0": 1, "1": 2}
+    assert view.metadata["niche_counts"] == {"0": 1, "1": 2}
 
 
 def test_prepare_tissue_graph_view_fails_for_missing_coords() -> None:
@@ -66,7 +66,7 @@ def test_prepare_tissue_graph_view_fails_for_missing_coords() -> None:
             id_column="instance_id",
             x_column="center_x",
             y_column="center_y",
-            label_column="cluster_label",
+            label_column="niche_label",
         )
 
 
