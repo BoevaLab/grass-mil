@@ -1,12 +1,24 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, Optional
 
 import torch
 from torch.utils.data import DataLoader as TorchDataLoader
 from torch.utils.data import Dataset
+
+from grass_mil.data.components.ego_radius import (
+    EgoRadiusConfig,
+    EgoRadiusCutoff,
+    resolve_ego_radius,
+)
+from grass_mil.data.components.seed_sampling import (
+    InteriorSeedConfig,
+    InteriorSeedIndexCache,
+    cache_key_for_unit,
+    compute_interior_seed_indices,
+)
 
 try:
     from torch_geometric.data import Batch, Data
@@ -54,6 +66,8 @@ class RuntimeShadowConfig:
     min_weight: float = 1e-6
     subsample_fraction: float = 1.0
     subsample_seed: Optional[int] = None
+    interior_seeds: InteriorSeedConfig = field(default_factory=InteriorSeedConfig)
+    ego_radius: EgoRadiusConfig = field(default_factory=EgoRadiusConfig)
 
     @classmethod
     def from_dict(cls, cfg: Optional[Dict[str, Any]]) -> "RuntimeShadowConfig":
@@ -97,11 +111,18 @@ class RuntimeShadowConfig:
             min_weight=min_weight,
             subsample_fraction=subsample_fraction,
             subsample_seed=subsample_seed,
+            interior_seeds=InteriorSeedConfig.from_dict(cfg.get("interior_seeds")),
+            ego_radius=EgoRadiusConfig.from_dict(cfg.get("ego_radius")),
         )
 
 
 def _build_weighted_node_idx(
-    data: Data, *, property_name: str, weight_mode: str, min_weight: float
+    data: Data,
+    *,
+    property_name: str,
+    weight_mode: str,
+    min_weight: float,
+    allowed_indices: Optional[torch.Tensor] = None,
 ) -> Optional[torch.Tensor]:
     if not hasattr(data, "categorical_codes") or not hasattr(
         data, "categorical_slices"
@@ -129,6 +150,15 @@ def _build_weighted_node_idx(
     if node_labels.numel() == 0:
         return None
 
+    # Restrict the candidate pool *before* weighting, so class frequencies are
+    # computed over the eligible nodes rather than the whole graph.
+    pool = None
+    if allowed_indices is not None:
+        pool = allowed_indices.view(-1).long()
+        if pool.numel() == 0:
+            return None
+        node_labels = node_labels[pool]
+
     unique_labels, inverse, counts = torch.unique(
         node_labels, sorted=False, return_inverse=True, return_counts=True
     )
@@ -155,11 +185,66 @@ def _build_weighted_node_idx(
         return None
 
     num_samples = int(getattr(data, "num_nodes", node_labels.numel()))
+    if pool is not None:
+        num_samples = int(pool.numel())
     if num_samples <= 0:
         num_samples = int(node_labels.numel())
     if num_samples <= 0:
         return None
-    return torch.multinomial(probs, num_samples=num_samples, replacement=True).long()
+    sampled = torch.multinomial(probs, num_samples=num_samples, replacement=True).long()
+    if pool is not None:
+        # `sampled` indexes into the restricted pool; map back to node ids.
+        return pool[sampled]
+    return sampled
+
+
+def _resolve_interior_indices(
+    data: Data,
+    runtime: "RuntimeShadowConfig",
+    cache: Optional[InteriorSeedIndexCache] = None,
+) -> Optional[torch.Tensor]:
+    """Interior seed pool for one graph unit, or None when unrestricted."""
+    if not runtime.interior_seeds.enabled:
+        return None
+    hops = (
+        int(runtime.interior_seeds.n_hops)
+        if runtime.interior_seeds.n_hops is not None
+        else int(runtime.depth)
+    )
+    key = cache_key_for_unit(data, n_hops=hops)
+    if cache is not None and key:
+        cached = cache.load(key)
+        if cached is not None:
+            return torch.from_numpy(cached).long()
+    indices = compute_interior_seed_indices(data, runtime.interior_seeds, n_hops=hops)
+    if cache is not None and key:
+        cache.store(key, indices)
+    return torch.from_numpy(indices).long()
+
+
+def _compose_ego_radius_transform(
+    transform: Optional[Callable[[Data], Data]],
+    runtime: "RuntimeShadowConfig",
+) -> Optional[Callable[[Data], Data]]:
+    """Append the ego-radius cutoff after any user transform."""
+    if not runtime.ego_radius.enabled:
+        return transform
+    radius = resolve_ego_radius(
+        int(runtime.depth),
+        radius_per_hop=runtime.ego_radius.radius_per_hop,
+        radius_offset=runtime.ego_radius.radius_offset,
+    )
+    cutoff = EgoRadiusCutoff(
+        radius=radius,
+        keep_root_component=runtime.ego_radius.keep_root_component,
+    )
+    if transform is None:
+        return cutoff
+
+    def _composed(data: Data) -> Data:
+        return cutoff(transform(data))
+
+    return _composed
 
 
 def _resolve_root_candidates(data: Data, node_idx: Optional[torch.Tensor]) -> torch.Tensor:
@@ -245,6 +330,11 @@ class _RuntimeUnitShadowDatasetLoader:
         self.pin_memory = pin_memory
         self.shuffle = shuffle
         self.kwargs = kwargs
+        self._interior_cache = (
+            InteriorSeedIndexCache(runtime.interior_seeds.cache_dir)
+            if runtime.interior_seeds.enabled
+            else None
+        )
 
     def __len__(self) -> int:
         if len(self.dataset) == 0:
@@ -257,12 +347,18 @@ class _RuntimeUnitShadowDatasetLoader:
         for idx in range(len(self.dataset)):
             unit_data = self.dataset[idx]
             effective_node_idx = self.runtime.node_idx
+            interior_idx = _resolve_interior_indices(
+                unit_data, self.runtime, self._interior_cache
+            )
+            if interior_idx is not None:
+                effective_node_idx = interior_idx
             if self.runtime.proportional_root_sampling:
                 computed_node_idx = _build_weighted_node_idx(
                     unit_data,
                     property_name=self.runtime.property_name,
                     weight_mode=self.runtime.weight_mode,
                     min_weight=self.runtime.min_weight,
+                    allowed_indices=interior_idx,
                 )
                 if computed_node_idx is not None:
                     effective_node_idx = computed_node_idx
@@ -292,12 +388,18 @@ class _RuntimeUnitShadowDatasetLoader:
         for idx in indices.tolist():
             unit_data = self.dataset[idx]
             effective_node_idx = self.runtime.node_idx
+            interior_idx = _resolve_interior_indices(
+                unit_data, self.runtime, self._interior_cache
+            )
+            if interior_idx is not None:
+                effective_node_idx = interior_idx
             if self.runtime.proportional_root_sampling:
                 computed_node_idx = _build_weighted_node_idx(
                     unit_data,
                     property_name=self.runtime.property_name,
                     weight_mode=self.runtime.weight_mode,
                     min_weight=self.runtime.min_weight,
+                    allowed_indices=interior_idx,
                 )
                 if computed_node_idx is not None:
                     effective_node_idx = computed_node_idx
@@ -326,7 +428,9 @@ class _RuntimeUnitShadowDatasetLoader:
                 node_idx=effective_root_candidates,
                 replace=bool(self.runtime.replace),
                 shuffle=bool(self.runtime.shuffle_subgraphs and self.shuffle),
-                transform=self.kwargs.get("transform"),
+                transform=_compose_ego_radius_transform(
+                    self.kwargs.get("transform"), self.runtime
+                ),
                 **unit_loader_kwargs,
             )
             for sub_batch in loader:

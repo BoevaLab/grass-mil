@@ -614,3 +614,109 @@ def test_node_level_codes_batch_along_the_node_dimension():
         batch.categorical_codes.view(-1),
         torch.tensor([0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6]),
     )
+
+
+def _dense_grid_graph(side: int = 9, spacing: float = 10.0):
+    """Grid graph with coordinates, for interior/radius sampler wiring."""
+    import numpy as np
+    from torch_geometric.data import Data
+
+    xs, ys = np.meshgrid(np.arange(side), np.arange(side), indexing="ij")
+    coords = np.column_stack([xs.ravel(), ys.ravel()]).astype(float) * spacing
+
+    edges = []
+    for i in range(side):
+        for j in range(side):
+            node = i * side + j
+            if i + 1 < side:
+                edges.append((node, (i + 1) * side + j))
+            if j + 1 < side:
+                edges.append((node, i * side + (j + 1)))
+    edge_index = torch.tensor(np.array(edges).T, dtype=torch.long)
+    n_nodes = side * side
+    data = Data(
+        x=torch.randn(n_nodes, 4),
+        edge_index=edge_index,
+        edge_attr=torch.rand(edge_index.size(1), 2),
+    )
+    data.pos = torch.tensor(coords, dtype=torch.float32)
+    data.num_nodes = n_nodes
+    data.sample_id = "s0"
+    data.region_id = "r0"
+    data.patch_id = "p0"
+    return data
+
+
+def test_runtime_interior_seeds_restrict_roots_to_the_tissue_interior():
+    pytest.importorskip("torch_geometric")
+    from grass_mil.data.components.samplers import (
+        RuntimeShadowConfig,
+        _resolve_interior_indices,
+    )
+
+    data = _dense_grid_graph(side=9)
+    runtime = RuntimeShadowConfig.from_dict(
+        {"enabled": True, "depth": 1, "interior_seeds": {"enabled": True}}
+    )
+    interior = _resolve_interior_indices(data, runtime)
+    assert interior is not None
+    assert int(interior.numel()) < data.num_nodes
+
+    # No seed may sit on the outer ring of the grid.
+    coords = data.pos.numpy()
+    selected = coords[interior.numpy()]
+    assert selected[:, 0].min() > coords[:, 0].min()
+    assert selected[:, 0].max() < coords[:, 0].max()
+
+    disabled = RuntimeShadowConfig.from_dict({"enabled": True, "depth": 1})
+    assert _resolve_interior_indices(data, disabled) is None
+
+
+def test_runtime_ego_radius_shrinks_sampled_subgraphs():
+    pytest.importorskip("torch_geometric")
+    try:
+        import torch_sparse  # noqa: F401
+    except Exception:
+        pytest.skip("torch_sparse is not available")
+
+    from grass_mil.data.components.samplers import get_sampler_strategy
+
+    data = _dense_grid_graph(side=9, spacing=10.0)
+
+    def _subgraph_sizes(runtime):
+        strategy = get_sampler_strategy(
+            {"name": "shadow_custom", "kwargs": {}, "runtime": runtime}
+        )
+        loader = strategy.build_dataset_loader(
+            dataset=[data],
+            batch_size=1,
+            num_workers=0,
+            pin_memory=False,
+            shuffle=False,
+            transform=lambda d: d,
+        )
+        batch = next(iter(loader))
+        return int(batch.x.size(0))
+
+    base_runtime = {
+        "enabled": True,
+        "depth": 3,
+        "num_neighbors": 8,
+        "subgraph_batch_size": 4,
+        "shuffle_subgraphs": False,
+        "proportional_root_sampling": False,
+    }
+    unbounded = _subgraph_sizes(base_runtime)
+    bounded = _subgraph_sizes(
+        {
+            **base_runtime,
+            # r = 5*3 + 0 = 15, i.e. 1.5 grid steps: anything two or more
+            # steps from the root is cut even though it is within 3 hops.
+            "ego_radius": {
+                "enabled": True,
+                "radius_per_hop": 5.0,
+                "radius_offset": 0.0,
+            },
+        }
+    )
+    assert bounded < unbounded
