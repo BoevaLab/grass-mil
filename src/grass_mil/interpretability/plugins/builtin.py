@@ -11,17 +11,24 @@ from grass_mil.interpretability.contracts import (
     PluginResult,
     ReportSection,
 )
+from grass_mil.interpretability.core.agreement import compute_cluster_agreement
+from grass_mil.interpretability.core.attribution import cluster_attribution_summary
 from grass_mil.interpretability.core.biomarkers import (
     cluster_attention_summary,
     cluster_biomarker_summary,
 )
 from grass_mil.interpretability.plugins.base import InterpretabilityPlugin, PluginContext
 from grass_mil.interpretability.plugins.registry import PluginRegistry, create_plugin_registry
+from grass_mil.interpretability.tier2.autocorrelation import (
+    diff_morans_i_vs_reference,
+    run_morans_i,
+)
 from grass_mil.interpretability.tier2.filtration import compute_filtration_curves
 from grass_mil.interpretability.tier2.neighborhood import (
     run_diff_neighborhood_enrichment,
     run_neighborhood_enrichment,
 )
+from grass_mil.interpretability.tier2.ripley import aggregate_ripley
 from grass_mil.interpretability.tier2.tissue_graph import prepare_tissue_graph_view
 
 
@@ -430,6 +437,236 @@ class PerClusterCellTypeEnrichmentPlugin(InterpretabilityPlugin):
         return PluginResult(name=self.name, payload=payload, sections=sections)
 
 
+def _resolve_columns(table: pd.DataFrame, prefix: str, explicit) -> List[str]:
+    if explicit:
+        return [str(c) for c in explicit]
+    return [c for c in table.columns if str(c).startswith(prefix)]
+
+
+@dataclass
+class MarginAttributionPlugin(InterpretabilityPlugin):
+    """Exact additive attribution of bag decisions to instance clusters.
+
+    Requires per-class attention columns, which only exist when the head emits
+    one attention channel per class.
+    """
+
+    name: str = "margin_attribution"
+
+    def required_inputs(self) -> List[str]:
+        return ["cluster_labels"]
+
+    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
+        table = dataset.instance_table
+        labels = np.asarray(context.state["cluster_labels"])
+
+        attention_columns = _resolve_columns(
+            table,
+            str(params.get("attention_prefix", "attention_c")),
+            params.get("attention_columns"),
+        )
+        if not attention_columns:
+            attention_columns = [str(params.get("attention_column", "attention"))]
+        logit_columns = _resolve_columns(
+            table, str(params.get("logit_prefix", "logit_")), params.get("logit_columns")
+        )
+        if not logit_columns:
+            raise ValueError(
+                "Margin attribution needs instance logit columns (default prefix 'logit_'). "
+                "Enable the interpretability export in the predict step."
+            )
+
+        result = cluster_attribution_summary(
+            table,
+            labels,
+            attention_columns=attention_columns,
+            logit_columns=logit_columns,
+            bag_id_column=str(params.get("bag_id_column", dataset.bag_id_column)),
+            logit_bias=params.get("logit_bias"),
+            n_bootstrap=int(params.get("n_bootstrap", 200)),
+            random_state=int(params.get("random_state", 0)),
+            margin_eps=float(params.get("margin_eps", 1e-6)),
+        )
+        payload = {
+            "per_cluster": result.per_cluster,
+            "identity_residual": result.identity_residual,
+        }
+        sections = [
+            ReportSection(
+                title="Margin Attribution",
+                description=(
+                    "Exact additive contributions M[i,c] = A[i,c] * l[i,c], summarised per "
+                    "cluster with percentile bootstrap intervals over regions."
+                ),
+                tables={"per_cluster": result.per_cluster},
+            )
+        ]
+        return PluginResult(name=self.name, payload=payload, sections=sections)
+
+
+@dataclass
+class MoransIPlugin(InterpretabilityPlugin):
+    """Spatial autocorrelation per cluster, with a permutation null."""
+
+    name: str = "morans_i"
+
+    def required_inputs(self) -> List[str]:
+        return ["spatial_table", "cluster_labels"]
+
+    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
+        if dataset.spatial_table is None:
+            raise ValueError("Moran's I requires a spatial table.")
+        table = dataset.instance_table.copy()
+        cluster_column = str(params.get("cluster_column", "cluster_label"))
+        table[cluster_column] = np.asarray(context.state["cluster_labels"])
+
+        feature_columns = _resolve_columns(
+            table,
+            str(params.get("feature_prefix", "comp_")),
+            params.get("feature_columns"),
+        )
+        if not feature_columns:
+            raise ValueError("Moran's I found no feature columns to evaluate.")
+
+        result = run_morans_i(
+            table,
+            dataset.spatial_table,
+            feature_columns=feature_columns,
+            group_column=cluster_column,
+            id_column=str(params.get("id_column", dataset.id_column)),
+            n_perms=int(params.get("n_perms", 100)),
+            random_state=int(params.get("random_state", 0)),
+            min_nodes=int(params.get("min_nodes", 3)),
+        )
+        payload: Dict[str, Any] = {
+            "statistic": result.statistic,
+            "pvalue": result.pvalue,
+            "qvalue": result.qvalue,
+            "n_nodes": result.n_nodes,
+        }
+        tables = {"morans_i": result.statistic, "qvalue": result.qvalue}
+
+        reference = params.get("reference_group", -1)
+        if reference in result.statistic.index:
+            differential = diff_morans_i_vs_reference(result, reference_group=reference)
+            payload["differential_z"] = differential
+            tables["differential_z"] = differential
+
+        sections = [
+            ReportSection(
+                title="Spatial Autocorrelation (Moran's I)",
+                description=(
+                    "Global Moran's I per cluster over the instance graph, with a "
+                    "permutation null and BH-FDR adjustment."
+                ),
+                tables=tables,
+            )
+        ]
+        return PluginResult(name=self.name, payload=payload, sections=sections)
+
+
+@dataclass
+class RipleyPlugin(InterpretabilityPlugin):
+    """Centred cross-L curves over instance centroids."""
+
+    name: str = "ripley"
+
+    def required_inputs(self) -> List[str]:
+        return ["cluster_labels"]
+
+    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
+        table = dataset.instance_table.copy()
+        label_column = str(params.get("label_column", "cluster_label"))
+        if label_column == "cluster_label":
+            table[label_column] = np.asarray(context.state["cluster_labels"])
+
+        pairs = params.get("pairs")
+        if pairs is not None:
+            pairs = [(str(a), str(b)) for a, b in pairs]
+
+        result = aggregate_ripley(
+            table,
+            label_column=label_column,
+            group_column=params.get("group_column"),
+            x_column=str(params.get("x_column", "center_x")),
+            y_column=str(params.get("y_column", "center_y")),
+            pairs=pairs,
+            n_radii=int(params.get("n_radii", 50)),
+            max_fraction=float(params.get("max_fraction", 0.25)),
+            min_count=int(params.get("min_count", 5)),
+            radius_source=str(params.get("radius_source", "median")),
+        )
+        curves = result.to_frame()
+        payload = {
+            "radii": result.radii,
+            "curves": curves,
+            "n_groups": result.n_groups,
+        }
+        sections = [
+            ReportSection(
+                title="Ripley Cross-L",
+                description=(
+                    "Centred cross-L, L(r) - r: zero under complete spatial randomness, "
+                    "positive under clustering, negative under regularity."
+                ),
+                tables={"cross_l": curves},
+            )
+        ]
+        return PluginResult(name=self.name, payload=payload, sections=sections)
+
+
+@dataclass
+class ClusterAgreementPlugin(InterpretabilityPlugin):
+    """Agreement between the active partition and previously stored ones.
+
+    Extra labelings are read from columns of the instance table, so a user
+    joins a prior run's cluster_labels.csv rather than re-running clustering.
+    """
+
+    name: str = "cluster_agreement"
+
+    def required_inputs(self) -> List[str]:
+        return ["cluster_labels"]
+
+    def run(self, dataset, context: PluginContext, **params: Any) -> PluginResult:
+        table = dataset.instance_table
+        labelings: Dict[str, Any] = {
+            str(params.get("active_name", "active")): np.asarray(context.state["cluster_labels"])
+        }
+        for column in params.get("label_columns", []) or []:
+            if column not in table.columns:
+                raise ValueError(
+                    f"cluster_agreement label column {column!r} is not in the instance table."
+                )
+            labelings[str(column)] = table[column].to_numpy()
+
+        if len(labelings) < 2:
+            raise ValueError(
+                "cluster_agreement needs at least one additional labeling; set "
+                "params.cluster_agreement.label_columns."
+            )
+
+        result = compute_cluster_agreement(
+            labelings,
+            metrics=tuple(params.get("metrics", ("ari", "ami", "nmi"))),
+            include_jaccard=bool(params.get("include_jaccard", True)),
+        )
+        payload = {
+            "pairwise_metrics": result.pairwise_metrics,
+            "jaccard": result.jaccard,
+        }
+        sections = [
+            ReportSection(
+                title="Cross-Space Cluster Agreement",
+                description=(
+                    "Chance-corrected agreement between partitions of the same instances."
+                ),
+                tables={"pairwise_metrics": result.pairwise_metrics.reset_index()},
+            )
+        ]
+        return PluginResult(name=self.name, payload=payload, sections=sections)
+
+
 def register_builtin_plugins(registry: PluginRegistry) -> None:
     registry.register(ClusterProfilesPlugin())
     registry.register(AttentionAttributionPlugin())
@@ -438,6 +675,10 @@ def register_builtin_plugins(registry: PluginRegistry) -> None:
     registry.register(FiltrationCurvesPlugin())
     registry.register(TissueGraphPlugin())
     registry.register(PerClusterCellTypeEnrichmentPlugin())
+    registry.register(MarginAttributionPlugin())
+    registry.register(MoransIPlugin())
+    registry.register(RipleyPlugin())
+    registry.register(ClusterAgreementPlugin())
 
 
 def create_builtin_registry() -> PluginRegistry:

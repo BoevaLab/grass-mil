@@ -29,6 +29,19 @@ class AttnNetGated(nn.Module):
         logits = self.attention_c(a * b)
         return logits, x
 
+    def head_spaces(self, x):
+        """Intermediate activations of the attention head.
+
+        ``a_pre_tanh`` is the argument of the tanh gate, before saturation. It
+        is the primary clustering space for the interpretability suite because
+        it is low-dimensional and directly upstream of the attention weights;
+        clustering the saturated output collapses the extremes together.
+        """
+        pre_tanh = self.attention_a[0](x)
+        a = self.attention_a(x)
+        b = self.attention_b(x)
+        return {"a_pre_tanh": pre_tanh, "gate_product": a * b}
+
 
 class AttnNetGatedProjected(nn.Module):
     """Projected variant of gated MIL attention network."""
@@ -58,3 +71,18 @@ class AttnNetGatedProjected(nn.Module):
         h = self.projection(x)
         logits = self.attention_c(self.attention_a(h) * self.attention_b(h))
         return logits, x
+
+    def head_spaces(self, x):
+        """Intermediate activations of the attention head.
+
+        ``a_pre_tanh`` is ``V * LeakyReLU(W_proj x)``, the argument of the tanh
+        gate. It is the primary clustering space for the interpretability
+        suite: low-dimensional, directly upstream of the attention weights, and
+        not yet collapsed by tanh saturation.
+        """
+        h = self.projection(x)
+        pre_tanh = self.attention_a[0](h)
+        return {
+            "a_pre_tanh": pre_tanh,
+            "gate_product": self.attention_a(h) * self.attention_b(h),
+        }

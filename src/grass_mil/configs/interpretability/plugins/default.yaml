@@ -40,6 +40,39 @@ params:
     n_perms: 0
     random_state: 42
     undirected: false
+  margin_attribution:
+    # Per-class attention columns, emitted when the head has one attention
+    # channel per class. Falls back to the single `attention` column.
+    attention_prefix: attention_c
+    logit_prefix: logit_
+    # Head output bias per class, removed so the margin reflects the
+    # instance-driven part of the decision. Read it from model_summary.json.
+    logit_bias: null
+    n_bootstrap: 200
+    random_state: 0
+  morans_i:
+    feature_prefix: comp_
+    n_perms: 100
+    random_state: 0
+    min_nodes: 3
+    # Contrast every cluster against this one; -1 is the HDBSCAN noise label.
+    reference_group: -1
+  ripley:
+    label_column: cluster_label
+    group_column: null
+    x_column: center_x
+    y_column: center_y
+    n_radii: 50
+    max_fraction: 0.25
+    min_count: 5
+    # median | max | first. `first` reproduces the legacy order-dependent grid.
+    radius_source: median
+  cluster_agreement:
+    active_name: active
+    # Columns holding partitions from other representation spaces, e.g. joined
+    # from a previous run's cluster_labels.csv.
+    label_columns: []
+    metrics: [ari, ami, nmi]
   tissue_graph:
     sample_column: sample_id
     sample_value: null

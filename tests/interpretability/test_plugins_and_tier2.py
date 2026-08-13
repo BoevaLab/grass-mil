@@ -884,3 +884,105 @@ def test_per_cluster_cell_type_enrichment_skips_noise_cluster() -> None:
         n_perms=0,
     )
     assert set(retained.payload["enrichment_by_cluster"]) == {"-1", "1"}
+
+
+def _attribution_dataset() -> InterpretabilityDataset:
+    """Sample dataset carrying per-class attention and instance logits."""
+    ds = _sample_dataset()
+    table = ds.instance_table.copy()
+    # Two attention channels, each normalised within its bag.
+    table["attention_c0"] = [2 / 3, 1 / 6, 1 / 6, 0.2, 0.3, 0.5]
+    table["attention_c1"] = [0.2, 0.5, 0.3, 1 / 6, 1 / 6, 2 / 3]
+    table["logit_0"] = [0.5, -0.2, 0.9, 0.1, -0.4, 0.7]
+    table["logit_1"] = [-0.3, 0.8, 0.2, 0.6, 0.1, -0.5]
+    return InterpretabilityDataset(
+        instance_table=table,
+        spatial_table=ds.spatial_table,
+        id_column=ds.id_column,
+        bag_id_column=ds.bag_id_column,
+        cell_type_column=ds.cell_type_column,
+    )
+
+
+def test_margin_attribution_plugin_reports_per_cluster_intervals() -> None:
+    registry = create_builtin_registry()
+    ds = _attribution_dataset()
+    labels = np.array([0, 0, 1, 1, 0, 1])
+
+    out = registry.get("margin_attribution").run(
+        ds, PluginContext(state={"cluster_labels": labels}), n_bootstrap=25
+    )
+    assert out.name == "margin_attribution"
+    summary = out.payload["per_cluster"]
+    assert set(summary.index) == {0, 1}
+    for column in ("margin_signed_share", "attention_lift", "prevalence"):
+        assert column in summary.columns
+        assert f"{column}_lo" in summary.columns
+
+
+def test_margin_attribution_requires_instance_logits() -> None:
+    registry = create_builtin_registry()
+    ds = _sample_dataset()  # has no logit_* columns
+    with pytest.raises(ValueError, match="instance logit columns"):
+        registry.get("margin_attribution").run(
+            ds, PluginContext(state={"cluster_labels": np.zeros(6, dtype=int)})
+        )
+
+
+def test_morans_i_plugin_runs_over_the_instance_graph() -> None:
+    registry = create_builtin_registry()
+    ds = _sample_dataset()
+    labels = np.array([0, 0, 0, 1, 1, 1])
+
+    out = registry.get("morans_i").run(
+        ds, PluginContext(state={"cluster_labels": labels}), n_perms=10, min_nodes=2
+    )
+    assert out.name == "morans_i"
+    assert set(out.payload["statistic"].index) == {0, 1}
+    assert "comp_A" in out.payload["statistic"].columns
+    assert (out.payload["qvalue"].to_numpy(dtype=float) >= 0).any()
+
+
+def test_ripley_plugin_produces_centred_curves() -> None:
+    registry = create_builtin_registry()
+    ds = _sample_dataset()
+    labels = np.array([0, 0, 1, 1, 0, 1])
+
+    out = registry.get("ripley").run(
+        ds, PluginContext(state={"cluster_labels": labels}), n_radii=6, min_count=2
+    )
+    assert out.name == "ripley"
+    curves = out.payload["curves"]
+    assert len(out.payload["radii"]) == 6
+    assert curves.shape[0] == 6
+
+
+def test_cluster_agreement_plugin_compares_stored_labelings() -> None:
+    registry = create_builtin_registry()
+    ds = _sample_dataset()
+    table = ds.instance_table.copy()
+    table["prior_labels"] = [0, 0, 0, 1, 1, 1]
+    ds = InterpretabilityDataset(
+        instance_table=table,
+        spatial_table=ds.spatial_table,
+        id_column=ds.id_column,
+        bag_id_column=ds.bag_id_column,
+        cell_type_column=ds.cell_type_column,
+    )
+
+    out = registry.get("cluster_agreement").run(
+        ds,
+        PluginContext(state={"cluster_labels": np.array([0, 0, 0, 1, 1, 1])}),
+        label_columns=["prior_labels"],
+    )
+    metrics = out.payload["pairwise_metrics"]
+    # Identical partitions agree perfectly.
+    assert metrics["ari"].iloc[0] == pytest.approx(1.0)
+
+
+def test_cluster_agreement_plugin_requires_a_second_labeling() -> None:
+    registry = create_builtin_registry()
+    with pytest.raises(ValueError, match="at least one additional labeling"):
+        registry.get("cluster_agreement").run(
+            _sample_dataset(), PluginContext(state={"cluster_labels": np.zeros(6, dtype=int)})
+        )
