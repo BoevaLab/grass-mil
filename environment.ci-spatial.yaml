@@ -19,6 +19,12 @@ dependencies:
   - pytorch=2.4.1
   - pyg=2.6.1
   - pytorch-scatter=2.1.2
+  # Prebuilt from the pyg channel. Do NOT move this to the pip section:
+  # pip has no macOS-arm64 wheel, so it builds from source, and PyTorch's
+  # own c10/util/strong_type.h specializes std::is_arithmetic, which newer
+  # libc++ (Xcode 26) rejects outright. Any pip-built torch C++ extension
+  # fails on the macOS runner for that reason.
+  - pytorch-sparse=0.6.18
   - pip:
       - lightning==2.5.6
       - pytorch-lightning==2.5.6
@@ -29,5 +35,4 @@ dependencies:
       - plotly==5.24.1
       - rootutils==1.0.7
       - shapely==2.0.6
-      - torch-sparse==0.6.18
       - sh==2.2.2
