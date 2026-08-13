@@ -486,6 +486,7 @@ class MarginAttributionPlugin(InterpretabilityPlugin):
             n_bootstrap=int(params.get("n_bootstrap", 200)),
             random_state=int(params.get("random_state", 0)),
             margin_eps=float(params.get("margin_eps", 1e-6)),
+            focus_classes=params.get("focus_classes"),
         )
         payload = {
             "per_cluster": result.per_cluster,

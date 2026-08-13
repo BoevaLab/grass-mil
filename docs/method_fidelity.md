@@ -31,7 +31,8 @@ The interpretability claim rests on one identity. If `identity_residual` is not
 
 | Quantity | Definition | Implementation | Test |
 |---|---|---|---|
-| Instance contribution | `M[i,c] = A[i,c]·(ℓ[i,c] − βc)` | `interpretability/core/attribution.py` | `test_bias_removal_shifts_the_margin_by_exactly_the_bias_term` |
+| Instance contribution | `M[i,c] = A[i,c]·(ℓ[i,c] − βc)` — bias-free attention-weighted logits | `interpretability/core/attribution.py` | `test_bias_removal_shifts_the_margin_by_exactly_the_bias_term` |
+| Margin (any C) | one-vs-rest: `m[i,c] = M[i,c] − mean(M[i,c'≠c])`; reduces to `M[i,1] − M[i,0]` when C=2 | `instance_ovr_margins` | `test_ovr_margin_reduces_to_the_binary_margin_when_c_is_two`, `test_ovr_margin_contrasts_each_class_against_the_mean_of_the_rest` |
 | Additive identity | `Σᵢ M[i,c] = L_c` | same, `identity_residual` | `test_contributions_sum_exactly_to_the_bag_logit` |
 | Attention lift | `λ = (Σ A) / prevalence`, 1 = neutral | same | `test_attention_lift_is_neutral_when_attention_matches_abundance` |
 | Uncertainty | 200-resample percentile bootstrap **over regions** | `percentile_bootstrap_ci` | `test_bootstrap_ci_brackets_the_point_estimate` |

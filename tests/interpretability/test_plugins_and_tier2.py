@@ -914,7 +914,8 @@ def test_margin_attribution_plugin_reports_per_cluster_intervals() -> None:
     )
     assert out.name == "margin_attribution"
     summary = out.payload["per_cluster"]
-    assert set(summary.index) == {0, 1}
+    # (cluster_label, class_index); a binary head summarises the positive class.
+    assert set(summary.index) == {(0, 1), (1, 1)}
     for column in ("margin_signed_share", "attention_lift", "prevalence"):
         assert column in summary.columns
         assert f"{column}_lo" in summary.columns

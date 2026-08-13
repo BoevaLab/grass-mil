@@ -11,10 +11,13 @@ approximation: it needs no baseline, no integration path, and no surrogate
 model. :func:`cluster_attribution_summary` reports ``identity_residual`` so the
 assumption is checked rather than trusted.
 
-For binary tasks the reported margin removes the head's per-class bias, so it
-reflects the instance-driven part of the decision:
+The reported margin removes the head's per-class bias, so it reflects the
+instance-driven part of the decision rather than the head's prior. It is a
+one-vs-rest contrast, which for a binary head is exactly
 
 .. math:: m_i = A_{i,1}(\\ell_{i,1} - \\beta_1) - A_{i,0}(\\ell_{i,0} - \\beta_0)
+
+and generalises to any number of classes (see :func:`instance_ovr_margins`).
 
 Cluster-level summaries aggregate within cluster x region cells and are
 reported region-equal with percentile bootstrap intervals over regions, because
@@ -25,7 +28,7 @@ let one large region dominate.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -34,6 +37,7 @@ __all__ = [
     "AttributionResult",
     "cluster_attribution_summary",
     "instance_margin_contributions",
+    "instance_ovr_margins",
     "percentile_bootstrap_ci",
 ]
 
@@ -142,11 +146,49 @@ def instance_margin_contributions(
     return attention * centred
 
 
-def _binary_margin(contributions: np.ndarray) -> np.ndarray:
-    """Class-1-vs-0 margin per instance, or the single column when C == 1."""
-    if contributions.shape[1] == 1:
-        return contributions[:, 0]
-    return contributions[:, 1] - contributions[:, 0]
+def instance_ovr_margins(contributions: np.ndarray) -> np.ndarray:
+    """One-vs-rest margin per instance and class.
+
+    For class :math:`c`, the margin contrasts that class's contribution against
+    the mean of the others:
+
+    .. math:: m_{i,c} = M_{i,c} - \\frac{1}{C-1} \\sum_{c' \\neq c} M_{i,c'}
+
+    With ``C == 2`` this reduces exactly to :math:`M_{i,1} - M_{i,0}`, the
+    classic binary margin, so binary results are unchanged. With ``C == 1``
+    (regression, or Cox on the log-hazard scale) the contribution is already the
+    margin.
+
+    Returns:
+        ``[n_instances, n_classes]``.
+    """
+    contributions = np.asarray(contributions, dtype=float)
+    if contributions.ndim == 1:
+        contributions = contributions[:, None]
+    n_classes = contributions.shape[1]
+    if n_classes == 1:
+        return contributions
+    total = contributions.sum(axis=1, keepdims=True)
+    rest_mean = (total - contributions) / (n_classes - 1)
+    return contributions - rest_mean
+
+
+def _resolve_focus_classes(n_classes: int, focus_classes) -> List[int]:
+    """Which classes get a cluster-level summary.
+
+    Binary tasks summarise the positive class only: the class-0 margin is its
+    exact negation, so reporting both is redundant. Multi-class tasks summarise
+    every class, since no single contrast represents the decision.
+    """
+    if focus_classes is not None:
+        resolved = [int(c) for c in focus_classes]
+        for c in resolved:
+            if c < 0 or c >= n_classes:
+                raise ValueError(f"focus class {c} is out of range for {n_classes} class(es).")
+        return resolved
+    if n_classes <= 2:
+        return [n_classes - 1]
+    return list(range(n_classes))
 
 
 def cluster_attribution_summary(
@@ -161,6 +203,7 @@ def cluster_attribution_summary(
     random_state: int = 0,
     margin_eps: float = 1e-6,
     bag_logits: Optional[Dict[str, Sequence[float]]] = None,
+    focus_classes: Optional[Sequence[int]] = None,
 ) -> AttributionResult:
     """Summarise each cluster's contribution to the bag decisions.
 
@@ -173,6 +216,9 @@ def cluster_attribution_summary(
         logit_bias: Head output bias per class, removed from the margin.
         bag_logits: Optional bag logits keyed by bag id. When given, the
             additive identity is checked against them.
+        focus_classes: Classes to summarise. Defaults to the positive class for
+            binary tasks (the class-0 margin is its exact negation) and to every
+            class for multi-class tasks.
     """
     for column in (*attention_columns, *logit_columns, bag_id_column):
         if column not in table.columns:
@@ -193,27 +239,45 @@ def cluster_attribution_summary(
             "cluster_label": np.asarray(cluster_labels),
         }
     )
-    for index in range(contributions.shape[1]):
+    margins = instance_ovr_margins(contributions)
+    n_classes = int(contributions.shape[1])
+    for index in range(n_classes):
         per_instance[f"contribution_c{index}"] = contributions[:, index]
-    per_instance["margin"] = _binary_margin(contributions)
+        per_instance[f"margin_c{index}"] = margins[:, index]
 
     identity_residual = _identity_residual(
         per_instance[bag_id_column].to_numpy(), raw_contributions, bag_logits
     )
 
-    summary = _summarise_clusters(
-        per_instance,
-        attention=attention,
-        bag_id_column=bag_id_column,
-        n_bootstrap=n_bootstrap,
-        random_state=random_state,
-        margin_eps=margin_eps,
-    )
+    summaries = []
+    for class_index in _resolve_focus_classes(n_classes, focus_classes):
+        frame = per_instance.copy()
+        frame["margin"] = margins[:, class_index]
+        part = _summarise_clusters(
+            frame,
+            attention=_attention_for_class(attention, class_index),
+            bag_id_column=bag_id_column,
+            n_bootstrap=n_bootstrap,
+            random_state=random_state,
+            margin_eps=margin_eps,
+        )
+        part["class_index"] = class_index
+        summaries.append(part.set_index("class_index", append=True))
+    summary = pd.concat(summaries).sort_index()
     return AttributionResult(
         per_instance=per_instance,
         per_cluster=summary,
         identity_residual=identity_residual,
     )
+
+
+def _attention_for_class(attention: np.ndarray, class_index: int) -> np.ndarray:
+    """Attention weights driving one class, or the shared channel."""
+    if attention.ndim == 1:
+        return attention[:, None]
+    if attention.shape[1] == 1:
+        return attention
+    return attention[:, class_index : class_index + 1]
 
 
 def _identity_residual(

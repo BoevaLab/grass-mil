@@ -50,6 +50,10 @@ params:
     logit_bias: null
     n_bootstrap: 200
     random_state: 0
+    # Classes to summarise. null summarises the positive class for binary
+    # heads (the class-0 margin is its exact negation) and every class for
+    # multi-class heads, each with a one-vs-rest margin.
+    focus_classes: null
   morans_i:
     feature_prefix: comp_
     n_perms: 100
