@@ -111,14 +111,16 @@ grass-mil-eval \
 - Exhaustive hyperparameter reference for repo configs: [`docs/hyperparameter_reference.md`](docs/hyperparameter_reference.md)
 - Capability modes and operational options: [`docs/capabilities_and_modes.md`](docs/capabilities_and_modes.md)
 - Existing model contracts: [`docs/model_component_contracts.md`](docs/model_component_contracts.md)
-- Existing legacy gap audit: [`docs/legacy_gap_audit.md`](docs/legacy_gap_audit.md)
+- Method fidelity map (method -> code -> test): [`docs/method_fidelity.md`](docs/method_fidelity.md)
+- Fidelity status and bugs found while closing gaps: [`docs/legacy_gap_audit.md`](docs/legacy_gap_audit.md)
 
 ## Supported Training/Inference Modes
 
 | Mode | Task Config | Model Config | Entrypoint | Primary Output |
 |---|---|---|---|---|
 | Supervised mean aggregation | `task=finetune_mean` | `model=supervised_module` | `src/grass_mil/train.py` | Region/sample-level logits via mean bag aggregation |
-| Supervised MIL attention | `task=finetune_mil` | `model=supervised_module` | `src/grass_mil/train.py` | Attention-weighted bag logits (+ optional MIL auxiliary terms) |
+| Supervised MIL attention | `task=finetune_mil` | `model=supervised_module` | `src/grass_mil/train.py` | Per-class attention-weighted bag logits |
+| Cox survival with MIL | `task=finetune_survival` | `model=supervised_module` | `src/grass_mil/train.py` | Scalar log-hazard per bag, scored by c-index |
 | SSL pretraining (BGRL) | `task=pretrain_bgrl` | `model=bgrl_module` | `src/grass_mil/train.py` | BGRL-pretrained encoder checkpoint |
 | Checkpoint evaluation | any compatible task/model | matching training stack | `src/grass_mil/eval.py` | Test metrics from selected checkpoint |
 | Advanced prediction (Python API) | compatible with `SupervisedModule.predict_step` | `model=supervised_module` | `Trainer.predict(...)` | `bag_ids`, `bag_logits`, `row_region_ids`, `row_sample_ids`, optional `bag_targets`, optional `bag_attention`, optional `instance_*`, optional `embedding_*` |
@@ -194,9 +196,20 @@ Data precompute outputs:
 
 ## Known Gaps / Non-Goals
 
-Current repository behavior intentionally excludes:
+`grass-mil` implements the method, and only the method. It is deliberately not
+a reproduction harness for any particular study, so the following live outside
+this repository:
 
-1. Curated first-class hyperparameter sweep recipes in `configs/hparams_search/`.
-2. Turnkey dataset-specific benchmark packs beyond the generic Hydra/config contracts.
+1. Cohort-specific experiment configs and dataset preprocessing.
+2. Non-GNN baselines (cell-type composition models, frozen-encoder probes) and
+   the benchmark tables that compare against them.
+3. Cross-validation campaign harnesses, hyperparameter sweep recipes, and
+   experiment-tracking orchestration.
+
+The one deliberate exception is the interpretability suite, which is
+first-class here because the method's attribution claim is part of the method.
+
+For what is implemented and the tests that hold it in place, see
+[`docs/method_fidelity.md`](docs/method_fidelity.md).
 
 All currently supported capabilities are documented in [`docs/workflows_train_infer.md`](docs/workflows_train_infer.md), [`docs/hyperparameter_reference.md`](docs/hyperparameter_reference.md), and [`docs/capabilities_and_modes.md`](docs/capabilities_and_modes.md).
