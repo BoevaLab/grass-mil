@@ -66,9 +66,9 @@ survived:
 - Native PyG operators are preferred; adapters stay thin.
 - Optional components instantiate only when their config is set.
 
-## Still open
+## Deliberately retained
 
-- `attention_attribution` and `margin_attribution` overlap. Consolidating them
-  changes the payload keys `build_composite_cluster_heatmap` consumes.
-- Region accumulation is retained. It is throughput mechanism rather than
-  method, but removing it changes optimizer-step semantics for streamed bags.
+- Region accumulation. It is a throughput mechanism rather than an objective,
+  and the final NSCLC runs use it (`hyperbatch_size: 16`), so it stays.
+- The clustering algorithm's own names (`run_clustering`, `n_clusters`,
+  `min_cluster_size`). Clustering is the method; niches are its result.

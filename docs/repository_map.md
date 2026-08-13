@@ -17,7 +17,7 @@ Scope rules used here:
 - `LICENSE`: Project license text.
 - `README.md`: Primary entrypoint documentation and navigation index.
 - `Makefile`: Convenience targets for clean, format, tests, and default training.
-- `requirements.txt`: Pip dependency list, including optional data/runtime libraries.
+- `pyproject.toml`: Package metadata, dependencies and optional extras.
 - `environment.yaml`: Conda environment alternative with pinned major versions.
 - `setup.py`: Package metadata and console entry points (`train_command`, `eval_command`).
 - `pyproject.toml`: Pytest and coverage tool configuration.
@@ -125,7 +125,6 @@ Attention presets:
 Head presets:
 
 - `configs/model/heads/graph.yaml`: Graph-level prediction MLP head preset.
-- `configs/model/heads/node.yaml`: Node-level prediction MLP head preset.
 
 Loss presets:
 

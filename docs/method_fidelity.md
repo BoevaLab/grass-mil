@@ -17,7 +17,7 @@ listed at the bottom.
 | Message passing | GINE conditioned on the **scalar edge length** only | `models/components/backbones.py::_select_edge_features` | `test_gine_reads_only_the_selected_edge_column` |
 | Ego-graph extent | `r_k = radius_per_hop·k + radius_offset` | `data/components/ego_radius.py` | `test_seed_sampling.py::test_resolve_ego_radius_is_linear_in_depth` |
 | Interior seeding | exclude the `n_hops` rim around the convex hull | `data/components/seed_sampling.py::convex_hull_interior_mask` | `test_interior_mask_excludes_the_hull_rim` |
-| MIL attention | gated attention, softmax over instances **per class** | `models/components/attention.py`, `models/training/bagging.py` | `test_bagging.py::test_attention_is_normalised_per_class_over_instances` |
+| MIL attention | gated attention, softmax over instances **per class** (a binary head has two channels) | `models/components/attention.py`, `models/training/bagging.py` | `test_bagging.py::test_attention_is_normalised_per_class_over_instances` |
 | Bag logit | `L_c = Σᵢ A[i,c]·ℓ[i,c]` | `models/training/bagging.py::aggregate_bag_logits_attention` | `test_bag_logit_is_the_attention_weighted_sum_of_instance_logits` |
 | Objective | region cross-entropy, **sole** loss | `models/supervised_module.py::_compute_losses` | `tests/test_train_regimes.py` |
 | Survival | Cox partial likelihood on a scalar log-hazard | `models/components/losses.py::CoxSGDLoss` | `test_survival_regime_fast_dev_run` |
@@ -34,7 +34,6 @@ The interpretability claim rests on one identity. If `identity_residual` is not
 | Instance contribution | `M[i,c] = A[i,c]·(ℓ[i,c] − βc)` — bias-free attention-weighted logits | `interpretability/core/attribution.py` | `test_bias_removal_shifts_the_margin_by_exactly_the_bias_term` |
 | Margin (any C) | one-vs-rest: `m[i,c] = M[i,c] − mean(M[i,c'≠c])`; reduces to `M[i,1] − M[i,0]` when C=2 | `instance_ovr_margins` | `test_ovr_margin_reduces_to_the_binary_margin_when_c_is_two`, `test_ovr_margin_contrasts_each_class_against_the_mean_of_the_rest` |
 | Additive identity | `Σᵢ M[i,c] = L_c` | same, `identity_residual` | `test_contributions_sum_exactly_to_the_bag_logit` |
-| Attention lift | `λ = (Σ A) / prevalence`, 1 = neutral | same | `test_attention_lift_is_neutral_when_attention_matches_abundance` |
 | Uncertainty | 200-resample percentile bootstrap **over regions** | `percentile_bootstrap_ci` | `test_bootstrap_ci_brackets_the_point_estimate` |
 
 ## Spatial statistics

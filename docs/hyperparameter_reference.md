@@ -242,16 +242,6 @@ Includes all keys above plus MIL-specific controls:
 | `task.region_accumulation.mode` | `manual_region_buffer` | str | currently manual mode in code | MIL accumulation metadata | `grass-mil-train task.region_accumulation.mode=manual_region_buffer` |
 | `task.region_accumulation.hyperbatch_size` | `8` | int | `>=1` when enabled | MIL accumulation | `grass-mil-train task.region_accumulation.hyperbatch_size=4` |
 | `task.region_accumulation.flush_on_epoch_end` | `true` | bool | `true/false` | MIL accumulation | `grass-mil-train task.region_accumulation.flush_on_epoch_end=true` |
-| `task.node_aux.enabled` | `false` | bool | `true/false` | MIL + binary training stage | `grass-mil-train task.node_aux.enabled=true` |
-| `task.node_aux.target_mode` | `attention_shaped_ti` | str | `graph_label`, `attention_shaped_ti` | node auxiliary targets | `grass-mil-train task.node_aux.target_mode=graph_label` |
-| `task.node_aux.loss_mode` | `bce` | str | `bce`, `weighted_bce` | node auxiliary loss | `grass-mil-train task.node_aux.loss_mode=weighted_bce` |
-| `task.node_aux.weight` | `1.0` | float | any float | node auxiliary weighting | `grass-mil-train task.node_aux.weight=0.2` |
-| `task.entropy_reg.enabled` | `false` | bool | `true/false` | MIL + binary training stage | `grass-mil-train task.entropy_reg.enabled=true` |
-| `task.entropy_reg.mode` | `attention_shaped_target` | str | `attention`, `attention_shaped_target` | entropy regularization | `grass-mil-train task.entropy_reg.mode=attention` |
-| `task.entropy_reg.weight` | `0.01` | float | any float | entropy weighting | `grass-mil-train task.entropy_reg.weight=0.005` |
-| `task.loss_weights.region` | `1.0` | float | any float | MIL total loss composition | `grass-mil-train task.loss_weights.region=1.0` |
-| `task.loss_weights.node_aux` | `1.0` | float | any float | MIL total loss composition | `grass-mil-train task.loss_weights.node_aux=0.5` |
-| `task.loss_weights.entropy` | `0.0` | float | any float | MIL total loss composition | `grass-mil-train task.loss_weights.entropy=0.1` |
 
 ## 3.3 `configs/task/pretrain_bgrl.yaml`
 
@@ -297,8 +287,7 @@ Includes all keys above plus MIL-specific controls:
 | `model.encoder.norm` | `batchnorm` | str | `batchnorm`, `layernorm`, `none` | encoder | `grass-mil-train model.encoder.norm=layernorm` |
 | `model.encoder.jk` | `last` | str | `last`, `concat`, `max`, `sum` | encoder | `grass-mil-train model.encoder.jk=concat` |
 | `model.encoder.act` | `relu` | str | `relu`, `gelu`, `leaky_relu` | encoder | `grass-mil-train model.encoder.act=gelu` |
-| `model.encoder.pooling` | `mean` | str | `sum`,`mean`,`max`,`attention`,`set2set` | graph embedding | `grass-mil-train model.encoder.pooling=set2set` |
-| `model.encoder.set2set_steps` | `3` | int | `>=1` | `pooling=set2set` | `grass-mil-train model.encoder.set2set_steps=4` |
+| `model.encoder.pooling` | `mean` | str | `sum`,`mean`,`max` | graph embedding | `grass-mil-train model.encoder.pooling=max` |
 | `model.encoder.gat_heads` | `4` | int | `>=1` and divides hidden dim | `conv_type=gat` | `grass-mil-train model.encoder.gat_heads=8` |
 | `model.encoder.use_edge_attr` | `false` | bool | `true/false` | `gcn`/`gine` meaningful | `grass-mil-train model.encoder.use_edge_attr=true` |
 | `model.encoder.edge_weight_index` | `0` | int | column index | `gcn` with edge attrs | `grass-mil-train model.encoder.edge_weight_index=1` |
@@ -377,7 +366,6 @@ Covered files:
 
 All five files expose the same keys:
 
-- `_target_`, `input_dim`, `hidden_dim`, `out_dim`, `num_layers`, `dropout`, `conv_type`, `norm`, `jk`, `act`, `pooling`, `set2set_steps`, `gat_heads`, `use_edge_attr`, `edge_weight_index`, `edge_attr_dim`.
 
 Per-file defaults differ mainly in `conv_type`, `use_edge_attr`, and `edge_attr_dim`:
 
@@ -404,7 +392,6 @@ Covered files:
 Covered files:
 
 - `configs/model/heads/graph.yaml`
-- `configs/model/heads/node.yaml`
 
 Both `graph.yaml` and `node.yaml` expose:
 
@@ -729,9 +716,6 @@ These constraints are not just documentation conventions; they are enforced in r
 | `task.target_type` must be one of `binary`, `regression`, `survival` | `src/grass_mil/models/training/builders.py` | raises `ValueError` for unsupported target types |
 | `task.instance_sampling` must be `all` or `random` | `src/grass_mil/models/training/builders.py` | raises `ValueError` for invalid sampling mode |
 | `task.region_accumulation.hyperbatch_size >= 1` when enabled | `src/grass_mil/models/supervised_module.py` | raises `ValueError` |
-| `task.node_aux.target_mode` must be `graph_label` or `attention_shaped_ti` | `src/grass_mil/models/training/loss_utils.py` | raises `ValueError` |
-| `task.node_aux.loss_mode` must be `bce` or `weighted_bce` | `src/grass_mil/models/training/loss_utils.py` | raises `ValueError` |
-| `task.entropy_reg.mode` must be `attention` or `attention_shaped_target` | `src/grass_mil/models/supervised_module.py` | raises `ValueError` |
 | `conv_type=gine` requires `model.encoder.edge_attr_dim` and runtime `edge_attr` | `src/grass_mil/models/components/backbones.py` | raises `ValueError` |
 | `conv_type=gat` requires `hidden_dim % gat_heads == 0` | `src/grass_mil/models/components/backbones.py` | raises `ValueError` |
 | `model.encoder.use_edge_attr=true` is meaningful only for `gcn`/`gine` | `src/grass_mil/models/components/backbones.py` | warning/ignored for unsupported convs |

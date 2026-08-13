@@ -7,7 +7,8 @@ This document catalogs operational modes and non-default capabilities in `grass-
 | Regime | Task | Model | Primary Use |
 |---|---|---|---|
 | Supervised mean | `finetune_mean` | `supervised_module` | Stable baseline graph-level classification/regression/survival |
-| Supervised MIL | `finetune_mil` | `supervised_module` | Region-level attention aggregation + optional MIL auxiliaries |
+| Supervised MIL | `finetune_mil` | `supervised_module` | Per-class attention aggregation; region cross-entropy is the sole objective |
+| Cox survival MIL | `finetune_survival` | `supervised_module` | Scalar log-hazard per bag, scored by c-index |
 | SSL pretrain | `pretrain_bgrl` | `bgrl_module` | Representation learning before supervised fine-tuning |
 
 ## 2) Aggregation And MIL Feature Modes
@@ -17,8 +18,6 @@ This document catalogs operational modes and non-default capabilities in `grass-
 | Mean bag aggregation | `task.aggregation=mean` | Averages instance logits per bag |
 | MIL attention aggregation | `task.aggregation=mil_attention` | Learns attention weights over instance embeddings |
 | Region accumulation | `task.region_accumulation.enabled=true` | Manual optimizer steps over region hyperbatches |
-| Node auxiliary loss | `task.node_aux.enabled=true` | Adds node-level auxiliary objective in binary MIL training |
-| Entropy regularization | `task.entropy_reg.enabled=true` | Adds entropy-based regularization term |
 
 ## 3) Backbone/Encoder Modes
 
@@ -36,7 +35,8 @@ Notable behavior:
 2. `gine` requires edge feature dimensionality (`model.encoder.edge_attr_dim`) and runtime `edge_attr`.
 3. `gat` requires `hidden_dim` divisible by `gat_heads`.
 4. JK modes: `last`, `concat`, `max`, `sum`.
-5. Pooling modes: `sum`, `mean`, `max`, `attention`, `set2set`.
+5. Pooling modes: `sum`, `mean`, `max`. Learned pooling was removed: instance
+   selection is the MIL head's job, pooling across ego-graphs.
 
 ## 4) Data Sampling Modes
 

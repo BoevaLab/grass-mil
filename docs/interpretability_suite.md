@@ -102,7 +102,7 @@ Common optional columns:
 - `instance_attention_logits` export requires shape `(N, 1)`; multi-column attention logits are
   rejected as ambiguous.
 
-Note: `niche_profiles` and `attention_attribution` require `comp_*` columns.
+Note: `niche_profiles` requires `comp_*` columns.
 There is no fallback to one-hot `cell_type` composition.
 
 `variance_estimator` convention (biomarker z-scoring):
@@ -272,7 +272,7 @@ Plugin registration is per pipeline run (fresh `PluginRegistry`).
 Built-in plugins:
 
 - `niche_profiles`
-- `attention_attribution`
+- `margin_attribution`
 - `neighborhood_enrichment`
 - `diff_neighborhood_enrichment`
 - `filtration_curves`
@@ -448,7 +448,7 @@ With spatial plugins:
 grass-mil-report \
   data.instance_table=/abs/path/instance_table.csv \
   data.spatial_table=/abs/path/spatial_table.csv \
-  plugins.enabled="[niche_profiles,attention_attribution,neighborhood_enrichment,diff_neighborhood_enrichment,filtration_curves]"
+  plugins.enabled="[niche_profiles,margin_attribution,neighborhood_enrichment,diff_neighborhood_enrichment,filtration_curves]"
 ```
 
 Render a single selected tissue graph colored by niche labels:
@@ -540,7 +540,7 @@ Parameter contract:
 From project root:
 
 ```bash
-pip install -r requirements.txt
+pip install -e ".[interpretability,report,spatial-stats,io]"
 ```
 
 For PDF export, install Playwright browser binaries:

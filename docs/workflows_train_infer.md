@@ -14,7 +14,7 @@ From `/Users/lovrorabuzin/Projects/grass-mil_unification/grass-mil`:
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e ".[interpretability,report,spatial-stats,io]"
 export PROJECT_ROOT=/Users/lovrorabuzin/Projects/grass-mil_unification/grass-mil
 ```
 
@@ -371,8 +371,7 @@ grass-mil-train \
   model.encoder.dropout=0.2 \
   model.encoder.norm=layernorm \
   model.encoder.jk=concat \
-  model.encoder.pooling=set2set \
-  model.encoder.set2set_steps=4
+  model.encoder.pooling=max
 ```
 
 ### D) Attention Variants
@@ -386,33 +385,15 @@ grass-mil-train task=finetune_mil \
   model.attention.projection_dim=128
 ```
 
-### E) MIL-Only Optional Terms
+### E) MIL Region Accumulation
 
-Region accumulation (manual optimizer stepping over region hyperbatches):
+Manual optimizer stepping over region hyperbatches. This is a throughput
+mechanism, not an objective: region cross-entropy remains the sole loss.
 
 ```bash
 grass-mil-train task=finetune_mil \
   task.region_accumulation.enabled=true \
   task.region_accumulation.hyperbatch_size=8
-```
-
-Node auxiliary loss:
-
-```bash
-grass-mil-train task=finetune_mil \
-  task.node_aux.enabled=true \
-  task.node_aux.target_mode=attention_shaped_ti \
-  task.node_aux.loss_mode=weighted_bce \
-  task.node_aux.weight=0.2
-```
-
-Entropy regularization:
-
-```bash
-grass-mil-train task=finetune_mil \
-  task.entropy_reg.enabled=true \
-  task.entropy_reg.mode=attention \
-  task.entropy_reg.weight=0.01
 ```
 
 Dual LR groups for MIL backbone/attention:
