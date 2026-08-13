@@ -237,53 +237,6 @@ def test_attention_bag_aggregation_shapes():
     assert len(bag_indices) == 2
 
 
-def test_build_mil_aux_targets_attention_shaped():
-    from grass_mil.models.training.loss_utils import build_mil_aux_targets
-
-    bag_targets = torch.tensor([[1.0], [0.0]])
-    bag_indices = [[0, 1], [2, 3, 4]]
-    bag_ids = ["r0", "r1"]
-    bag_attention = {
-        "r0": torch.tensor([0.25, 0.75]),
-        "r1": torch.tensor([0.2, 0.3, 0.5]),
-    }
-    targets, weights = build_mil_aux_targets(
-        bag_targets=bag_targets,
-        bag_indices=bag_indices,
-        bag_ids=bag_ids,
-        bag_attention=bag_attention,
-        target_mode="attention_shaped_ti",
-    )
-    assert targets.shape == (5, 1)
-    assert weights.shape == (5, 1)
-    assert torch.all(targets[:2] >= 0.5)
-    assert torch.all(targets[2:] <= 0.5)
-
-
-def test_compute_aux_and_entropy_terms():
-    from grass_mil.models.training.loss_utils import (
-        compute_aux_node_loss,
-        compute_entropy_regularization,
-    )
-
-    logits = torch.tensor([[0.2], [-0.3], [0.9]])
-    targets = torch.tensor([[1.0], [0.0], [1.0]])
-    weights = torch.tensor([[0.5], [0.25], [0.25]])
-    bce = compute_aux_node_loss(
-        aux_logits=logits, aux_targets=targets, aux_weights=None, loss_mode="bce"
-    )
-    weighted = compute_aux_node_loss(
-        aux_logits=logits,
-        aux_targets=targets,
-        aux_weights=weights,
-        loss_mode="weighted_bce",
-    )
-    ent = compute_entropy_regularization(targets)
-    assert bce.ndim == 0
-    assert weighted.ndim == 0
-    assert ent.ndim == 0
-
-
 def test_select_target_columns_handles_single_label_list():
     from types import SimpleNamespace
 
@@ -597,22 +550,6 @@ def test_gather_bag_targets_requires_consistent_labels_within_bag():
             bag_indices=[[0, 1], [2]],
             target_columns=None,
         )
-
-
-def test_attention_shaped_aux_targets_are_detached():
-    from grass_mil.models.training.loss_utils import build_mil_aux_targets
-
-    bag_targets = torch.tensor([[1.0]], dtype=torch.float32)
-    bag_attention = {"b0": torch.tensor([0.2, 0.8], requires_grad=True)}
-    targets, weights = build_mil_aux_targets(
-        bag_targets=bag_targets,
-        bag_indices=[[0, 1]],
-        bag_ids=["b0"],
-        bag_attention=bag_attention,
-        target_mode="attention_shaped_ti",
-    )
-    assert targets.requires_grad is False
-    assert weights.requires_grad is False
 
 
 def test_region_buffer_flushes_in_hyperbatch_chunks():

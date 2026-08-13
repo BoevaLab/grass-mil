@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 
 from .attention import AttnNetGated, AttnNetGatedProjected
 from .backbones import EncoderConfig, GNNEncoder
-from .heads import GraphPredictionHead, NodePredictionHead
+from .heads import GraphPredictionHead
 from .losses import (
     CoxSGDLoss,
     WeightedBCEWithLogitsLoss,
@@ -40,10 +40,6 @@ def build_attention(
 
 def build_graph_head(config: Dict[str, Any]) -> GraphPredictionHead:
     return GraphPredictionHead(**config)
-
-
-def build_node_head(config: Dict[str, Any]) -> NodePredictionHead:
-    return NodePredictionHead(**config)
 
 
 def build_ssl(use_ssl: bool, encoder, ssl_config: Optional[Dict[str, Any]] = None):

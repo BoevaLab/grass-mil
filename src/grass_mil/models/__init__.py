@@ -8,7 +8,6 @@ from .components import (
     GraphPooling,
     GraphPredictionHead,
     MLPPredictor,
-    NodePredictionHead,
     WeightedBCEWithLogitsLoss,
     WeightedCrossEntropyLoss,
     WeightedHuberLoss,
@@ -17,7 +16,6 @@ from .components import (
     build_encoder,
     build_graph_head,
     build_loss,
-    build_node_head,
     build_pooling,
     build_ssl,
 )
@@ -36,7 +34,6 @@ __all__ = [
     "GraphPooling",
     "GraphPredictionHead",
     "MLPPredictor",
-    "NodePredictionHead",
     "WeightedBCEWithLogitsLoss",
     "WeightedCrossEntropyLoss",
     "WeightedHuberLoss",
@@ -45,7 +42,6 @@ __all__ = [
     "build_encoder",
     "build_graph_head",
     "build_loss",
-    "build_node_head",
     "build_pooling",
     "build_ssl",
 ]

@@ -28,23 +28,6 @@ task:
     mode: manual_region_buffer
     hyperbatch_size: 8
     flush_on_epoch_end: true
-  node_aux:
-    enabled: false
-    # graph_label | attention_shaped_ti
-    target_mode: attention_shaped_ti
-    # bce | weighted_bce
-    loss_mode: bce
-    weight: 1.0
-  entropy_reg:
-    enabled: false
-    # attention | attention_shaped_target
-    mode: attention_shaped_target
-    weight: 0.01
-  loss_weights:
-    region: 1.0
-    node_aux: 1.0
-    entropy: 0.0
-
 
 # Per-class attention and matching head width. Override both together when
 # moving to a task with more than two classes.

@@ -6,11 +6,10 @@ from .factory import (
     build_encoder,
     build_graph_head,
     build_loss,
-    build_node_head,
     build_pooling,
     build_ssl,
 )
-from .heads import GraphPredictionHead, NodePredictionHead
+from .heads import GraphPredictionHead
 from .losses import (
     CoxSGDLoss,
     WeightedBCEWithLogitsLoss,
@@ -33,7 +32,6 @@ __all__ = [
     "GraphPooling",
     "GraphPredictionHead",
     "MLPPredictor",
-    "NodePredictionHead",
     "WeightedBCEWithLogitsLoss",
     "WeightedCrossEntropyLoss",
     "WeightedHuberLoss",
@@ -42,7 +40,6 @@ __all__ = [
     "build_encoder",
     "build_graph_head",
     "build_loss",
-    "build_node_head",
     "build_pooling",
     "build_ssl",
 ]

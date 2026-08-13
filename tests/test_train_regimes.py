@@ -97,16 +97,11 @@ def test_training_regimes_fast_dev_run(
         cfg_train.model.optim = cfg_train.optim
         cfg_train.model.scheduler = cfg_train.scheduler
         if advanced_mil:
+            # Region accumulation only; the auxiliary instance and entropy
+            # terms were removed with the region-CE-only objective.
             cfg_train.model.task.region_accumulation.enabled = True
             cfg_train.model.task.region_accumulation.hyperbatch_size = 2
             cfg_train.model.task.region_accumulation.flush_on_epoch_end = True
-            cfg_train.model.task.node_aux.enabled = True
-            cfg_train.model.task.node_aux.target_mode = "attention_shaped_ti"
-            cfg_train.model.task.node_aux.loss_mode = "bce"
-            cfg_train.model.task.node_aux.weight = 0.2
-            cfg_train.model.task.entropy_reg.enabled = True
-            cfg_train.model.task.entropy_reg.mode = "attention_shaped_target"
-            cfg_train.model.task.entropy_reg.weight = 0.01
         if use_pretrained:
             cfg_train.model.init_from_ckpt = _make_pretrain_ckpt(tmp_path)
             cfg_train.model.init_strict = False

@@ -12,16 +12,12 @@ from grass_mil.inference.schemas import BatchPredictionPayload
 from .training import (
     aggregate_bag_logits_attention,
     aggregate_bag_logits_mean,
-    build_mil_aux_targets,
     build_supervised_components,
-    compute_aux_node_loss,
     compute_binary_accuracy,
     compute_categorical_accuracy,
-    compute_entropy_regularization,
     compute_supervised_loss,
     extract_bag_ids,
     gather_bag_targets,
-    gather_instance_logits,
     group_instance_indices_by_bag,
     instantiate_optimizer,
     instantiate_scheduler_with_warmup,
@@ -98,17 +94,11 @@ class SupervisedModule(L.LightningModule):
                     "task.region_accumulation.hyperbatch_size must be >= 1 "
                     "when region accumulation is enabled."
                 )
-            self.node_aux_cfg = dict(self.task_cfg.get("node_aux", {}))
-            self.entropy_reg_cfg = dict(self.task_cfg.get("entropy_reg", {}))
-            self.loss_weights_cfg = dict(self.task_cfg.get("loss_weights", {}))
         else:
             self.region_accum_cfg = {}
             self.region_accum_enabled = False
             self.region_accum_hyperbatch_size = 0
             self.region_accum_flush_on_epoch_end = False
-            self.node_aux_cfg = {}
-            self.entropy_reg_cfg = {}
-            self.loss_weights_cfg = {}
 
         self._region_total_loss_buffer: list[torch.Tensor] = []
         self._manual_optimizer_steps = 0
@@ -637,89 +627,6 @@ class SupervisedModule(L.LightningModule):
             bag_weights=bag_weights,
         )
 
-    def _compute_optional_terms(
-        self,
-        *,
-        patch_logits: torch.Tensor,
-        bag_targets: torch.Tensor,
-        bag_ids: list[str],
-        bag_indices: list[list[int]],
-        bag_attention: dict[str, torch.Tensor],
-        stage: str,
-    ) -> tuple[Optional[torch.Tensor], Optional[torch.Tensor]]:
-        """Compute node auxiliary loss and entropy regularisation.
-
-        Only active during training when MIL attention is enabled and the
-        relevant sub-configs are turned on.
-        """
-        if not self.use_attention:
-            return None, None
-        if stage != "train" or self.task_cfg.get("target_type") != "binary":
-            return None, None
-
-        node_aux_enabled = bool(self.node_aux_cfg.get("enabled", False))
-        entropy_enabled = bool(self.entropy_reg_cfg.get("enabled", False))
-        if not node_aux_enabled and not entropy_enabled:
-            return None, None
-
-        aux_logits = gather_instance_logits(patch_logits, bag_indices)
-        aux_targets, aux_weights = build_mil_aux_targets(
-            bag_targets=bag_targets,
-            bag_indices=bag_indices,
-            bag_ids=bag_ids,
-            bag_attention=bag_attention,
-            target_mode=str(self.node_aux_cfg.get("target_mode", "attention_shaped_ti")),
-        )
-
-        node_aux_loss = None
-        if node_aux_enabled:
-            loss_mode = str(self.node_aux_cfg.get("loss_mode", "bce"))
-            node_aux_loss = compute_aux_node_loss(
-                aux_logits=aux_logits,
-                aux_targets=aux_targets,
-                aux_weights=aux_weights if loss_mode == "weighted_bce" else None,
-                loss_mode=loss_mode,
-            )
-
-        entropy_reg = None
-        if entropy_enabled:
-            entropy_mode = str(self.entropy_reg_cfg.get("mode", "attention_shaped_target"))
-            if entropy_mode == "attention":
-                entropy_values = torch.cat(
-                    [bag_attention[bag_id].reshape(-1, 1) for bag_id in bag_ids],
-                    dim=0,
-                )
-            elif entropy_mode == "attention_shaped_target":
-                entropy_values = aux_targets
-            else:
-                raise ValueError(
-                    "entropy_reg.mode must be one of " "['attention', 'attention_shaped_target']"
-                )
-            entropy_reg = compute_entropy_regularization(entropy_values)
-
-        return node_aux_loss, entropy_reg
-
-    def _compose_total_loss(
-        self,
-        region_loss: torch.Tensor,
-        node_aux_loss: Optional[torch.Tensor],
-        entropy_reg: Optional[torch.Tensor],
-    ) -> torch.Tensor:
-        if not self.use_attention:
-            return region_loss
-
-        region_w = float(self.loss_weights_cfg.get("region", 1.0))
-        node_w = float(self.node_aux_cfg.get("weight", self.loss_weights_cfg.get("node_aux", 1.0)))
-        entropy_w = float(
-            self.entropy_reg_cfg.get("weight", self.loss_weights_cfg.get("entropy", 0.0))
-        )
-        total = region_w * region_loss
-        if node_aux_loss is not None:
-            total = total + node_w * node_aux_loss
-        if entropy_reg is not None:
-            total = total + entropy_w * entropy_reg
-        return total
-
     def _compute_losses(
         self,
         *,
@@ -731,22 +638,13 @@ class SupervisedModule(L.LightningModule):
         bag_indices: list[list[int]],
         bag_attention: Optional[dict[str, torch.Tensor]],
         stage: str,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor], torch.Tensor]:
-        region_loss = self._compute_region_loss(
+    ) -> torch.Tensor:
+        """Region cross-entropy is the sole training objective."""
+        return self._compute_region_loss(
             bag_logits=bag_logits,
             bag_targets=bag_targets,
             bag_weights=bag_weights,
         )
-        node_aux_loss, entropy_reg = self._compute_optional_terms(
-            patch_logits=patch_logits,
-            bag_targets=bag_targets,
-            bag_ids=ordered_bag_ids,
-            bag_indices=bag_indices,
-            bag_attention=bag_attention or {},
-            stage=stage,
-        )
-        total_loss = self._compose_total_loss(region_loss, node_aux_loss, entropy_reg)
-        return region_loss, node_aux_loss, entropy_reg, total_loss
 
     def _log_stage_metrics(
         self,
@@ -756,8 +654,6 @@ class SupervisedModule(L.LightningModule):
         bag_logits: torch.Tensor,
         bag_targets: torch.Tensor,
         region_loss: Optional[torch.Tensor] = None,
-        node_aux_loss: Optional[torch.Tensor] = None,
-        entropy_reg: Optional[torch.Tensor] = None,
     ) -> None:
         if stage not in {"train", "val", "test"}:
             return
@@ -776,22 +672,6 @@ class SupervisedModule(L.LightningModule):
                 on_epoch=True,
                 prog_bar=False,
             )
-            if node_aux_loss is not None:
-                self.log(
-                    "train/node_aux_loss",
-                    node_aux_loss,
-                    on_step=True,
-                    on_epoch=True,
-                    prog_bar=False,
-                )
-            if entropy_reg is not None:
-                self.log(
-                    "train/entropy_reg",
-                    entropy_reg,
-                    on_step=True,
-                    on_epoch=True,
-                    prog_bar=False,
-                )
         if stage in {"train", "test"} and self.task_cfg["target_type"] == "binary":
             acc = compute_binary_accuracy(bag_logits, bag_targets)
             self.log(
@@ -825,7 +705,7 @@ class SupervisedModule(L.LightningModule):
         bag_targets = payload["bag_targets"]
         bag_weights = payload["bag_weights"]
 
-        region_loss, node_aux_loss, entropy_reg, total_loss = self._compute_losses(
+        region_loss = self._compute_losses(
             patch_logits=patch_logits,
             bag_logits=bag_logits,
             bag_targets=bag_targets,
@@ -837,16 +717,14 @@ class SupervisedModule(L.LightningModule):
         )
         self._log_stage_metrics(
             stage=stage,
-            loss_value=total_loss if stage == "train" else region_loss,
+            loss_value=region_loss,
             bag_logits=bag_logits,
             bag_targets=bag_targets,
             region_loss=region_loss if self.use_attention else None,
-            node_aux_loss=node_aux_loss,
-            entropy_reg=entropy_reg,
         )
 
         result = {
-            "loss": total_loss if stage == "train" else region_loss,
+            "loss": region_loss,
             "bag_ids": list(ordered_bag_ids),
             "bag_logits": bag_logits,
             "bag_targets": bag_targets,
@@ -857,13 +735,7 @@ class SupervisedModule(L.LightningModule):
             "bag_attention": bag_attention,
         }
         if self.use_attention:
-            result.update(
-                {
-                    "region_loss": region_loss,
-                    "node_aux_loss": node_aux_loss,
-                    "entropy_reg": entropy_reg,
-                }
-            )
+            result["region_loss"] = region_loss
         return result
 
     # ------------------------------------------------------------------
@@ -886,11 +758,9 @@ class SupervisedModule(L.LightningModule):
 
         region_losses: list[torch.Tensor] = []
         total_losses: list[torch.Tensor] = []
-        node_losses: list[torch.Tensor] = []
-        entropies: list[torch.Tensor] = []
         for idx, bag_id in enumerate(ordered_bag_ids):
             region_w = bag_weights[idx : idx + 1] if bag_weights is not None else None
-            region_loss, node_aux_loss, entropy_reg, total_loss = self._compute_losses(
+            region_loss = self._compute_losses(
                 patch_logits=patch_logits,
                 bag_logits=bag_logits[idx : idx + 1],
                 bag_targets=bag_targets[idx : idx + 1],
@@ -901,11 +771,7 @@ class SupervisedModule(L.LightningModule):
                 stage="train",
             )
             region_losses.append(region_loss.detach())
-            total_losses.append(total_loss)
-            if node_aux_loss is not None:
-                node_losses.append(node_aux_loss.detach())
-            if entropy_reg is not None:
-                entropies.append(entropy_reg.detach())
+            total_losses.append(region_loss)
 
         if not total_losses:
             return torch.zeros((), device=self.device)
@@ -933,16 +799,12 @@ class SupervisedModule(L.LightningModule):
         )
         mean_total_loss = step_total_loss.detach()
         mean_region_loss = torch.stack(region_losses).mean()
-        mean_node_aux = torch.stack(node_losses).mean() if node_losses else None
-        mean_entropy = torch.stack(entropies).mean() if entropies else None
         self._log_stage_metrics(
             stage="train",
             loss_value=mean_total_loss,
             bag_logits=bag_logits,
             bag_targets=bag_targets,
             region_loss=mean_region_loss,
-            node_aux_loss=mean_node_aux,
-            entropy_reg=mean_entropy,
         )
 
         return mean_total_loss

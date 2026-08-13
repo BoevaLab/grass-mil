@@ -22,7 +22,6 @@ def test_model_component_yaml_instantiation():
         base / "attention" / "gated.yaml",
         base / "attention" / "gated_projected.yaml",
         base / "heads" / "graph.yaml",
-        base / "heads" / "node.yaml",
         base / "loss" / "categorical_ce.yaml",
         base / "loss" / "categorical_bce.yaml",
         base / "loss" / "regression_mse.yaml",

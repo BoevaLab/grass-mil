@@ -17,7 +17,6 @@ norm: layernorm
 jk: last
 act: relu
 pooling: max
-set2set_steps: 3
 gat_heads: 4
 
 # Message passing reads exactly one edge column: the edge length. Index 0 of

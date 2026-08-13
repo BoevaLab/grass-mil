@@ -14,7 +14,6 @@ def _encoder_cfg():
         "jk": "last",
         "act": "relu",
         "pooling": "mean",
-        "set2set_steps": 3,
         "gat_heads": 2,
         "use_edge_attr": False,
         "edge_weight_index": 0,

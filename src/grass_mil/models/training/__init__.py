@@ -27,13 +27,9 @@ from .checkpoint_init import (
     remap_encoder_keys,
 )
 from .loss_utils import (
-    build_mil_aux_targets,
-    compute_aux_node_loss,
     compute_binary_accuracy,
     compute_categorical_accuracy,
-    compute_entropy_regularization,
     compute_supervised_loss,
-    gather_instance_logits,
 )
 from .optimization import (
     instantiate_optimizer,
@@ -63,13 +59,9 @@ __all__ = [
     "validate_task_config",
     "load_state_dict_with_optional_mapping",
     "remap_encoder_keys",
-    "build_mil_aux_targets",
-    "compute_aux_node_loss",
     "compute_binary_accuracy",
     "compute_categorical_accuracy",
-    "compute_entropy_regularization",
     "compute_supervised_loss",
-    "gather_instance_logits",
     "instantiate_optimizer",
     "instantiate_scheduler",
     "instantiate_scheduler_with_warmup",

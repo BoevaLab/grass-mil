@@ -32,7 +32,3 @@ class _MLPHead(nn.Module):
 
 class GraphPredictionHead(_MLPHead):
     pass
-
-
-class NodePredictionHead(_MLPHead):
-    pass

@@ -35,7 +35,6 @@ class EncoderConfig:
     jk: JKType = "last"
     act: Literal["relu", "gelu", "leaky_relu"] = "relu"
     pooling: Optional[str] = None
-    set2set_steps: int = 3
     gat_heads: int = 4
     use_edge_attr: bool = False
     edge_weight_index: int = 0
@@ -100,7 +99,6 @@ class GNNEncoder(nn.Module):
             GraphPooling(
                 name=cfg.pooling,
                 input_dim=final_dim,
-                set2set_steps=cfg.set2set_steps,
             )
             if cfg.pooling is not None
             else None
