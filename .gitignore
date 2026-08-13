@@ -151,3 +151,6 @@ configs/local/default.yaml
 
 # Aim logging
 .aim
+
+# Vignette scratch space (downloaded data, graphs, runs)
+vignettes/vignette_work/

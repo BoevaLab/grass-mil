@@ -228,6 +228,17 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             shuffle=False,
         )
 
+    def predict_dataloader(self) -> Any:
+        """Inference loader, over the test split.
+
+        Required by `grass-mil-predict`: `Trainer.predict` raises
+        `MisconfigurationException` without it. Predicting on the held-out split
+        mirrors `test_dataloader` so exported tables line up with test metrics.
+        To score a different set of graphs, point `data.processed_dir` at a
+        precompute whose entries carry the split you want.
+        """
+        return self.test_dataloader()
+
 
 def _subset_dataset_from_entries(
     dataset: SpatialOmicsGraphDataset,
