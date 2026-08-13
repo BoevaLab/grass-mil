@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import torch
 
+from grass_mil.contracts import validate_attention_width
+
 try:
     from torch_geometric.data import Data
 except Exception as exc:  # pragma: no cover
@@ -130,6 +132,23 @@ def aggregate_bag_logits_attention(
     max_instances_per_bag: int,
     instance_sampling: str,
 ) -> tuple[torch.Tensor, List[str], Dict[str, torch.Tensor], List[List[int]]]:
+    """Pool instance logits into bag logits with gated attention.
+
+    Attention is normalised over the instances of a bag, **independently per
+    class**:
+
+    .. math:: A_{i,c} = \\mathrm{softmax}_i(\\alpha_{i,c}), \\quad
+              L_c = \\sum_{i \\in B} A_{i,c}\\, \\ell_{i,c}
+
+    Two attention widths are legal. ``n_classes == num_classes`` is the
+    published per-class form, and is what makes the attribution identity
+    ``sum_i A[i,c] * l[i,c] == L_c`` exact. ``n_classes == 1`` keeps a single
+    shared attention channel broadcast across the class logits.
+
+    Returns:
+        Bag logits, bag ids, per-bag attention of shape ``[n_instances,
+        n_attention_classes]``, and the selected instance indices per bag.
+    """
     bag_logits = []
     bag_ids = []
     bag_attention = {}
@@ -143,8 +162,15 @@ def aggregate_bag_logits_attention(
         sub_emb = embeddings[selected]
         sub_logits = logits[selected]
         attn_logits, _ = attention(sub_emb)
-        attn_scores = torch.softmax(attn_logits.squeeze(-1), dim=0)
-        weighted_logits = (sub_logits * attn_scores.unsqueeze(-1)).sum(dim=0, keepdim=True)
+        if attn_logits.dim() == 1:
+            attn_logits = attn_logits.unsqueeze(-1)
+        validate_attention_width(
+            attention_width=int(attn_logits.size(-1)),
+            num_classes=int(sub_logits.size(-1)),
+        )
+        # Softmax down the instance axis, per class column.
+        attn_scores = torch.softmax(attn_logits, dim=0)
+        weighted_logits = (sub_logits * attn_scores).sum(dim=0, keepdim=True)
         bag_logits.append(weighted_logits)
         bag_ids.append(bag_id)
         bag_indices.append(selected)

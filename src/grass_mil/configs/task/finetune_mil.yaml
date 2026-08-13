@@ -7,9 +7,13 @@ task:
   bag_fallback_key: sample_id
   max_instances_per_bag: 0
   instance_sampling: all
-  target_type: binary
+  # The published MIL head is per-class: the bag logit for class c is
+  # sum_i A[i,c] * l[i,c], which requires one logit and one attention channel
+  # per class. A single-logit BCE head cannot express the attribution identity,
+  # so this preset is categorical with C=2 for binary tasks.
+  target_type: categorical
   target_columns: null
-  loss: categorical_bce
+  loss: categorical_ce
   optimization:
     backbone_lr: null
     attention_lr: null
@@ -40,3 +44,12 @@ task:
     region: 1.0
     node_aux: 1.0
     entropy: 0.0
+
+
+# Per-class attention and matching head width. Override both together when
+# moving to a task with more than two classes.
+model:
+  graph_head:
+    output_dim: 2
+  attention:
+    n_classes: 2

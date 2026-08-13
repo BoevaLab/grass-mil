@@ -422,6 +422,7 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             score_mode=str((interpret_cfg or {}).get("score_mode", "sigmoid")),
             score_logit_index=int((interpret_cfg or {}).get("score_logit_index", 0)),
             attention_column=str((interpret_cfg or {}).get("attention_column", "attention")),
+            attention_class_index=(interpret_cfg or {}).get("attention_class_index"),
         )
         instance_path = output_dir / str(
             (interpret_cfg or {}).get("instance_filename", "instance_table.csv")

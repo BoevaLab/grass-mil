@@ -323,6 +323,14 @@ class SupervisedModule(L.LightningModule):
             centroids[inst_idx, :] = positions[mask][:, :2].mean(dim=0)
         return centroids
 
+    def _attention_width(self) -> int:
+        """Number of attention channels, i.e. 1 (shared) or one per class."""
+        if self.attention is None:
+            return 1
+        head = getattr(self.attention, "attention_c", None)
+        out_features = getattr(head, "out_features", None)
+        return int(out_features) if out_features is not None else 1
+
     def _build_predict_group_metadata(
         self,
         batch,
@@ -425,7 +433,9 @@ class SupervisedModule(L.LightningModule):
             if compute_attention_logits:
                 sub_emb = graph_emb.index_select(0, idx)
                 attn_logits, _ = self.attention(sub_emb)
-                instance_attention_logits_chunks.append(attn_logits.reshape(-1, 1))
+                if attn_logits.dim() == 1:
+                    attn_logits = attn_logits.unsqueeze(-1)
+                instance_attention_logits_chunks.append(attn_logits)
 
         metadata["instance_logits"] = (
             torch.cat(instance_logits_chunks, dim=0)
@@ -460,7 +470,7 @@ class SupervisedModule(L.LightningModule):
             metadata["instance_attention_logits"] = (
                 torch.cat(instance_attention_logits_chunks, dim=0)
                 if instance_attention_logits_chunks
-                else torch.empty((0, 1), device=patch_logits.device)
+                else torch.empty((0, self._attention_width()), device=patch_logits.device)
             )
         if instance_graph_chunks:
             metadata["instance_graphs"] = instance_graph_chunks

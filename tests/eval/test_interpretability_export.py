@@ -184,13 +184,19 @@ def test_build_spatial_table_requires_payload_connectivity() -> None:
         build_spatial_table(instance_frame, payload)
 
 
-def test_build_instance_table_rejects_multi_column_attention_logits() -> None:
+def test_build_instance_table_exports_per_class_attention_columns() -> None:
+    """Per-class attention is exported, not rejected.
+
+    The attribution identity needs one attention column per class, plus the raw
+    pre-softmax logits (which, unlike the within-bag normalised scores, are
+    comparable across bags).
+    """
     payload = BatchPredictionPayload(
         bag_ids=["b0"],
         bag_logits=torch.tensor([[1.0, 0.0]]),
         bag_targets=None,
         bag_attention=None,
-        instance_logits=torch.tensor([[0.2], [0.5]]),
+        instance_logits=torch.tensor([[0.2, 0.7], [0.5, 0.1]]),
         instance_attention_logits=torch.tensor([[0.1, 0.2], [0.3, 0.4]]),
         instance_patch_ids=["p0", "p1"],
         instance_bag_ids=["b0", "b0"],
@@ -199,5 +205,38 @@ def test_build_instance_table_rejects_multi_column_attention_logits() -> None:
         instance_embeddings=torch.tensor([[0.1, 0.2], [0.3, 0.4]]),
         instance_composition=torch.tensor([[1.0, 0.0], [0.5, 0.5]]),
     )
-    with pytest.raises(ValueError, match="exactly one column"):
-        build_instance_table(payload, require_composition=True)
+    table = build_instance_table(payload, require_composition=True)
+
+    for column in ("attention", "attention_c0", "attention_c1"):
+        assert column in table.columns
+    assert "attention_logit_c0" in table.columns
+
+    # Each class column is a distribution over the bag's instances.
+    assert table["attention_c0"].sum() == pytest.approx(1.0)
+    assert table["attention_c1"].sum() == pytest.approx(1.0)
+    # The canonical `attention` column defaults to the last class.
+    assert table["attention"].tolist() == pytest.approx(table["attention_c1"].tolist())
+    # Raw logits are passed through unnormalised.
+    assert table["attention_logit_c0"].tolist() == pytest.approx([0.1, 0.3])
+
+
+def test_build_instance_table_attention_class_index_is_selectable() -> None:
+    payload = BatchPredictionPayload(
+        bag_ids=["b0"],
+        bag_logits=torch.tensor([[1.0, 0.0]]),
+        bag_targets=None,
+        bag_attention=None,
+        instance_logits=torch.tensor([[0.2, 0.7], [0.5, 0.1]]),
+        instance_attention_logits=torch.tensor([[0.1, 5.0], [0.3, 0.4]]),
+        instance_patch_ids=["p0", "p1"],
+        instance_bag_ids=["b0", "b0"],
+        instance_region_ids=["r0", "r0"],
+        instance_sample_ids=["s0", "s0"],
+        instance_embeddings=torch.tensor([[0.1, 0.2], [0.3, 0.4]]),
+        instance_composition=torch.tensor([[1.0, 0.0], [0.5, 0.5]]),
+    )
+    table = build_instance_table(payload, require_composition=True, attention_class_index=0)
+    assert table["attention"].tolist() == pytest.approx(table["attention_c0"].tolist())
+
+    with pytest.raises(ValueError, match="out of range"):
+        build_instance_table(payload, require_composition=True, attention_class_index=5)

@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 import torch
 
 from grass_mil.inference.schemas import AggregatedPredictionPayload, BatchPredictionPayload
+from grass_mil.contracts import validate_attention_width
 
 
 def _aggregate_rows(values: torch.Tensor, mode: str) -> torch.Tensor:
@@ -254,9 +255,17 @@ def aggregate_group_logits(
             )
             idx = torch.tensor(indices, dtype=torch.long)
             instance_logits = payload.instance_logits.index_select(0, idx)
-            attn_logits = payload.instance_attention_logits.index_select(0, idx).reshape(-1)
+            attn_logits = payload.instance_attention_logits.index_select(0, idx)
+            if attn_logits.dim() == 1:
+                attn_logits = attn_logits.unsqueeze(-1)
+            validate_attention_width(
+                attention_width=int(attn_logits.size(-1)),
+                num_classes=int(instance_logits.size(-1)),
+            )
+            # Softmax down the instance axis, per class column, matching the
+            # training-time bag pooling.
             attn_scores = torch.softmax(attn_logits, dim=0)
-            agg_logits = (instance_logits * attn_scores.unsqueeze(-1)).sum(dim=0, keepdim=True)
+            agg_logits = (instance_logits * attn_scores).sum(dim=0, keepdim=True)
             aggregated_ids.append(bag_id)
             aggregated_logits.append(agg_logits)
             aggregated_attention_rows.append(attn_scores.detach().cpu())

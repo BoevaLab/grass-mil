@@ -71,7 +71,57 @@ def test_aggregate_group_logits_attention_weighted_uses_instance_softmax() -> No
     assert out.bag_attention is not None
     assert len(out.bag_attention) == 2
     assert out.bag_attention[0] is not None
-    assert torch.allclose(out.bag_attention[0], torch.tensor([0.000335, 0.999665]), atol=1e-4)
+    # Attention is [n_instances, n_channels]; a shared channel keeps one column.
+    assert out.bag_attention[0].shape == (2, 1)
+    assert torch.allclose(out.bag_attention[0], torch.tensor([[0.000335], [0.999665]]), atol=1e-4)
+
+
+def test_aggregate_group_logits_attention_weighted_supports_per_class_attention() -> None:
+    """Each class column is normalised over instances independently."""
+    payload = BatchPredictionPayload(
+        bag_ids=["r1", "r1"],
+        bag_logits=torch.tensor([[1.0, 10.0], [3.0, 30.0]]),
+        bag_targets=None,
+        bag_attention=None,
+        row_region_ids=["region_a", "region_a"],
+        row_sample_ids=["sample_x", "sample_x"],
+        instance_logits=torch.tensor([[1.0, 10.0], [3.0, 30.0]]),
+        # Class 0 attends the first instance, class 1 the second.
+        instance_attention_logits=torch.tensor([[9.0, 1.0], [1.0, 9.0]]),
+        instance_patch_ids=["r1", "r1"],
+        instance_region_ids=["region_a", "region_a"],
+        instance_sample_ids=["sample_x", "sample_x"],
+    )
+    out = aggregate_group_logits(payload, mode="attention_weighted")
+
+    attention = out.bag_attention[0]
+    assert attention.shape == (2, 2)
+    assert torch.allclose(attention.sum(dim=0), torch.ones(2), atol=1e-6)
+
+    # The identity: bag logit for class c is sum_i A[i,c] * l[i,c].
+    expected = (payload.instance_logits * attention).sum(dim=0)
+    assert torch.allclose(out.bag_logits[0], expected, atol=1e-6)
+    # Class 0 is pulled toward instance 0's logit, class 1 toward instance 1's.
+    assert out.bag_logits[0][0] < 1.5
+    assert out.bag_logits[0][1] > 29.0
+
+
+def test_aggregate_group_logits_rejects_mismatched_attention_width() -> None:
+    payload = BatchPredictionPayload(
+        bag_ids=["r1", "r1"],
+        bag_logits=torch.tensor([[1.0, 10.0], [3.0, 30.0]]),
+        bag_targets=None,
+        bag_attention=None,
+        row_region_ids=["region_a", "region_a"],
+        row_sample_ids=["sample_x", "sample_x"],
+        instance_logits=torch.tensor([[1.0, 10.0], [3.0, 30.0]]),
+        instance_attention_logits=torch.tensor([[1.0, 2.0, 3.0], [1.0, 2.0, 3.0]]),
+        instance_patch_ids=["r1", "r1"],
+        instance_region_ids=["region_a", "region_a"],
+        instance_sample_ids=["sample_x", "sample_x"],
+    )
+    with pytest.raises(ValueError, match="Attention emits 3 channel"):
+        aggregate_group_logits(payload, mode="attention_weighted")
 
 
 def test_aggregate_group_logits_mean_supports_region_scope() -> None:

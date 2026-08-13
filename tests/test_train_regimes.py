@@ -16,6 +16,16 @@ def _load_task_cfg(name: str):
     return OmegaConf.load(CONFIGS_DIR / "task" / f"{name}.yaml").task
 
 
+def _load_task_model_overrides(name: str):
+    """Model overrides a task preset injects into the global package.
+
+    Hydra applies these during composition; this test composes manually, so it
+    must apply them too or the head width and the task objective disagree.
+    """
+    cfg = OmegaConf.load(CONFIGS_DIR / "task" / f"{name}.yaml")
+    return cfg.get("model", None)
+
+
 def _make_pretrain_ckpt(path: Path) -> str:
     from grass_mil.models.bgrl_module import BGRLModule
 
@@ -79,6 +89,9 @@ def test_training_regimes_fast_dev_run(
             "cosine_step.yaml" if task_name == "pretrain_bgrl" else "cosine_epoch.yaml"
         )
         cfg_train.scheduler = OmegaConf.load(CONFIGS_DIR / "scheduler" / scheduler_name)
+        task_model_overrides = _load_task_model_overrides(task_name)
+        if task_model_overrides is not None:
+            cfg_train.model = OmegaConf.merge(cfg_train.model, task_model_overrides)
         cfg_train.model.encoder.input_dim = 8
         cfg_train.model.task = cfg_train.task
         cfg_train.model.optim = cfg_train.optim

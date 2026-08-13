@@ -15,6 +15,11 @@ score_mode: sigmoid
 # Which logit column to project into `score` (0-based).
 score_logit_index: 0
 attention_column: attention
+# Which attention channel becomes the canonical `attention` column when the
+# head emits one channel per class. null selects the last channel (the
+# positive class for binary tasks). Per-class columns are always exported
+# as attention_c{j} alongside the raw attention_logit_c{j}.
+attention_class_index: null
 require_composition: true
 
 spatial:

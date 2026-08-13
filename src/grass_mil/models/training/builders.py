@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 import lightning as L
 import torch
 
+from grass_mil.contracts import validate_attention_width
 from grass_mil.models.components import (
     EncoderConfig,
     build_attention,
@@ -159,6 +160,11 @@ def build_supervised_components(
             raise ValueError("attention config is required when use_attention=True.")
         cfg = dict(attention_cfg)
         attention_type = cfg.pop("attention_type", "gated_projected")
+        # Fail at build time rather than part-way through the first batch.
+        validate_attention_width(
+            attention_width=int(cfg.get("n_classes", 1)),
+            num_classes=int(graph_head_cfg.get("output_dim", 1)),
+        )
         attention = build_attention(True, attention_type=attention_type, **cfg)
     loss_name = loss_cfg.pop("loss_type")
     loss_fn = build_loss(loss_name, **loss_cfg)

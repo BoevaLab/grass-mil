@@ -75,26 +75,32 @@ def _make_unique_ids(values: Sequence[str]) -> List[str]:
 
 
 def _softmax_by_group(logits: torch.Tensor, groups: Sequence[str]) -> np.ndarray:
-    if logits.ndim != 2 or logits.shape[1] != 1:
+    """Normalise attention logits over the instances of each bag.
+
+    Returns one column per attention channel: a shared channel yields
+    ``[n_instances, 1]``, per-class attention yields ``[n_instances,
+    n_classes]``. Each column sums to 1 within a bag.
+    """
+    if logits.ndim == 1:
+        logits = logits.unsqueeze(-1)
+    if logits.ndim != 2:
         raise ValueError(
-            "instance_attention_logits must be a 2D tensor with exactly one column. "
-            "Multi-column attention logits are ambiguous for interpretability export; "
-            "emit a single attention logit per instance."
+            "instance_attention_logits must be a 2D tensor of shape "
+            f"[n_instances, n_attention_classes]; got {tuple(logits.shape)}."
         )
     if logits.shape[0] != len(groups):
         raise ValueError(
             "Mismatch between attention logits rows and group ids: "
             f"{logits.shape[0]} vs {len(groups)}."
         )
-    attention = np.zeros((len(groups),), dtype=np.float64)
+    attention = np.zeros((len(groups), int(logits.shape[1])), dtype=np.float64)
     grouped_indices: Dict[str, List[int]] = defaultdict(list)
     for idx, group in enumerate(groups):
         grouped_indices[str(group)].append(idx)
     for indices in grouped_indices.values():
-        chunk = logits[indices, 0]
+        chunk = logits[indices, :]
         scores = torch.softmax(chunk, dim=0).cpu().numpy().astype(np.float64)
-        for local, global_idx in enumerate(indices):
-            attention[global_idx] = float(scores[local])
+        attention[indices, :] = scores
     return attention
 
 
@@ -183,6 +189,7 @@ def build_instance_table(
     score_mode: str = "sigmoid",
     score_logit_index: int = 0,
     attention_column: str = "attention",
+    attention_class_index: Optional[int] = None,
 ) -> pd.DataFrame:
     logits = _tensor_to_2d_cpu(payload.instance_logits)
     if logits is None:
@@ -232,7 +239,24 @@ def build_instance_table(
 
     attention_logits = _tensor_to_2d_cpu(payload.instance_attention_logits)
     if attention_logits is not None:
-        data[attention_column] = _softmax_by_group(attention_logits, bag_ids).tolist()
+        attention_matrix = _softmax_by_group(attention_logits, bag_ids)
+        n_channels = int(attention_matrix.shape[1])
+        canonical = n_channels - 1 if attention_class_index is None else int(attention_class_index)
+        if canonical < 0 or canonical >= n_channels:
+            raise ValueError(
+                f"attention_class_index={canonical} is out of range for attention with "
+                f"{n_channels} channel(s)."
+            )
+        data[attention_column] = attention_matrix[:, canonical].tolist()
+        if n_channels > 1:
+            # Per-class attention and the raw pre-softmax logits. The logits are
+            # comparable across bags, which the within-bag normalised scores are
+            # not, and the attribution identity needs the per-class columns.
+            for channel in range(n_channels):
+                data[f"{attention_column}_c{channel}"] = attention_matrix[:, channel].tolist()
+                data[f"{attention_column}_logit_c{channel}"] = attention_logits[
+                    :, channel
+                ].tolist()
     else:
         data[attention_column] = _uniform_attention(bag_ids).tolist()
 
