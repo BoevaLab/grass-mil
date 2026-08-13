@@ -10,12 +10,27 @@ from .components import EncoderConfig, build_encoder, build_ssl
 from .training import (
     CosineWarmup,
     augment_graph,
+    build_augmentation,
     infer_encoder_input_dim,
     resolve_encoder_cfg,
     instantiate_optimizer,
     instantiate_scheduler_with_warmup,
     load_state_dict_with_optional_mapping,
 )
+
+
+def _molecular_feature_names(module) -> Optional[list]:
+    """Feature names from the datamodule, for name-based column resolution."""
+    try:
+        trainer = module.trainer
+    except RuntimeError:
+        return None
+    datamodule = getattr(trainer, "datamodule", None) if trainer is not None else None
+    dataset = getattr(datamodule, "dataset_train", None)
+    if dataset is None or len(dataset) == 0:
+        return None
+    names = getattr(dataset[0], "molecular_feature_names", None)
+    return list(names) if names else None
 
 
 class BGRLModule(L.LightningModule):
@@ -53,6 +68,9 @@ class BGRLModule(L.LightningModule):
         self._total_steps = int(self.task_cfg.get("total_steps", 0))
 
         self._momentum_scheduler: Optional[CosineWarmup] = None
+        # When set, replaces the uniform drop_edge/drop_feat views.
+        self._augmentation_cfg = self.task_cfg.get("augmentation")
+        self._augmentation = None
 
     def setup(self, stage: Optional[str] = None) -> None:
         if self._built:
@@ -61,6 +79,17 @@ class BGRLModule(L.LightningModule):
             dict(self.hparams.encoder), infer_encoder_input_dim(self), module=self
         )
         self.encoder = build_encoder(EncoderConfig(**encoder_cfg))
+        if self._augmentation_cfg:
+            input_proj = getattr(self.encoder, "input_proj", None)
+            categorical = getattr(input_proj, "categorical", None)
+            self._augmentation = build_augmentation(
+                self._augmentation_cfg,
+                feature_names=_molecular_feature_names(self),
+                unassigned_index=getattr(input_proj, "unassigned_index", None),
+                categorical_column=(
+                    None if categorical is None else categorical.column_index or 0
+                ),
+            )
         self.ssl_model = build_ssl(True, self.encoder, dict(self.hparams.ssl))
         if self.ssl_model is None:
             raise ValueError("BGRLModule requires ssl.method=bgrl config.")
@@ -98,17 +127,24 @@ class BGRLModule(L.LightningModule):
             getattr(batch, "categorical_codes", None),
         )
 
+    def _make_views(self, batch):
+        if self._augmentation is not None:
+            return self._augmentation(batch, None), self._augmentation(batch, None)
+        return (
+            augment_graph(
+                batch,
+                drop_edge_p=self._drop_edge_p1,
+                drop_feat_p=self._drop_feat_p1,
+            ),
+            augment_graph(
+                batch,
+                drop_edge_p=self._drop_edge_p2,
+                drop_feat_p=self._drop_feat_p2,
+            ),
+        )
+
     def _step(self, batch) -> torch.Tensor:
-        view1 = augment_graph(
-            batch,
-            drop_edge_p=self._drop_edge_p1,
-            drop_feat_p=self._drop_feat_p1,
-        )
-        view2 = augment_graph(
-            batch,
-            drop_edge_p=self._drop_edge_p2,
-            drop_feat_p=self._drop_feat_p2,
-        )
+        view1, view2 = self._make_views(batch)
         q1, y2 = self.ssl_model(self._encode_tuple(view1), self._encode_tuple(view2))
         q2, y1 = self.ssl_model(self._encode_tuple(view2), self._encode_tuple(view1))
         loss = (
