@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 import lightning as L
 import torch
 import torch.distributed as dist
+from grass_mil.batching import extract_subgraphs
 from grass_mil.inference.aggregation import aggregate_group_logits
 from grass_mil.inference.metrics import compute_task_metrics_from_tensors
 from grass_mil.inference.schemas import BatchPredictionPayload
@@ -392,12 +393,12 @@ class SupervisedModule(L.LightningModule):
         compute_attention_logits = (
             include_instance_payload and self.use_attention and self.attention is not None
         )
-        subgraph_data_list = None
-        if hasattr(batch, "to_data_list"):
-            try:
-                subgraph_data_list = batch.to_data_list()
-            except Exception:
-                subgraph_data_list = None
+        # ShaDow batches are built directly and delimited by `ptr`, so
+        # `to_data_list()` raises on them. This previously sat behind a bare
+        # `except` that turned that into a silent None, and the spatial-table
+        # export then failed several steps later complaining about a missing
+        # payload field instead of naming the cause.
+        subgraph_data_list = extract_subgraphs(batch)
 
         for bag_id, indices in zip(ordered_bag_ids, bag_indices):
             if not indices:

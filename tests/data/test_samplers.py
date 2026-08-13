@@ -720,3 +720,63 @@ def test_runtime_ego_radius_shrinks_sampled_subgraphs():
         }
     )
     assert bounded < unbounded
+
+
+def test_shadow_batches_split_into_subgraphs_without_a_transform():
+    """ShaDow batches must be splittable even when no transform is configured.
+
+    ``Batch.to_data_list()`` only works for batches assembled by
+    ``Batch.from_data_list()``. The ShaDow samplers construct their ``Batch``
+    directly and delimit subgraphs with ``ptr``, so ``to_data_list()`` raises on
+    them.
+
+    That mattered because ``predict_step`` used ``to_data_list()`` behind a bare
+    ``except`` to recover per-instance subgraphs: it silently produced ``None``,
+    ``instance_graphs`` were never collected, and the spatial-table export failed
+    several steps later complaining about a missing payload field. Every spatial
+    plugin (Moran's I, Ripley, neighbourhood enrichment) was unreachable from the
+    CLI as a result.
+
+    The existing coverage missed it because the only test exercising this path
+    passed a transform, and the transform branch re-collates via
+    ``Batch.from_data_list()`` -- the one case where ``to_data_list()`` works.
+    """
+    pytest.importorskip("torch_geometric")
+    try:
+        import torch_sparse  # noqa: F401
+    except Exception:
+        pytest.skip("torch_sparse is not available")
+
+    from grass_mil.batching import extract_subgraphs
+    from grass_mil.data.components.samplers import get_sampler_strategy
+
+    n_nodes = 20
+    data = _toy_dataset(n_graphs=1, n_nodes=n_nodes)[0]
+    _attach_cell_type_metadata(data, list(range(n_nodes)))
+    data.pos = torch.arange(n_nodes, dtype=torch.float32).view(-1, 1).repeat(1, 2)
+
+    strategy = get_sampler_strategy({"name": "shadow_custom", "kwargs": {}})
+    loader = strategy.build_unit_loader(
+        data=data, depth=2, num_neighbors=8, batch_size=4, transform=None
+    )
+    batch = next(iter(loader))
+
+    # The precondition: this batch is not one PyG can un-batch itself.
+    with pytest.raises(Exception):
+        batch.to_data_list()
+
+    subgraphs = extract_subgraphs(batch)
+    assert subgraphs is not None, "ShaDow batch could not be split into subgraphs"
+    assert len(subgraphs) == int(batch.ptr.numel() - 1)
+
+    for sub in subgraphs:
+        # Node-level tensors must come along, sliced to this subgraph. Spatial
+        # export needs `pos`; the encoder needs `categorical_codes`.
+        assert sub.categorical_codes.size(0) == sub.x.size(0)
+        assert sub.pos.size(0) == sub.x.size(0)
+        # Edges must be relabelled into the subgraph's own index space.
+        if sub.edge_index.numel():
+            assert int(sub.edge_index.max()) < sub.x.size(0)
+
+    # Node counts must partition the batch, with nothing dropped or duplicated.
+    assert sum(int(s.x.size(0)) for s in subgraphs) == int(batch.x.size(0))
