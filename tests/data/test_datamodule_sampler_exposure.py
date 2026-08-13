@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from src.data.components.samplers import SamplerConfig
-from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
+from grass_mil.data.components.samplers import SamplerConfig
+from grass_mil.data.spatial_omics_datamodule import SpatialOmicsDataModule
 
 
 def _minimal_datamodule(tmp_path: Path, sampler: dict | None) -> SpatialOmicsDataModule:

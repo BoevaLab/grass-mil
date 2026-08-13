@@ -20,11 +20,8 @@ sync: ## Merge changes from main branch to your current branch
 	git pull
 	git pull origin main
 
-test: ## Run not slow tests
-	pytest -k "not slow"
-
-test-full: ## Run all tests
+test: ## Run the test suite
 	pytest
 
 train: ## Train the model
-	python src/train.py
+	grass-mil-train

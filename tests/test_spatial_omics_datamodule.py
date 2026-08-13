@@ -63,7 +63,7 @@ def test_spatial_omics_datamodule_precompute(tmp_path: Path) -> None:
     graph_labels_path = raw_dir / "graph_labels.csv"
     graph_labels_path.write_text("region_id,outcome\nregion_1,1\n")
 
-    from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
+    from grass_mil.data.spatial_omics_datamodule import SpatialOmicsDataModule
 
     dm = SpatialOmicsDataModule(
         data_dir=str(data_dir),
@@ -149,8 +149,8 @@ def test_spatial_omics_datamodule_precompute(tmp_path: Path) -> None:
     assert hasattr(data, "edge_attr")
     assert hasattr(data, "graph_y")
     assert data.x.shape[1] == 2  # gene1, gene2
-    assert hasattr(data, "categorical_index")
-    assert data.categorical_index.shape[1] == 1
+    assert hasattr(data, "categorical_codes")
+    assert data.categorical_codes.shape[1] == 1
     assert data.categorical_slices["cell_type"] == 0
 
     index_payload = json.loads((data_dir / "processed" / "processed_index.json").read_text())
@@ -197,7 +197,7 @@ def test_spatial_omics_datamodule_indices_no_molecular(tmp_path: Path) -> None:
         f"sample_1,{csv_path},csv,region_1,{polygon_path}\n"
     )
 
-    from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
+    from grass_mil.data.spatial_omics_datamodule import SpatialOmicsDataModule
 
     dm = SpatialOmicsDataModule(
         data_dir=str(data_dir),
@@ -265,8 +265,8 @@ def test_spatial_omics_datamodule_indices_no_molecular(tmp_path: Path) -> None:
     data = dm.train_dataloader().dataset[0]
     assert hasattr(data, "x")
     assert data.x.shape[1] == 0
-    assert hasattr(data, "categorical_index")
-    assert data.categorical_index.shape == (2, 1)
+    assert hasattr(data, "categorical_codes")
+    assert data.categorical_codes.shape == (2, 1)
 
 
 def test_h5ad_obsm_spatial_coords(tmp_path: Path) -> None:
@@ -284,7 +284,7 @@ def test_h5ad_obsm_spatial_coords(tmp_path: Path) -> None:
     p = tmp_path / "test.h5ad"
     adata.write_h5ad(p)
 
-    from src.data.components.loaders import H5adConfig, load_h5ad_table
+    from grass_mil.data.components.loaders import H5adConfig, load_h5ad_table
 
     table = load_h5ad_table(
         p,
@@ -332,7 +332,7 @@ def test_datamodule_requires_persisted_splits(tmp_path: Path) -> None:
         )
     )
 
-    from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
+    from grass_mil.data.spatial_omics_datamodule import SpatialOmicsDataModule
 
     dm = SpatialOmicsDataModule(
         data_dir=str(tmp_path),
@@ -417,7 +417,7 @@ def test_datamodule_uses_persisted_splits(tmp_path: Path) -> None:
         )
     )
 
-    from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
+    from grass_mil.data.spatial_omics_datamodule import SpatialOmicsDataModule
 
     dm = SpatialOmicsDataModule(
         data_dir=str(tmp_path),
@@ -474,7 +474,7 @@ def test_datamodule_uses_persisted_splits(tmp_path: Path) -> None:
 def _make_unit(
     table_idx: int, sample_id: str, region_id: str, patch_idx: int, split: str = "train"
 ):
-    from src.data.components.precompute import GraphUnitSpec
+    from grass_mil.data.components.precompute import GraphUnitSpec
 
     return GraphUnitSpec(
         table_idx=table_idx,
@@ -488,7 +488,7 @@ def _make_unit(
 
 
 def test_region_split_groups_all_patches_per_region() -> None:
-    from src.data.components.precompute import _assign_split_labels
+    from grass_mil.data.components.precompute import _assign_split_labels
 
     units = [
         _make_unit(0, "s0", "r0", 0),
@@ -508,7 +508,7 @@ def test_region_split_groups_all_patches_per_region() -> None:
 
 
 def test_loocv_holdout_region_is_test_only_with_region_validation() -> None:
-    from src.data.components.precompute import LoocvConfig, _assign_split_labels
+    from grass_mil.data.components.precompute import LoocvConfig, _assign_split_labels
 
     units = [
         _make_unit(0, "s0", "r0", 0),
@@ -540,7 +540,7 @@ def test_loocv_holdout_region_is_test_only_with_region_validation() -> None:
 
 
 def test_loocv_patch_validation_uses_only_train_fold_items() -> None:
-    from src.data.components.precompute import LoocvConfig, _assign_split_labels
+    from grass_mil.data.components.precompute import LoocvConfig, _assign_split_labels
 
     units = [
         _make_unit(0, "s0", "r0", 0),
@@ -574,7 +574,7 @@ def test_loocv_patch_validation_uses_only_train_fold_items() -> None:
 def test_loocv_heldout_validation_allows_zero_val_ratio() -> None:
     pytest.importorskip("lightning")
     pytest.importorskip("torch_geometric")
-    from src.data.components.precompute import LoocvConfig, _assign_split_labels
+    from grass_mil.data.components.precompute import LoocvConfig, _assign_split_labels
 
     units = [
         _make_unit(0, "s0", "r0", 0),
@@ -604,7 +604,7 @@ def test_loocv_heldout_validation_allows_zero_val_ratio() -> None:
 def test_loocv_heldout_validation_forces_one_for_nonzero_ratio() -> None:
     pytest.importorskip("lightning")
     pytest.importorskip("torch_geometric")
-    from src.data.components.precompute import LoocvConfig, _assign_split_labels
+    from grass_mil.data.components.precompute import LoocvConfig, _assign_split_labels
 
     units = [
         _make_unit(0, "s0", "r0", 0),
@@ -631,7 +631,7 @@ def test_loocv_heldout_validation_forces_one_for_nonzero_ratio() -> None:
 def test_loocv_patch_validation_allows_zero_val_ratio() -> None:
     pytest.importorskip("lightning")
     pytest.importorskip("torch_geometric")
-    from src.data.components.precompute import LoocvConfig, _assign_split_labels
+    from grass_mil.data.components.precompute import LoocvConfig, _assign_split_labels
 
     units = [
         _make_unit(0, "s0", "r0", 0),
@@ -661,7 +661,7 @@ def test_loocv_patch_validation_allows_zero_val_ratio() -> None:
 def test_loocv_patch_validation_forces_one_for_nonzero_ratio() -> None:
     pytest.importorskip("lightning")
     pytest.importorskip("torch_geometric")
-    from src.data.components.precompute import LoocvConfig, _assign_split_labels
+    from grass_mil.data.components.precompute import LoocvConfig, _assign_split_labels
 
     units = [
         _make_unit(0, "s0", "r0", 0),
@@ -686,7 +686,7 @@ def test_loocv_patch_validation_forces_one_for_nonzero_ratio() -> None:
 
 
 def test_loocv_supports_sample_fold_unit() -> None:
-    from src.data.components.precompute import LoocvConfig, _assign_split_labels
+    from grass_mil.data.components.precompute import LoocvConfig, _assign_split_labels
 
     units = [
         _make_unit(0, "s0", "r0", 0),
@@ -718,7 +718,7 @@ def _build_loocv_train_only_dm(tmp_path: Path, processed_dir: Path):
     manifest_path = tmp_path / "manifest.csv"
     manifest_path.write_text("sample_id,input_path,input_type\ns0,/tmp/fake.csv,csv\n")
 
-    from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
+    from grass_mil.data.spatial_omics_datamodule import SpatialOmicsDataModule
 
     return SpatialOmicsDataModule(
         data_dir=str(tmp_path),
@@ -844,7 +844,7 @@ def _build_minimal_datamodule(
     force_precompute: bool,
     edge_features: list[str],
 ):
-    from src.data.spatial_omics_datamodule import SpatialOmicsDataModule
+    from grass_mil.data.spatial_omics_datamodule import SpatialOmicsDataModule
 
     return SpatialOmicsDataModule(
         data_dir=str(data_dir),
@@ -1008,3 +1008,163 @@ def test_precompute_reuse_rejects_coord_scale_um_mismatch(tmp_path: Path) -> Non
     dm_third.prepare_data()
     third_index = json.loads((processed_dir / "processed_index.json").read_text())
     assert float(third_index["preprocessing"]["coord_scale_um"]) == 2.0
+
+
+def test_graph_dataset_migrates_legacy_categorical_index(tmp_path):
+    """Processed caches written before the rename must still load."""
+    import json
+
+    import torch
+    from torch_geometric.data import Data
+
+    from grass_mil.data.components.datasets import SpatialOmicsGraphDataset
+
+    graph_path = tmp_path / "legacy.pt"
+    data = Data(x=torch.randn(3, 2), edge_index=torch.empty(2, 0, dtype=torch.long))
+    data.num_nodes = 3
+    data.categorical_index = torch.tensor([[0], [1], [2]], dtype=torch.long)
+    torch.save(data, graph_path)
+
+    index_path = tmp_path / "processed_index.json"
+    index_path.write_text(
+        json.dumps(
+            {
+                "entries": [
+                    {
+                        "path": str(graph_path),
+                        "sample_id": "s0",
+                        "region_id": "r0",
+                        "patch_id": "p0",
+                        "split": "train",
+                    }
+                ]
+            }
+        )
+    )
+
+    loaded = SpatialOmicsGraphDataset(index_path)[0]
+    assert torch.equal(loaded.categorical_codes.view(-1), torch.tensor([0, 1, 2]))
+    assert getattr(loaded, "categorical_index", None) is None
+
+
+def _packaged_data_defaults():
+    """Reuse the shipped datamodule defaults so tests track config changes."""
+    from omegaconf import OmegaConf
+
+    from tests.helpers.config_paths import CONFIGS_DIR
+
+    cfg = OmegaConf.load(CONFIGS_DIR / "data" / "spatial_omics.yaml")
+    return OmegaConf.to_container(cfg, resolve=False)
+
+
+def _write_cell_type_csv_and_manifest(raw_dir: Path, *, n_samples: int = 4) -> Path:
+    """A cohort whose only node attribute is a categorical cell type."""
+    rng = np.random.default_rng(0)
+    rows = ["sample_id,input_path,input_type,region_id"]
+    for sample in range(n_samples):
+        coords = rng.uniform(0.0, 100.0, size=(24, 2))
+        cell_types = rng.choice(["tumor", "tcell", "stroma"], size=coords.shape[0])
+        csv_path = raw_dir / f"sample_{sample}.csv"
+        lines = ["cell_id,x,y,cell_type"]
+        for idx, ((cx, cy), ctype) in enumerate(zip(coords, cell_types)):
+            lines.append(f"{idx},{cx},{cy},{ctype}")
+        csv_path.write_text("\n".join(lines) + "\n")
+        rows.append(f"sample_{sample},{csv_path},csv,region_{sample}")
+    manifest_path = raw_dir / "manifest.csv"
+    manifest_path.write_text("\n".join(rows) + "\n")
+    return manifest_path
+
+
+def test_encoder_trains_on_cell_type_only_cohort(tmp_path):
+    """End-to-end guard for the published input scheme.
+
+    With `use_molecular_features=false` the node feature matrix has zero
+    columns, so the learned cell-type embedding is the entire input
+    representation. This configuration was inexpressible before the encoder
+    gained a categorical embedding.
+    """
+    import lightning as L
+
+    from grass_mil.data.spatial_omics_datamodule import SpatialOmicsDataModule
+    from grass_mil.models.supervised_module import SupervisedModule
+
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    manifest_path = _write_cell_type_csv_and_manifest(raw_dir)
+
+    targets_path = tmp_path / "targets.csv"
+    targets_path.write_text("id,label\n" + "".join(f"region_{i},{i % 2}\n" for i in range(4)))
+
+    datamodule = SpatialOmicsDataModule(
+        data_dir=str(tmp_path),
+        raw_manifest_path=str(manifest_path),
+        processed_dir=str(tmp_path / "processed"),
+        sample_unit="full",
+        batch_size=1,
+        num_workers=0,
+        pin_memory=False,
+        min_cells=1,
+        use_molecular_features=False,
+        force_precompute=True,
+        coord_scale_um=1.0,
+        reducer_scope="sample",
+        keep_raw_molecular=False,
+        h5ad=_packaged_data_defaults()["h5ad"],
+        sce=_packaged_data_defaults()["sce"],
+        feature_reducer={"name": "identity", "fit_mode": "train_only", "kwargs": {}},
+        tiling={"tile_size_um": 200.0, "stride_um": 200.0, "min_cells": 1},
+        categorical_features={"include_labels": ["cell_type"]},
+        csv={
+            "sep": ",",
+            "coord_columns": ["x", "y"],
+            "cell_id_column": "cell_id",
+            "categorical_label_columns": ["cell_type"],
+            "molecular_columns": None,
+        },
+        split={"train_val_test_split": [0.5, 0.25, 0.25], "split_by": "sample"},
+        graph_builder={
+            "name": "delaunay",
+            "kwargs": {"edge_features": ["distance", "neighbor"], "neighbor_cutoff_um": 20.0},
+        },
+        graph_labels={
+            "label_file": str(targets_path),
+            "id_column": "id",
+            "tasks": ["label"],
+            "scope": "region",
+        },
+    )
+    datamodule.prepare_data()
+    datamodule.setup("fit")
+
+    sample = datamodule.dataset_train[0]
+    assert sample.x.shape[1] == 0, "cell-type-only cohort must have zero continuous features"
+    assert sample.categorical_codes.shape[0] == sample.x.shape[0]
+
+    model = SupervisedModule(
+        encoder={
+            "input_dim": 0,
+            "hidden_dim": 8,
+            "out_dim": 8,
+            "num_layers": 2,
+            "conv_type": "gine",
+            "norm": "layernorm",
+            "pooling": "max",
+            "use_edge_attr": True,
+            "edge_attr_dim": 1,
+            "edge_feature_index": 0,
+            "categorical_embedding": {"label": "cell_type"},
+        },
+        graph_head={"input_dim": 8, "output_dim": 1, "hidden_dim": 8, "num_layers": 2},
+        attention=None,
+        loss={"loss_type": "categorical_bce"},
+        task={"aggregation": "mean", "target_type": "binary", "bag_key": "region_id"},
+        optim={"_target_": "torch.optim.AdamW", "lr": 1e-3},
+    )
+
+    trainer = L.Trainer(
+        fast_dev_run=True, accelerator="cpu", logger=False, enable_checkpointing=False
+    )
+    trainer.fit(model, datamodule=datamodule)
+
+    # The vocabulary was inferred from the data, plus the reserved unassigned row.
+    assert model.encoder.input_proj.embedding.num_embeddings == 4

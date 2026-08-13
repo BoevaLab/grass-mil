@@ -14,10 +14,10 @@ Geometric deep learning framework for spatial omics data, built around a Hydra-c
 
 Core architecture:
 
-- Data pipeline: `src/data/` + `configs/data/`
-- Model/runtime pipeline: `src/models/` + `configs/model/` + `configs/task/`
-- Interpretability pipeline: `src/interpretability/` + `configs/interpretability/`
-- Entrypoints: `src/train.py`, `src/eval.py`
+- Data pipeline: `src/grass_mil/data/` + `configs/data/`
+- Model/runtime pipeline: `src/grass_mil/models/` + `configs/model/` + `configs/task/`
+- Interpretability pipeline: `src/grass_mil/interpretability/` + `configs/interpretability/`
+- Entrypoints: `src/grass_mil/train.py`, `src/grass_mil/eval.py`
 - Configuration system: `configs/` (Hydra groups)
 
 ## Interpretability
@@ -32,7 +32,7 @@ Core architecture:
 Quick run:
 
 ```bash
-python src/interpretability/report_cli.py \
+grass-mil-report \
   data.instance_table=/absolute/path/to/instance_table.csv \
   data.spatial_table=/absolute/path/to/spatial_table.csv
 ```
@@ -42,16 +42,30 @@ python src/interpretability/report_cli.py \
 ### 1) Install
 
 ```bash
-cd /Users/lovrorabuzin/Projects/grass-mil_unification/grass-mil
+git clone git@github.com:BoevaLab/grass-mil.git
+cd grass-mil
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+
+# Editable install for development; drop -e for a plain install.
+pip install -e .
+
+# Optional extras: interpretability plots, report rendering, spatial statistics,
+# and the h5ad/SingleCellExperiment readers.
+pip install -e ".[interpretability,report,spatial-stats,io]"
 ```
 
-Set project root for Hydra path resolution:
+Installing exposes the CLI entrypoints (`grass-mil-train`, `grass-mil-eval`,
+`grass-mil-loocv`, `grass-mil-predict`, `grass-mil-report`). The Hydra config
+tree ships inside the package, so it resolves from any working directory.
+
+Hydra's `paths.root_dir` defaults to the `PROJECT_ROOT` environment variable
+when set (`rootutils` exports it automatically from the `.project-root` marker
+in a source checkout) and otherwise falls back to the current working
+directory. Set it explicitly to place `data/` and `logs/` elsewhere:
 
 ```bash
-export PROJECT_ROOT=/Users/lovrorabuzin/Projects/grass-mil_unification/grass-mil
+export PROJECT_ROOT=/path/to/your/workspace
 ```
 
 ### 2) Prepare New Data
@@ -73,13 +87,13 @@ For the full onboarding checklist and dataset schema details, see
 ### 3) Run Default Supervised Pipeline
 
 ```bash
-python src/train.py task=finetune_mean model=supervised_module data=spatial_omics
+grass-mil-train task=finetune_mean model=supervised_module data=spatial_omics
 ```
 
 ### 4) Evaluate A Checkpoint
 
 ```bash
-python src/eval.py \
+grass-mil-eval \
   ckpt_path=/absolute/path/to/checkpoint.ckpt \
   task=finetune_mean \
   model=supervised_module \
@@ -102,10 +116,11 @@ python src/eval.py \
 
 | Mode | Task Config | Model Config | Entrypoint | Primary Output |
 |---|---|---|---|---|
-| Supervised mean aggregation | `task=finetune_mean` | `model=supervised_module` | `src/train.py` | Region/sample-level logits via mean bag aggregation |
-| Supervised MIL attention | `task=finetune_mil` | `model=supervised_module` | `src/train.py` | Attention-weighted bag logits (+ optional MIL auxiliary terms) |
-| SSL pretraining (BGRL) | `task=pretrain_bgrl` | `model=bgrl_module` | `src/train.py` | BGRL-pretrained encoder checkpoint |
-| Checkpoint evaluation | any compatible task/model | matching training stack | `src/eval.py` | Test metrics from selected checkpoint |
+| Supervised mean aggregation | `task=finetune_mean` | `model=supervised_module` | `src/grass_mil/train.py` | Region/sample-level logits via mean bag aggregation |
+| Supervised MIL attention | `task=finetune_mil` | `model=supervised_module` | `src/grass_mil/train.py` | Per-class attention-weighted bag logits |
+| Cox survival with MIL | `task=finetune_survival` | `model=supervised_module` | `src/grass_mil/train.py` | Scalar log-hazard per bag, scored by c-index |
+| SSL pretraining (BGRL) | `task=pretrain_bgrl` | `model=bgrl_module` | `src/grass_mil/train.py` | BGRL-pretrained encoder checkpoint |
+| Checkpoint evaluation | any compatible task/model | matching training stack | `src/grass_mil/eval.py` | Test metrics from selected checkpoint |
 | Advanced prediction (Python API) | compatible with `SupervisedModule.predict_step` | `model=supervised_module` | `Trainer.predict(...)` | `bag_ids`, `bag_logits`, `row_region_ids`, `row_sample_ids`, optional `bag_targets`, optional `bag_attention`, optional `instance_*`, optional `embedding_*` |
 
 ## Required Inputs (Manifest Summary)
@@ -132,20 +147,20 @@ See full input contracts and file examples in [`docs/workflows_train_infer.md`](
 ### Switch aggregation regime
 
 ```bash
-python src/train.py task=finetune_mean model=supervised_module
-python src/train.py task=finetune_mil model=supervised_module
+grass-mil-train task=finetune_mean model=supervised_module
+grass-mil-train task=finetune_mil model=supervised_module
 ```
 
 ### Run SSL pretraining
 
 ```bash
-python src/train.py task=pretrain_bgrl model=bgrl_module
+grass-mil-train task=pretrain_bgrl model=bgrl_module
 ```
 
 ### Change backbone
 
 ```bash
-python src/train.py task=finetune_mil model=supervised_module \
+grass-mil-train task=finetune_mil model=supervised_module \
   model.encoder.conv_type=gine \
   model.encoder.use_edge_attr=true \
   model.encoder.edge_attr_dim=2
@@ -154,13 +169,13 @@ python src/train.py task=finetune_mil model=supervised_module \
 ### Force data re-precompute
 
 ```bash
-python src/train.py data.force_precompute=true
+grass-mil-train data.force_precompute=true
 ```
 
 ### Resume training
 
 ```bash
-python src/train.py ckpt_path=/absolute/path/to/last.ckpt
+grass-mil-train ckpt_path=/absolute/path/to/last.ckpt
 ```
 
 ## Where Outputs Go

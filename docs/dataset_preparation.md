@@ -108,7 +108,7 @@ Use a CSV file to attach supervision targets at `sample`, `region`, or `patch` s
 Use a fresh processed directory when onboarding new data:
 
 ```bash
-python src/train.py \
+grass-mil-train \
   task=finetune_mean \
   model=supervised_module \
   data=spatial_omics \

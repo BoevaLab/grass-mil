@@ -17,7 +17,7 @@ def _toy_graph(num_nodes: int = 12):
 @pytest.mark.parametrize("conv_type", ["gin", "gcn", "gat", "graphsage", "gine"])
 def test_encoder_forward_node_and_graph(conv_type):
     pytest.importorskip("torch_geometric")
-    from src.models.components.backbones import EncoderConfig, GNNEncoder
+    from grass_mil.models.components.backbones import EncoderConfig, GNNEncoder
 
     data = _toy_graph()
     cfg = EncoderConfig(
@@ -44,7 +44,7 @@ def test_encoder_forward_node_and_graph(conv_type):
 
 def test_encoder_warns_when_edge_attr_enabled_on_unsupported_backbone():
     pytest.importorskip("torch_geometric")
-    from src.models.components.backbones import EncoderConfig, GNNEncoder
+    from grass_mil.models.components.backbones import EncoderConfig, GNNEncoder
 
     with pytest.warns(UserWarning, match="use_edge_attr=True is ignored"):
         GNNEncoder(
@@ -62,7 +62,7 @@ def test_encoder_warns_when_edge_attr_enabled_on_unsupported_backbone():
 @pytest.mark.parametrize("jk", ["last", "concat", "max", "sum"])
 def test_encoder_jk_modes(jk):
     pytest.importorskip("torch_geometric")
-    from src.models.components.backbones import EncoderConfig, GNNEncoder
+    from grass_mil.models.components.backbones import EncoderConfig, GNNEncoder
 
     data = _toy_graph()
     cfg = EncoderConfig(
