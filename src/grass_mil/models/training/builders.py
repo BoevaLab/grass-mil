@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any, Dict, Optional
 
 import lightning as L
 import torch
 
 from grass_mil.contracts import validate_attention_width
+from grass_mil.models.components.embeddings import resolve_categorical_embedding_config
 from grass_mil.models.components import (
     EncoderConfig,
     build_attention,
@@ -132,23 +134,16 @@ def resolve_encoder_cfg(
         cfg["input_dim"] = max(int(inferred_input_dim), 0)
 
     if categorical_cfg is not None:
-        resolved = dict(categorical_cfg)
-        label = str(resolved.get("label", "cell_type"))
-        if module is not None and (
-            resolved.get("num_embeddings") is None or resolved.get("column_index") is None
-        ):
-            num_embeddings, column_index = infer_categorical_binding(module, label)
-            if resolved.get("num_embeddings") is None:
-                resolved["num_embeddings"] = num_embeddings
-            if resolved.get("column_index") is None:
-                resolved["column_index"] = column_index
-        if resolved.get("num_embeddings") is None:
-            raise ValueError(
-                f"Could not infer the vocabulary size for categorical label '{label}' from the "
-                "datamodule. Set model.encoder.categorical_embedding.num_embeddings explicitly, "
-                "or include the label in data.categorical_features.include_labels."
-            )
-        cfg["categorical_embedding"] = resolved
+        label = str(dict(categorical_cfg).get("label", "cell_type"))
+        num_embeddings, column_index = (
+            infer_categorical_binding(module, label) if module is not None else (None, None)
+        )
+        resolved = resolve_categorical_embedding_config(
+            categorical_cfg,
+            cardinalities={label: num_embeddings} if num_embeddings is not None else None,
+            slices={label: column_index} if column_index is not None else None,
+        )
+        cfg["categorical_embedding"] = asdict(resolved)
     return cfg
 
 

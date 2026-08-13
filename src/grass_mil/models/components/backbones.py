@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import warnings
 from dataclasses import dataclass
-from typing import Literal, Optional
+from typing import Any, Dict, Literal, Optional
 
 import torch
 from torch import nn
@@ -43,7 +43,7 @@ class EncoderConfig:
     # edge-aware message passing. When set, the conv sees only that column and
     # `edge_attr_dim` is 1. Leave unset to pass the whole edge_attr vector.
     edge_feature_index: Optional[int] = None
-    categorical_embedding: Optional[dict] = None
+    categorical_embedding: Optional[Dict[str, Any]] = None
 
 
 def _get_activation(name: str) -> nn.Module:

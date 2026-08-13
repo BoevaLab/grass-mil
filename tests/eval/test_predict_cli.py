@@ -24,7 +24,6 @@ from grass_mil.inference.predict import (
 from grass_mil.train import train
 
 
-@pytest.mark.slow
 def test_predict_cli_smoke(cfg_train: DictConfig, cfg_predict: DictConfig, tmp_path: Path) -> None:
     with open_dict(cfg_train):
         cfg_train.trainer.max_epochs = 1

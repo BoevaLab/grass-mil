@@ -595,7 +595,7 @@ def test_region_buffer_flushes_in_hyperbatch_chunks():
     module.manual_backward = lambda loss: None  # type: ignore[method-assign]
     module.log = lambda *args, **kwargs: None  # type: ignore[method-assign]
 
-    module._region_total_loss_buffer = [
+    module._region_loss_buffer = [
         torch.tensor(1.0),
         torch.tensor(2.0),
         torch.tensor(3.0),
@@ -604,12 +604,12 @@ def test_region_buffer_flushes_in_hyperbatch_chunks():
     ]
     flushes = module._flush_region_buffer_if_needed(force=False)
     assert len(flushes) == 2
-    assert len(module._region_total_loss_buffer) == 1
+    assert len(module._region_loss_buffer) == 1
     assert opt.steps == 2
     assert sch.steps == 2
 
     flushes = module._flush_region_buffer_if_needed(force=True)
     assert len(flushes) == 1
-    assert len(module._region_total_loss_buffer) == 0
+    assert len(module._region_loss_buffer) == 0
     assert opt.steps == 3
     assert sch.steps == 3

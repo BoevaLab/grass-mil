@@ -100,7 +100,7 @@ class SupervisedModule(L.LightningModule):
             self.region_accum_hyperbatch_size = 0
             self.region_accum_flush_on_epoch_end = False
 
-        self._region_total_loss_buffer: list[torch.Tensor] = []
+        self._region_loss_buffer: list[torch.Tensor] = []
         self._manual_optimizer_steps = 0
         # In inference, callers can disable instance-level payload emission to reduce
         # peak memory when aggregation only needs bag-level outputs.
@@ -757,7 +757,7 @@ class SupervisedModule(L.LightningModule):
         patch_logits = payload["patch_logits"]
 
         region_losses: list[torch.Tensor] = []
-        total_losses: list[torch.Tensor] = []
+        buffered_region_losses: list[torch.Tensor] = []
         for idx, bag_id in enumerate(ordered_bag_ids):
             region_w = bag_weights[idx : idx + 1] if bag_weights is not None else None
             region_loss = self._compute_losses(
@@ -771,15 +771,15 @@ class SupervisedModule(L.LightningModule):
                 stage="train",
             )
             region_losses.append(region_loss.detach())
-            total_losses.append(region_loss)
+            buffered_region_losses.append(region_loss)
 
-        if not total_losses:
+        if not buffered_region_losses:
             return torch.zeros((), device=self.device)
 
         # Buffer one scalar per forward pass to avoid chunked backward passes over
         # the same computation graph.
-        step_total_loss = torch.stack(total_losses).mean()
-        self._region_total_loss_buffer.append(step_total_loss)
+        step_region_loss = torch.stack(buffered_region_losses).mean()
+        self._region_loss_buffer.append(step_region_loss)
 
         flush_losses = self._flush_region_buffer_if_needed(force=False)
         for flush_loss in flush_losses:
@@ -792,22 +792,22 @@ class SupervisedModule(L.LightningModule):
             )
         self.log(
             "train/region_buffer_size",
-            float(len(self._region_total_loss_buffer)),
+            float(len(self._region_loss_buffer)),
             on_step=True,
             on_epoch=False,
             prog_bar=False,
         )
-        mean_total_loss = step_total_loss.detach()
+        mean_region_loss_value = step_region_loss.detach()
         mean_region_loss = torch.stack(region_losses).mean()
         self._log_stage_metrics(
             stage="train",
-            loss_value=mean_total_loss,
+            loss_value=mean_region_loss_value,
             bag_logits=bag_logits,
             bag_targets=bag_targets,
             region_loss=mean_region_loss,
         )
 
-        return mean_total_loss
+        return mean_region_loss_value
 
     def validation_step(self, batch, batch_idx):
         out = self._shared_step(batch, "val")
@@ -900,9 +900,9 @@ class SupervisedModule(L.LightningModule):
     # ------------------------------------------------------------------
 
     def _flush_region_buffer_if_needed(self, *, force: bool) -> list[torch.Tensor]:
-        if not self._region_total_loss_buffer:
+        if not self._region_loss_buffer:
             return []
-        if not force and len(self._region_total_loss_buffer) < self.region_accum_hyperbatch_size:
+        if not force and len(self._region_loss_buffer) < self.region_accum_hyperbatch_size:
             return []
 
         optimizer = self.optimizers()
@@ -910,16 +910,16 @@ class SupervisedModule(L.LightningModule):
             optimizer = optimizer[0]
         flush_losses: list[torch.Tensor] = []
 
-        while self._region_total_loss_buffer:
+        while self._region_loss_buffer:
             if force:
-                chunk = self._region_total_loss_buffer
+                chunk = self._region_loss_buffer
             else:
-                if len(self._region_total_loss_buffer) < self.region_accum_hyperbatch_size:
+                if len(self._region_loss_buffer) < self.region_accum_hyperbatch_size:
                     break
-                chunk = self._region_total_loss_buffer[: self.region_accum_hyperbatch_size]
+                chunk = self._region_loss_buffer[: self.region_accum_hyperbatch_size]
 
-            total_loss = torch.stack(chunk, dim=0).mean()
-            self.manual_backward(total_loss)
+            flush_loss = torch.stack(chunk, dim=0).mean()
+            self.manual_backward(flush_loss)
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
 
@@ -938,9 +938,9 @@ class SupervisedModule(L.LightningModule):
                 on_epoch=force,
                 prog_bar=False,
             )
-            flush_losses.append(total_loss.detach())
+            flush_losses.append(flush_loss.detach())
 
-            del self._region_total_loss_buffer[: len(chunk)]
+            del self._region_loss_buffer[: len(chunk)]
             if force:
                 break
 
@@ -948,7 +948,7 @@ class SupervisedModule(L.LightningModule):
 
     def on_train_start(self) -> None:
         if self.region_accum_enabled:
-            self._region_total_loss_buffer.clear()
+            self._region_loss_buffer.clear()
 
     def on_validation_epoch_start(self) -> None:
         self._reset_val_epoch_buffers()

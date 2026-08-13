@@ -54,9 +54,6 @@ filterwarnings = [
   "ignore::UserWarning",
 ]
 log_cli = "True"
-markers = [
-  "slow: slow tests",
-]
 minversion = "6.0"
 testpaths = "tests/"
 
