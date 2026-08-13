@@ -30,3 +30,11 @@ require_composition: true
 spatial:
   enabled: false
   undirected: true
+
+# Cell-level export: one row per node of every sampled ego-graph, plus the
+# intra-subgraph edges with their distances. Requires a shadow sampler, since
+# only then does the payload carry per-instance subgraphs.
+cells:
+  enabled: false
+  cell_filename: cell_table.csv
+  cell_edge_filename: cell_edges.csv

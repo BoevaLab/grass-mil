@@ -16,6 +16,7 @@ from grass_mil.inference.aggregation import aggregate_group_logits  # noqa: E402
 from grass_mil.inference.collectors import collect_inference_payload  # noqa: E402
 from grass_mil.inference.interpretability_export import (  # noqa: E402
     build_instance_table,
+    build_cell_tables,
     build_spatial_table,
     resolve_composition_column_names,
 )
@@ -444,9 +445,38 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             )
             write_dataframe(spatial_frame, spatial_path)
 
+        cell_path = None
+        cell_edge_path = None
+        cell_cfg = (interpret_cfg or {}).get("cells", {})
+        if bool(cell_cfg.get("enabled", False)):
+            # Cell-level tables: one row per node of every sampled ego-graph.
+            # Needed for the analyses that operate on cells rather than on
+            # neighbourhood summaries (cell-type enrichment within a niche,
+            # per-cell-type autocorrelation, distance filtration).
+            tables = build_cell_tables(
+                raw_pred_payload,
+                list(instance_frame[str((interpret_cfg or {}).get("id_column", "instance_id"))]),
+                composition_column_names=composition_names,
+                composition_prefix=composition_prefix,
+                composition_label=composition_label,
+            )
+            if tables is None:
+                raise ValueError(
+                    "interpretability.cells.enabled=true requires per-instance subgraphs "
+                    "in the predict payload. Use a shadow sampler "
+                    "(data.sampler.name=shadow_custom, data.sampler.runtime.enabled=true)."
+                )
+            cell_frame, cell_edge_frame = tables
+            cell_path = output_dir / str(cell_cfg.get("cell_filename", "cell_table.csv"))
+            cell_edge_path = output_dir / str(cell_cfg.get("cell_edge_filename", "cell_edges.csv"))
+            write_dataframe(cell_frame, cell_path)
+            write_dataframe(cell_edge_frame, cell_edge_path)
+
         interpretability_payload = {
             "instance_table_path": str(instance_path),
             "spatial_table_path": str(spatial_path) if spatial_path is not None else None,
+            "cell_table_path": str(cell_path) if cell_path is not None else None,
+            "cell_edge_table_path": str(cell_edge_path) if cell_edge_path is not None else None,
             "rows": int(len(instance_frame)),
         }
 

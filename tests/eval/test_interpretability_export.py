@@ -316,3 +316,77 @@ def test_instance_cell_type_column_can_be_disabled() -> None:
     )
     frame = build_instance_table(payload, require_composition=True, cell_type_column=None)
     assert "cell_type" not in frame.columns
+
+
+def test_build_cell_tables_pools_every_node_with_its_own_type() -> None:
+    """Cell-level tables: one row per node of every sampled ego-graph.
+
+    The instance table describes neighbourhoods, reducing their cell content to
+    composition fractions. Cell-type enrichment within a niche, per-cell-type
+    autocorrelation and distance filtration all need the cells themselves, which
+    that summary cannot reconstruct.
+
+    Cells are pooled with duplicates -- overlapping ego-graphs revisit the same
+    cell -- so (patch_id, node_id) identifies a real cell, not cell_id.
+    """
+    from grass_mil.inference.interpretability_export import build_cell_tables
+
+    g0 = _instance_graph(codes=[0, 1, 1], n_id=[5, 6, 7], root_global=5)
+    g0.pos = torch.tensor([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]])
+    g0.edge_index = torch.tensor([[0, 1], [1, 2]])
+    g0.edge_attr = torch.tensor([[1.0, 1.0], [2.0, 1.0]])
+    g0.edge_attr_names = ["distance", "neighbor"]
+    g0.patch_id = ["patchA"]
+
+    payload = BatchPredictionPayload(
+        bag_ids=["b0"],
+        bag_logits=torch.tensor([[1.0]]),
+        bag_targets=None,
+        bag_attention=None,
+        instance_logits=torch.tensor([[0.2]]),
+        instance_patch_ids=["p0"],
+        instance_bag_ids=["b0"],
+        instance_region_ids=["r0"],
+        instance_sample_ids=["s0"],
+        instance_embeddings=torch.tensor([[0.1, 0.2]]),
+        instance_composition=torch.tensor([[0.34, 0.66]]),
+        instance_graphs=[g0],
+    )
+    cells, edges = build_cell_tables(
+        payload,
+        ["inst0"],
+        composition_column_names=["comp_Epithelial", "comp_Tcell"],
+    )
+
+    # Every node becomes a row, carrying its own type -- not the neighbourhood's.
+    assert len(cells) == 3
+    assert cells["cell_type"].tolist() == ["Epithelial", "Tcell", "Tcell"]
+    assert cells["instance_id"].unique().tolist() == ["inst0"]
+    assert cells["patch_id"].unique().tolist() == ["patchA"]
+    # Exactly one root, and it is the node whose n_id matches root_n_id.
+    assert cells["is_root"].sum() == 1
+    assert cells.loc[cells["is_root"], "node_id"].tolist() == [5]
+
+    # Edges carry their distance, so filtration over thresholds is possible.
+    assert len(edges) == 2
+    assert edges["distance"].tolist() == [1.0, 2.0]
+    assert set(edges["source_id"]) <= set(cells["cell_id"])
+
+
+def test_build_cell_tables_returns_none_without_subgraphs() -> None:
+    from grass_mil.inference.interpretability_export import build_cell_tables
+
+    payload = BatchPredictionPayload(
+        bag_ids=["b0"],
+        bag_logits=torch.tensor([[1.0]]),
+        bag_targets=None,
+        bag_attention=None,
+        instance_logits=torch.tensor([[0.2]]),
+        instance_patch_ids=["p0"],
+        instance_bag_ids=["b0"],
+        instance_region_ids=["r0"],
+        instance_sample_ids=["s0"],
+        instance_embeddings=torch.tensor([[0.1, 0.2]]),
+        instance_composition=torch.tensor([[0.7, 0.3]]),
+    )
+    assert build_cell_tables(payload, ["inst0"]) is None
