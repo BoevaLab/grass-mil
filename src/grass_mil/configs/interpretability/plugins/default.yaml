@@ -45,8 +45,12 @@ params:
     # channel per class. Falls back to the single `attention` column.
     attention_prefix: attention_c
     logit_prefix: logit_
-    # Head output bias per class, removed so the margin reflects the
-    # instance-driven part of the decision. Read it from model_summary.json.
+    # Head output bias per class, subtracted so the margin reflects the
+    # instance-driven part of the decision rather than the head's prior.
+    # Point logit_bias_checkpoint at the trained checkpoint and it is read from
+    # there; logit_bias only exists to override that by hand.
+    logit_bias_checkpoint: null
+    head_prefix: graph_head
     logit_bias: null
     n_bootstrap: 200
     random_state: 0

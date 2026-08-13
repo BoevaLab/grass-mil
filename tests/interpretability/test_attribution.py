@@ -324,3 +324,62 @@ def test_multiclass_attention_lift_uses_the_matching_class_channel() -> None:
     # Niche 0 is the singled-out instance: strongly lifted for class 0 only.
     assert lift.loc[(0, 0)] > 3.0
     assert lift.loc[(0, 1)] == pytest.approx(1.0, abs=1e-6)
+
+
+def test_head_bias_is_read_from_a_checkpoint(tmp_path) -> None:
+    """The bias must come from the trained model, not be transcribed by hand."""
+    import torch
+
+    from grass_mil.models.components.heads import GraphPredictionHead
+    from grass_mil.models.training.checkpoint_init import read_graph_head_bias
+
+    head = GraphPredictionHead(input_dim=4, output_dim=3, hidden_dim=4, num_layers=2)
+    with torch.no_grad():
+        head.net[-1].bias.copy_(torch.tensor([0.25, -0.5, 1.5]))
+
+    ckpt = tmp_path / "model.ckpt"
+    torch.save({"state_dict": {f"graph_head.{k}": v for k, v in head.state_dict().items()}}, ckpt)
+
+    assert read_graph_head_bias(str(ckpt)) == pytest.approx([0.25, -0.5, 1.5])
+    # An encoder-only checkpoint has no head to read.
+    empty = tmp_path / "encoder.ckpt"
+    torch.save({"state_dict": {"encoder.layers.0.weight": torch.zeros(2, 2)}}, empty)
+    assert read_graph_head_bias(str(empty)) is None
+
+
+def test_margin_plugin_reads_the_bias_from_a_checkpoint(tmp_path) -> None:
+    import torch
+
+    from grass_mil.contracts import InterpretabilityDataset
+    from grass_mil.interpretability.plugins.base import PluginContext
+    from grass_mil.interpretability.plugins.builtin import create_builtin_registry
+    from grass_mil.models.components.heads import GraphPredictionHead
+
+    table, labels = _instance_table(n_bags=3, per_bag=4)
+    dataset = InterpretabilityDataset(
+        instance_table=table, spatial_table=None, id_column="bag_id", bag_id_column="bag_id"
+    )
+
+    head = GraphPredictionHead(input_dim=4, output_dim=2, hidden_dim=4, num_layers=2)
+    with torch.no_grad():
+        head.net[-1].bias.copy_(torch.tensor([5.0, -5.0]))
+    ckpt = tmp_path / "model.ckpt"
+    torch.save({"state_dict": {f"graph_head.{k}": v for k, v in head.state_dict().items()}}, ckpt)
+
+    plugin = create_builtin_registry().get("margin_attribution")
+    context = PluginContext(state={"niche_labels": labels})
+    unbiased = plugin.run(dataset, context, n_bootstrap=0)
+    debiased = plugin.run(dataset, context, n_bootstrap=0, logit_bias_checkpoint=str(ckpt))
+
+    # A large head bias must visibly change the margins once removed.
+    assert not np.allclose(
+        unbiased.payload["per_niche"]["margin_weighted"].to_numpy(),
+        debiased.payload["per_niche"]["margin_weighted"].to_numpy(),
+    )
+
+    # An encoder-only checkpoint must fail loudly rather than silently
+    # attributing with an un-removed bias.
+    encoder_only = tmp_path / "encoder.ckpt"
+    torch.save({"state_dict": {"encoder.layers.0.weight": torch.zeros(2, 2)}}, encoder_only)
+    with pytest.raises(ValueError, match="No graph head bias found"):
+        plugin.run(dataset, context, logit_bias_checkpoint=str(encoder_only))

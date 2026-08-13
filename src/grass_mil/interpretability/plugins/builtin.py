@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -441,6 +441,34 @@ def _resolve_columns(table: pd.DataFrame, prefix: str, explicit) -> List[str]:
     return [c for c in table.columns if str(c).startswith(prefix)]
 
 
+def _resolve_logit_bias(params: Dict[str, Any]) -> Optional[List[float]]:
+    """Head output bias, read from a checkpoint unless given explicitly.
+
+    Subtracting it makes the margin reflect the instance-driven part of the
+    decision rather than the head's prior, so it should normally come straight
+    from the trained model rather than being transcribed by hand.
+    """
+    explicit = params.get("logit_bias")
+    if explicit is not None:
+        return [float(v) for v in explicit]
+
+    checkpoint = params.get("logit_bias_checkpoint")
+    if not checkpoint:
+        return None
+
+    from grass_mil.models.training.checkpoint_init import read_graph_head_bias
+
+    bias = read_graph_head_bias(
+        str(checkpoint), head_prefix=str(params.get("head_prefix", "graph_head"))
+    )
+    if bias is None:
+        raise ValueError(
+            f"No graph head bias found in {checkpoint!r}. Check head_prefix, or set "
+            "logit_bias explicitly if the checkpoint holds only an encoder."
+        )
+    return bias
+
+
 @dataclass
 class MarginAttributionPlugin(InterpretabilityPlugin):
     """Exact additive attribution of bag decisions to instance niches.
@@ -480,7 +508,7 @@ class MarginAttributionPlugin(InterpretabilityPlugin):
             attention_columns=attention_columns,
             logit_columns=logit_columns,
             bag_id_column=str(params.get("bag_id_column", dataset.bag_id_column)),
-            logit_bias=params.get("logit_bias"),
+            logit_bias=_resolve_logit_bias(params),
             n_bootstrap=int(params.get("n_bootstrap", 200)),
             random_state=int(params.get("random_state", 0)),
             margin_eps=float(params.get("margin_eps", 1e-6)),

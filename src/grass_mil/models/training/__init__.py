@@ -23,6 +23,7 @@ from .builders import (
     validate_task_config,
 )
 from .checkpoint_init import (
+    read_graph_head_bias,
     load_state_dict_with_optional_mapping,
     remap_encoder_keys,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "resolve_encoder_cfg",
     "validate_task_config",
     "load_state_dict_with_optional_mapping",
+    "read_graph_head_bias",
     "remap_encoder_keys",
     "compute_binary_accuracy",
     "compute_categorical_accuracy",

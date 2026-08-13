@@ -45,3 +45,41 @@ def remap_encoder_keys(
             new_key = f"encoder.{key[len('model.online_encoder.') :]}"
         remapped[new_key] = value
     return remapped
+
+
+def read_graph_head_bias(
+    checkpoint_path: str,
+    *,
+    head_prefix: str = "graph_head",
+) -> Optional[List[float]]:
+    """Read the graph head's output bias from a training checkpoint.
+
+    Attribution subtracts this bias so the reported margin reflects the
+    instance-driven part of the decision rather than the head's prior. The bias
+    lives on the final ``Linear`` of the head MLP, which is the highest-numbered
+    ``net.<i>.bias`` entry under ``head_prefix``.
+
+    Returns:
+        One value per class, or ``None`` when the checkpoint carries no head
+        (an encoder-only checkpoint, for instance).
+    """
+    import re
+
+    import torch
+
+    payload = torch.load(checkpoint_path, map_location="cpu")
+    state = payload.get("state_dict", payload) if isinstance(payload, dict) else payload
+    if not isinstance(state, dict):
+        raise ValueError(f"Checkpoint {checkpoint_path!r} holds no state dict.")
+
+    pattern = re.compile(rf"^{re.escape(head_prefix)}\.net\.(\d+)\.bias$")
+    candidates = {}
+    for key, value in state.items():
+        match = pattern.match(str(key))
+        if match is not None:
+            candidates[int(match.group(1))] = value
+    if not candidates:
+        return None
+
+    bias = candidates[max(candidates)]
+    return [float(v) for v in bias.detach().cpu().reshape(-1)]
