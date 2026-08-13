@@ -97,7 +97,6 @@ python src/eval.py \
 - Exhaustive hyperparameter reference for repo configs: [`docs/hyperparameter_reference.md`](docs/hyperparameter_reference.md)
 - Capability modes and operational options: [`docs/capabilities_and_modes.md`](docs/capabilities_and_modes.md)
 - Existing model contracts: [`docs/model_component_contracts.md`](docs/model_component_contracts.md)
-- Existing legacy gap audit: [`docs/legacy_gap_audit.md`](docs/legacy_gap_audit.md)
 
 ## Supported Training/Inference Modes
 
@@ -178,11 +177,6 @@ Data precompute outputs:
 - Index: `${data.processed_dir}/processed_index.json`
 - Metadata: `${data.processed_dir}/metadata.json`
 
-## Known Gaps / Non-Goals
-
-Current repository behavior intentionally excludes:
-
-1. Curated first-class hyperparameter sweep recipes in `configs/hparams_search/`.
-2. Turnkey dataset-specific benchmark packs beyond the generic Hydra/config contracts.
+## Detailed documentation
 
 All currently supported capabilities are documented in [`docs/workflows_train_infer.md`](docs/workflows_train_infer.md), [`docs/hyperparameter_reference.md`](docs/hyperparameter_reference.md), and [`docs/capabilities_and_modes.md`](docs/capabilities_and_modes.md).
