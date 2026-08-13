@@ -37,9 +37,7 @@ def test_supervised_task_presets_compose(config_name: str, task_name: str) -> No
 
 @pytest.mark.parametrize("config_name", ROOT_CONFIGS)
 @pytest.mark.parametrize("task_name", SUPERVISED_TASKS)
-def test_attention_width_matches_head_width_as_composed(
-    config_name: str, task_name: str
-) -> None:
+def test_attention_width_matches_head_width_as_composed(config_name: str, task_name: str) -> None:
     """The contract must hold on the *composed* config, not just in code.
 
     ``validate_attention_width`` runs at build time, but it can only see what
@@ -67,7 +65,7 @@ def test_finetune_mil_composes_per_class_widths(config_name: str) -> None:
     channels. If ``model`` is merged after ``task`` in the defaults list, the
     module preset overwrites both and the published MIL head is not what runs.
     """
-    cfg = _compose(config_name, [f"task=finetune_mil"])
+    cfg = _compose(config_name, ["task=finetune_mil"])
     assert int(cfg.model.graph_head.output_dim) == 2
     assert int(cfg.model.attention.n_classes) == 2
     assert cfg.task.target_type == "categorical"

@@ -113,7 +113,6 @@ def run_interpretability_pipeline(
     reduction_enabled = bool(reduction_cfg.get("enabled", True))
     reduction_result = None
     combo_pca_result = None
-    reduced = emb_set.matrix
     if reduction_enabled:
         method = str(reduction_cfg.get("method", "pca"))
         params = dict(reduction_cfg.get("params", {}))
@@ -127,7 +126,6 @@ def run_interpretability_pipeline(
             )
             reduction_input = combo_pca_result.embedding
         reduction_result = run_reduction(method, reduction_input, **params)
-        reduced = reduction_result.embedding
 
     clustering_result = None
     labels: Optional[np.ndarray] = None

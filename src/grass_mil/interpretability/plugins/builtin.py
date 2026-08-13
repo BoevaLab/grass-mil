@@ -274,7 +274,7 @@ class TissueGraphPlugin(InterpretabilityPlugin):
                     "sample_value": meta.get("sample_value"),
                     "node_count": meta.get("node_count"),
                     "edge_count": meta.get("edge_count"),
-                    "cluster_count": len(niche_counts) if isinstance(niche_counts, dict) else 0,
+                    "niche_count": len(niche_counts) if isinstance(niche_counts, dict) else 0,
                 }
             ]
         )

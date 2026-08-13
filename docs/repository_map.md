@@ -13,15 +13,14 @@ Scope rules used here:
 - `.project-root`: Root marker used by `rootutils.setup_root(...)`.
 - `.gitignore`: Ignore rules for generated artifacts, envs, logs, and data outputs.
 - `.env.example`: Example environment variable file loaded by Hydra/OmegaConf env references.
-- `.pre-commit-config.yaml`: Code quality hooks (format/lint/notebook cleanup/docs checks).
+- `.pre-commit-config.yaml`: Code quality hooks (ruff lint + format, plus basic file hygiene checks).
 - `LICENSE`: Project license text.
 - `README.md`: Primary entrypoint documentation and navigation index.
 - `Makefile`: Convenience targets for clean, format, tests, and default training.
 - `pyproject.toml`: Package metadata, dependencies, optional extras, console
   entry points (`grass-mil-train`, `-eval`, `-loocv`, `-predict`, `-report`),
   and pytest/coverage/ruff configuration.
-- `environment.yaml`: Conda environment alternative with pinned major versions.
-- `environment.ci-spatial.yaml`: Fully pinned environment used by CI.
+- `environment.yaml`: Conda environment alternative for local development, pinned to major versions. CI does not use it; the CI stack is pinned inline in `.github/workflows/test.yml`.
 
 ## CI/DevOps And Contribution Files
 
@@ -32,7 +31,7 @@ Scope rules used here:
 - `.github/workflows/code-quality-main.yaml`: Pre-commit quality checks on pushes to `main`.
 - `.github/workflows/code-quality-pr.yaml`: Pre-commit quality checks on changed PR files.
 - `.github/workflows/release-drafter.yml`: Automated draft release workflow.
-- `.github/workflows/test.yml`: Multi-OS, multi-Python automated test workflow.
+- `.github/workflows/test.yml`: Multi-OS (Linux/macOS) test workflow, plus coverage and a from-source packaging job.
 
 ## Rules And Contracts
 
