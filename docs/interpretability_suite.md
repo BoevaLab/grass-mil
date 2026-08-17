@@ -747,4 +747,3 @@ as `data.cell_table` / `data.cell_edge_table`, and these become available:
 Each cell inherits the niche of the ego-graph it was sampled into, so a cell
 appearing in several overlapping ego-graphs contributes to each. This mirrors
 the pooling the legacy NSCLC reports do.
-
