@@ -30,6 +30,10 @@ def run_report(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         spatial_table_path=Path(str(cfg.data.spatial_table))
         if cfg.data.get("spatial_table")
         else None,
+        cell_table_path=Path(str(cfg.data.cell_table)) if cfg.data.get("cell_table") else None,
+        cell_edge_table_path=Path(str(cfg.data.cell_edge_table))
+        if cfg.data.get("cell_edge_table")
+        else None,
         id_column=str(cfg.data.get("id_column", "instance_id")),
         bag_id_column=str(cfg.data.get("bag_id_column", "bag_id")),
         cell_type_column=cfg.data.get("cell_type_column"),

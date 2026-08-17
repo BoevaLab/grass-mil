@@ -137,55 +137,6 @@ def test_report_render_tolerates_snapshot_export_failure_when_pdf_disabled(
     assert out["snapshot_paths"] == {}
 
 
-def test_pipeline_and_report_render_with_diff_neighborhood_plugin(
-    monkeypatch, tmp_path: Path
-) -> None:
-    instance_path, spatial_path = _write_minimal_tables(tmp_path)
-    dataset = load_interpretability_dataset(
-        instance_table_path=instance_path,
-        spatial_table_path=spatial_path,
-        id_column="instance_id",
-        bag_id_column="bag_id",
-        cell_type_column="cell_type",
-        condition_column="condition",
-    )
-    cfg = {
-        "reduction": {"enabled": True, "method": "pca", "params": {"n_components": 2}},
-        "clustering": {
-            "enabled": True,
-            "method": "agglomerative",
-            "params": {"n_clusters": 2, "linkage": "ward"},
-        },
-        "plugins": {
-            "enabled": ["diff_neighborhood_enrichment"],
-            "params": {
-                "diff_neighborhood_enrichment": {
-                    "condition_column": "condition",
-                    "permutation_group_column": "sample_id",
-                    "n_perms": 0,
-                    "undirected": True,
-                }
-            },
-        },
-    }
-    bundle = run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
-    assert "diff_neighborhood_enrichment" in bundle.plugin_results
-    figs = dict(bundle_figures(bundle))
-    assert "diff_neighborhood_enrichment_X_Y" in figs
-
-    monkeypatch.setattr(
-        "grass_mil.interpretability.reporting.render.export_plotly_snapshots",
-        lambda figures, output_dir, scale=2.0: {},  # type: ignore[lambda-assign]
-    )
-    out = render_interpretability_report(
-        bundle,
-        output_dir=tmp_path / "report_diff",
-        html_enabled=True,
-        pdf_enabled=False,
-    )
-    assert out["html_path"] is not None
-
-
 def test_pipeline_and_report_render_with_tissue_graph_plugin(monkeypatch, tmp_path: Path) -> None:
     instance_path, spatial_path = _write_minimal_tables(tmp_path)
     dataset = load_interpretability_dataset(
@@ -268,7 +219,7 @@ def test_pipeline_fails_fast_when_plugin_required_inputs_missing_spatial_table(
             "method": "agglomerative",
             "params": {"n_clusters": 2, "linkage": "ward"},
         },
-        "plugins": {"enabled": ["neighborhood_enrichment"], "params": {}},
+        "plugins": {"enabled": ["niche_label_moran"], "params": {}},
     }
     with pytest.raises(ValueError, match="missing required inputs: spatial_table"):
         run_interpretability_pipeline(dataset, cfg, artifacts_dir=tmp_path / "artifacts")
@@ -365,9 +316,7 @@ def test_report_cli_smoke(
         cfg_interpret.reduction.params = {"n_components": 2, "random_state": 42}
         cfg_interpret.plugins.enabled = [
             "niche_profiles",
-            "neighborhood_enrichment",
-            "diff_neighborhood_enrichment",
-            "filtration_curves",
+            "niche_label_moran",
         ]
         cfg_interpret.clustering.method = "agglomerative"
         cfg_interpret.clustering.cluster_on_pca = False

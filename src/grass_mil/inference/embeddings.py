@@ -9,11 +9,6 @@ from grass_mil.inference.io import (
 from grass_mil.inference.schemas import EmbeddingPayload
 
 
-def embedding_payload_to_table(payload: EmbeddingPayload) -> pd.DataFrame:
-    """Public wrapper used by downstream analysis and tests."""
-    return _embeddings_to_dataframe(payload)
-
-
 def embeddings_to_dataframe(payload: EmbeddingPayload) -> pd.DataFrame:
     """Backwards-friendly alias for table conversion."""
     return _embeddings_to_dataframe(payload)

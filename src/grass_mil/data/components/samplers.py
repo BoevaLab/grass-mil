@@ -22,6 +22,8 @@ from grass_mil.data.components.seed_sampling import (
 
 try:
     from torch_geometric.data import Batch, Data
+
+    from grass_mil.batching import apply_per_subgraph
     from torch_geometric.loader import DataLoader as PyGDataLoader
     from torch_geometric.loader import ShaDowKHopSampler
 except Exception as exc:  # pragma: no cover
@@ -711,6 +713,17 @@ def _normalize_shadow_batch(batch: Batch, source_data: Optional[Data] = None) ->
                 key,
                 _expand_graph_level_value(getattr(source_data, key), num_subgraphs),
             )
+    # Idempotent: this normalisation runs more than once over the same batch,
+    # and _resolve_batch_root_node_ids maps root indices through `n_id`. Applied
+    # twice, it maps already-global ids through `n_id` a second time and returns
+    # unrelated nodes -- after which a root is no longer found in its own
+    # subgraph. Convert only when the ids are not already global.
+    already_global = getattr(batch, "root_n_id_is_global", None)
+    if already_global is not None:
+        flags = torch.as_tensor(already_global).view(-1)
+        if flags.numel() > 0 and bool(flags[0]):
+            return batch
+
     root_node_ids = _resolve_batch_root_node_ids(batch)
     if isinstance(root_node_ids, torch.Tensor):
         batch.root_n_id = root_node_ids
@@ -869,90 +882,10 @@ class _ShaDowKHopSamplerWithTransform(torch.utils.data.DataLoader):
         return batch
 
     def _apply_transform_to_each_subgraph(self, batch: Batch) -> Batch:
-        from torch_geometric.utils import subgraph
-
-        processed = []
-        num_subgraphs = len(batch.ptr) - 1
-        skip_keys = {
-            "x",
-            "edge_index",
-            "edge_attr",
-            "batch",
-            "ptr",
-            "root_n_id",
-            "n_id",
-            "adj_t",
-            "num_nodes",
-        }
-        for i in range(len(batch.ptr) - 1):
-            node_start = int(batch.ptr[i])
-            node_end = int(batch.ptr[i + 1])
-            node_ids = torch.arange(node_start, node_end, device=batch.ptr.device)
-            sub_edge_index, sub_edge_attr = subgraph(
-                subset=node_ids,
-                edge_index=batch.edge_index,
-                edge_attr=batch.edge_attr if "edge_attr" in batch else None,
-                relabel_nodes=True,
-                num_nodes=int(batch.x.size(0)),
-            )
-            root_n_id = batch.root_n_id[i : i + 1]
-            if root_n_id.numel() == 1:
-                root_value = int(root_n_id.item())
-                if node_start <= root_value < node_end:
-                    root_n_id = root_n_id - node_start
-            sub_data = Data(
-                x=batch.x[node_ids],
-                edge_index=sub_edge_index,
-                edge_attr=sub_edge_attr,
-                root_n_id=root_n_id,
-            )
-            if hasattr(batch, "n_id") and isinstance(batch.n_id, torch.Tensor):
-                sub_data.n_id = batch.n_id[node_ids]
-            for key, val in batch:
-                if key in skip_keys:
-                    continue
-                if isinstance(val, torch.Tensor):
-                    if val.dim() > 0 and val.size(0) == num_subgraphs:
-                        setattr(sub_data, key, val[i : i + 1])
-                    elif val.dim() == 0:
-                        setattr(sub_data, key, val)
-                    elif val.dim() > 0 and val.size(0) == batch.x.size(0):
-                        # Node-level tensors must be sliced down to this subgraph.
-                        # They are NOT redundant with `x`: `categorical_codes`
-                        # carries the cell-type codes the encoder embeds, and
-                        # `pos` carries coordinates. Dropping them here silently
-                        # removed cell type from every sampled subgraph.
-                        setattr(sub_data, key, val[node_ids])
-                    elif val.dim() > 0 and "edge_attr" in batch and val.size(0) == batch.edge_index.size(1):
-                        continue
-                    else:
-                        setattr(sub_data, key, val)
-                elif isinstance(val, list):
-                    setattr(
-                        sub_data,
-                        key,
-                        _select_sequence_value_for_subgraph(
-                            key=key,
-                            value=val,
-                            subgraph_index=i,
-                            num_subgraphs=num_subgraphs,
-                        ),
-                    )
-                elif isinstance(val, tuple):
-                    setattr(
-                        sub_data,
-                        key,
-                        _select_sequence_value_for_subgraph(
-                            key=key,
-                            value=val,
-                            subgraph_index=i,
-                            num_subgraphs=num_subgraphs,
-                        ),
-                    )
-                else:
-                    setattr(sub_data, key, val)
-            processed.append(self.transform(sub_data))
-        return Batch.from_data_list(processed)
+        # Splitting lives in grass_mil.batching so the inference path can reuse
+        # it: it needs the same per-subgraph Data objects to export spatial
+        # edges, and previously had no way to get them from a ShaDow batch.
+        return apply_per_subgraph(batch, self.transform)
 
 
 def _resolve_num_roots(data: Data, node_idx: Optional[torch.Tensor]) -> int:

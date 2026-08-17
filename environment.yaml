@@ -1,41 +1,53 @@
-# reasons you might want to use `environment.yaml` instead of `requirements.txt`:
-# - pip installs packages in a loop, without ensuring dependencies across all packages
-#   are fulfilled simultaneously, but conda achieves proper dependency control across
-#   all packages
-# - conda allows for installing packages without requiring certain compilers or
-#   libraries to be available in the system, since it installs precompiled binaries
+# Conda environment for local development.
+#
+# This is an alternative to `pip install -e ".[interpretability,report,io]"`.
+# It exists because conda resolves the compiled stack (PyTorch, PyG, scipy)
+# across all packages simultaneously, and installs precompiled binaries without
+# requiring system compilers.
+#
+# Keep the versions here consistent with `pyproject.toml` (`requires-python` and
+# `dependencies`). CI does not use this file: it installs with pip and pins the
+# stack inline in `.github/workflows/test.yml`.
 
-name: myenv
+name: grass-mil
 
 channels:
+  - pyg
   - pytorch
   - conda-forge
   - defaults
 
-# it is strongly recommended to specify versions of packages installed through conda
-# to avoid situation when version-unspecified packages install their latest major
-# versions which can sometimes break things
-
-# current approach below keeps the dependencies in the same major versions across all
-# users, but allows for different minor and patch versions of packages where backwards
-# compatibility is usually guaranteed
-
+# Major versions are pinned so all users share the same majors, while minor and
+# patch versions stay free.
 dependencies:
-  - python=3.10
+  # Must satisfy pyproject's `requires-python = ">=3.11"`.
+  - python=3.12
   - pytorch=2.*
-  - torchvision=0.*
   - lightning=2.*
-  - torchmetrics=0.*
+  - torchmetrics=1.*
   - hydra-core=1.*
   - rich=13.*
-  - pre-commit=3.*
-  - pytest=7.*
   - numpy
   - pandas
   - scipy
   - scikit-learn
+  - joblib
+  - lightning-utilities
   - shapely
   - anndata
+  # PyG and its compiled extensions resolve far more reliably from conda than
+  # from pip; torch-sparse in particular has no macOS-arm64 wheel.
+  - pyg=2.*
+  - pytorch-scatter
+  - pytorch-sparse
+
+  # --------- interpretability --------- #
+  - plotly
+  - jinja2
+
+  # --------- dev --------- #
+  - pre-commit=4.*
+  - pytest=9.*
 
   # --------- loggers --------- #
   # - wandb
@@ -46,9 +58,9 @@ dependencies:
 
   - pip>=23
   - pip:
-      - hydra-optuna-sweeper
       - hydra-colorlog
       - rootutils
-      - torch-geometric
-      # optional: required only for SingleCellExperiment/rds loading
+      - umap-learn
+      # optional: required only for SingleCellExperiment/rds loading, and also
+      # needs an R runtime with Bioconductor
       # - rpy2

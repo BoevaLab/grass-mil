@@ -4,6 +4,11 @@ spatial_filename: spatial_table.csv
 id_column: instance_id
 bag_id_column: bag_id
 composition_label: cell_type
+# Single categorical label per instance, needed by `filtration_curves` and
+# `per_niche_cell_type_enrichment`. An instance is a neighbourhood, not a cell,
+# so this is the dominant cell type of the neighbourhood (argmax of the
+# composition vector). Set to null to omit the column.
+cell_type_column: cell_type
 composition_prefix: comp_
 embedding_prefix: inst_emb
 score_column: score
@@ -25,3 +30,11 @@ require_composition: true
 spatial:
   enabled: false
   undirected: true
+
+# Cell-level export: one row per node of every sampled ego-graph, plus the
+# intra-subgraph edges with their distances. Requires a shadow sampler, since
+# only then does the payload carry per-instance subgraphs.
+cells:
+  enabled: false
+  cell_filename: cell_table.csv
+  cell_edge_filename: cell_edges.csv

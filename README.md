@@ -102,6 +102,7 @@ grass-mil-eval \
 
 ## Documentation Index
 
+- Worked examples on a public dataset: [`vignettes/`](vignettes/README.md)
 - Full tracked-file map: [`docs/repository_map.md`](docs/repository_map.md)
 - Dataset onboarding and preparation checklist: [`docs/dataset_preparation.md`](docs/dataset_preparation.md)
 - End-to-end workflows (new data, SSL pretrain->finetune, model adjustments, inference): [`docs/workflows_train_infer.md`](docs/workflows_train_infer.md)

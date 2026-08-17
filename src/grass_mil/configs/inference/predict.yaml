@@ -3,10 +3,14 @@
 defaults:
   - _self_
   - /data: spatial_omics
-  - /task: finetune_mean
   - /model: supervised_module
   - /optim: adamw
   - /scheduler: cosine_epoch
+  # `task` is merged after `model`, `optim` and `scheduler` so a task preset
+  # can override them. finetune_mil sets the per-class head and attention
+  # widths; listed first, they are silently discarded and the model is built
+  # narrower than the checkpoint it is asked to load.
+  - /task: finetune_mean
   - /trainer: default
   - /paths: default
   - /extras: default

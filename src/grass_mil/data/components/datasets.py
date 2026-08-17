@@ -60,7 +60,12 @@ class SpatialOmicsGraphDataset(Dataset):
 
     def __getitem__(self, idx: int) -> torch.nn.Module:
         entry = self.entries[idx]
-        data = torch.load(entry.path)
+        # weights_only=False is required: these are PyG `Data` objects written
+        # by our own precompute step, not bare tensors. torch>=2.6 defaults the
+        # flag to True, which cannot unpickle `DataEdgeAttr`/`GlobalStorage`
+        # without allowlisting a set of PyG internals that changes between
+        # releases. The file is first-party, produced by this pipeline.
+        data = torch.load(entry.path, weights_only=False)
         return _migrate_legacy_attributes(data)
 
 

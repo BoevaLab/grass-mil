@@ -24,12 +24,6 @@ class PluginRegistry:
             )
         self._plugins[name] = plugin
 
-    def register_many(
-        self, plugins: Iterable[InterpretabilityPlugin], *, replace: bool = False
-    ) -> None:
-        for plugin in plugins:
-            self.register(plugin, replace=replace)
-
     def get(self, name: str) -> InterpretabilityPlugin:
         key = str(name).strip()
         if key not in self._plugins:

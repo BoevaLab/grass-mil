@@ -1,5 +1,13 @@
-# Every builtin analysis enabled. Slower than the default preset:
-# Moran's I and Ripley scale with niche size and permutation count.
+# Every builtin analysis enabled.
+#
+# The tier-2 analyses are cell-level: they measure the cells inside the sampled
+# ego-graphs, which needs `cell_table`/`cell_edge_table` from
+# `grass-mil-predict interpretability.cells.enabled=true`. `niche_label_moran`
+# is the global counterpart and needs only `spatial_table`.
+#
+# Slower than the default preset: the per-niche statistics scale with niche size
+# and permutation count.
+
 defaults:
   - default
   - _self_
@@ -7,8 +15,10 @@ defaults:
 enabled:
   - niche_profiles
   - margin_attribution
-  - neighborhood_enrichment
-  - per_niche_cell_type_enrichment
-  - filtration_curves
-  - morans_i
-  - ripley
+  # cell-level, within each niche
+  - cell_type_enrichment_per_niche
+  - cell_type_moran_per_niche
+  - cell_filtration_curves
+  - cell_type_ripley_per_niche
+  # global, over niches
+  - niche_label_moran

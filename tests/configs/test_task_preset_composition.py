@@ -16,12 +16,19 @@ from hydra import compose, initialize_config_module
 from hydra.core.global_hydra import GlobalHydra
 
 CONFIG_MODULE = "grass_mil.configs"
-ROOT_CONFIGS = ["train", "eval"]
+# Every root config that builds a SupervisedModule. `inference/predict` was
+# missing here, and it had the same defaults-ordering bug: it composed a
+# single-logit head, then failed to load a two-class fine-tuned checkpoint with
+# a size mismatch.
+ROOT_CONFIGS = ["train", "eval", "inference/predict"]
 SUPERVISED_TASKS = ["finetune_mean", "finetune_mil", "finetune_survival"]
 
 
 def _compose(config_name: str, overrides: list[str]):
     GlobalHydra.instance().clear()
+    if config_name == "inference/predict":
+        # Mandatory field; irrelevant to what these tests assert.
+        overrides = [*overrides, "ckpt_path=/tmp/none.ckpt"]
     with initialize_config_module(version_base="1.3", config_module=CONFIG_MODULE):
         cfg = compose(config_name=config_name, overrides=overrides)
     GlobalHydra.instance().clear()
@@ -37,9 +44,7 @@ def test_supervised_task_presets_compose(config_name: str, task_name: str) -> No
 
 @pytest.mark.parametrize("config_name", ROOT_CONFIGS)
 @pytest.mark.parametrize("task_name", SUPERVISED_TASKS)
-def test_attention_width_matches_head_width_as_composed(
-    config_name: str, task_name: str
-) -> None:
+def test_attention_width_matches_head_width_as_composed(config_name: str, task_name: str) -> None:
     """The contract must hold on the *composed* config, not just in code.
 
     ``validate_attention_width`` runs at build time, but it can only see what
@@ -67,7 +72,7 @@ def test_finetune_mil_composes_per_class_widths(config_name: str) -> None:
     channels. If ``model`` is merged after ``task`` in the defaults list, the
     module preset overwrites both and the published MIL head is not what runs.
     """
-    cfg = _compose(config_name, [f"task=finetune_mil"])
+    cfg = _compose(config_name, ["task=finetune_mil"])
     assert int(cfg.model.graph_head.output_dim) == 2
     assert int(cfg.model.attention.n_classes) == 2
     assert cfg.task.target_type == "categorical"

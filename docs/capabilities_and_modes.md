@@ -167,9 +167,10 @@ Validation (during `src/grass_mil/train.py`) includes:
 
 Notebooks support interactive smoke validation of:
 
-- data loading and graph construction (`notebooks/data_loading_testing.ipynb`)
-- component compatibility matrix (`notebooks/model_components_testing.ipynb`)
-- training regime smoke behavior (`notebooks/training_logic_testing.ipynb`)
+- ingesting a public AnnData cohort and building cellular graphs
+  (`vignettes/01_anndata_to_spatial_graphs.ipynb`)
+- self-supervised pretraining and spatial-niche discovery
+  (`vignettes/02_pretraining_and_niches.ipynb`)
 
 ## 12) CI And Quality Modes
 

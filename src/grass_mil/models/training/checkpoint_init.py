@@ -18,7 +18,9 @@ def load_state_dict_with_optional_mapping(
     ckpt_path = Path(init_from_ckpt)
     if not ckpt_path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {init_from_ckpt}")
-    raw = torch.load(str(ckpt_path), map_location="cpu")
+    # First-party Lightning checkpoint; see the note in data/components/datasets.py
+    # on why weights_only must be set explicitly under torch>=2.6.
+    raw = torch.load(str(ckpt_path), map_location="cpu", weights_only=False)
     state_dict = raw["state_dict"] if isinstance(raw, dict) and "state_dict" in raw else raw
     if not isinstance(state_dict, dict):
         raise ValueError("Checkpoint must resolve to a state_dict dictionary.")
@@ -67,7 +69,7 @@ def read_graph_head_bias(
 
     import torch
 
-    payload = torch.load(checkpoint_path, map_location="cpu")
+    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     state = payload.get("state_dict", payload) if isinstance(payload, dict) else payload
     if not isinstance(state, dict):
         raise ValueError(f"Checkpoint {checkpoint_path!r} holds no state dict.")

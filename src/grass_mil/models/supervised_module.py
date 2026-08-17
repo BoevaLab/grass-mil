@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 import lightning as L
 import torch
 import torch.distributed as dist
+from grass_mil.batching import extract_subgraphs
 from grass_mil.inference.aggregation import aggregate_group_logits
 from grass_mil.inference.metrics import compute_task_metrics_from_tensors
 from grass_mil.inference.schemas import BatchPredictionPayload
@@ -392,12 +393,12 @@ class SupervisedModule(L.LightningModule):
         compute_attention_logits = (
             include_instance_payload and self.use_attention and self.attention is not None
         )
-        subgraph_data_list = None
-        if hasattr(batch, "to_data_list"):
-            try:
-                subgraph_data_list = batch.to_data_list()
-            except Exception:
-                subgraph_data_list = None
+        # ShaDow batches are built directly and delimited by `ptr`, so
+        # `to_data_list()` raises on them. This previously sat behind a bare
+        # `except` that turned that into a silent None, and the spatial-table
+        # export then failed several steps later complaining about a missing
+        # payload field instead of naming the cause.
+        subgraph_data_list = extract_subgraphs(batch)
 
         for bag_id, indices in zip(ordered_bag_ids, bag_indices):
             if not indices:
@@ -500,49 +501,6 @@ class SupervisedModule(L.LightningModule):
                 bag_key=self.task_cfg.get("bag_key", "region_id"),
                 bag_fallback_key=self.task_cfg.get("bag_fallback_key", "sample_id"),
             )
-            batch_index = getattr(batch, "batch", None)
-            if batch_index is None:
-                batch_index = torch.zeros(
-                    node_emb.shape[0], dtype=torch.long, device=node_emb.device
-                )
-            node_bag_ids = [
-                str(bag_ids[int(graph_idx)]) for graph_idx in batch_index.detach().cpu()
-            ]
-            payload["node_embeddings"] = node_emb
-            payload["node_bag_ids"] = node_bag_ids
-        return payload
-
-    def collect_graph_embeddings(
-        self, batch, *, return_node_embeddings: bool = False
-    ) -> Dict[str, Any]:
-        node_emb, graph_emb = self.encoder(
-            batch.x,
-            batch.edge_index,
-            edge_attr=getattr(batch, "edge_attr", None),
-            batch=getattr(batch, "batch", None),
-            categorical_codes=getattr(batch, "categorical_codes", None),
-            return_graph_embedding=True,
-        )
-        bag_ids = extract_bag_ids(
-            batch,
-            bag_key=self.task_cfg.get("bag_key", "region_id"),
-            bag_fallback_key=self.task_cfg.get("bag_fallback_key", "sample_id"),
-        )
-        bag_groups = group_instance_indices_by_bag(bag_ids)
-        ordered_bag_ids = sorted(bag_groups.keys())
-        bag_graph_embeddings = []
-        bag_counts: list[int] = []
-        for bag_id in ordered_bag_ids:
-            idx = torch.tensor(bag_groups[bag_id], dtype=torch.long, device=graph_emb.device)
-            bag_graph_embeddings.append(graph_emb.index_select(0, idx).mean(dim=0, keepdim=True))
-            bag_counts.append(int(idx.numel()))
-
-        payload: Dict[str, Any] = {
-            "bag_ids": ordered_bag_ids,
-            "graph_embeddings": torch.cat(bag_graph_embeddings, dim=0),
-            "bag_counts": bag_counts,
-        }
-        if return_node_embeddings:
             batch_index = getattr(batch, "batch", None)
             if batch_index is None:
                 batch_index = torch.zeros(

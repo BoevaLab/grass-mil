@@ -176,6 +176,47 @@ def resolve_composition_column_names(
     return names
 
 
+def _resolve_instance_root_cell_types(
+    instance_graphs: Sequence[Any],
+    *,
+    labels: Sequence[str],
+    composition_label: str,
+) -> Optional[List[str]]:
+    """Cell type of each instance's root cell, as a readable name.
+
+    `root_n_id` holds a global node id, so the root's row within the subgraph is
+    found by matching it against `n_id`. Returns None if any instance cannot be
+    resolved, so a partially-correct column is never emitted.
+    """
+    out: List[str] = []
+    for graph in instance_graphs:
+        codes = getattr(graph, "categorical_codes", None)
+        n_id = getattr(graph, "n_id", None)
+        if not isinstance(codes, torch.Tensor) or not isinstance(n_id, torch.Tensor):
+            return None
+        try:
+            root_global = _resolve_instance_root_node_id(graph)
+        except ValueError:
+            return None
+
+        matches = (n_id.detach().cpu().long().view(-1) == int(root_global)).nonzero().view(-1)
+        if matches.numel() == 0:
+            return None
+        local_idx = int(matches[0])
+
+        column = 0
+        slices = getattr(graph, "categorical_slices", None)
+        if isinstance(slices, dict) and composition_label in slices:
+            column = int(slices[composition_label])
+        codes_2d = codes if codes.ndim == 2 else codes.view(-1, 1)
+        if local_idx >= int(codes_2d.shape[0]) or column >= int(codes_2d.shape[1]):
+            return None
+
+        code = int(codes_2d[local_idx, column])
+        out.append(labels[code] if 0 <= code < len(labels) else str(code))
+    return out
+
+
 def build_instance_table(
     payload: BatchPredictionPayload,
     *,
@@ -190,6 +231,7 @@ def build_instance_table(
     score_logit_index: int = 0,
     attention_column: str = "attention",
     attention_class_index: Optional[int] = None,
+    cell_type_column: Optional[str] = "cell_type",
 ) -> pd.DataFrame:
     logits = _tensor_to_2d_cpu(payload.instance_logits)
     if logits is None:
@@ -278,6 +320,30 @@ def build_instance_table(
             comp_cols = [f"{composition_prefix}{idx}" for idx in range(int(composition.shape[1]))]
         for col_name, values in zip(comp_cols, composition.T):
             data[col_name] = values.tolist()
+
+        if cell_type_column and payload.instance_graphs is not None:
+            # The type of the cell each instance is rooted at.
+            #
+            # There is exactly one instance per cell -- an instance is that
+            # cell's k-hop ego-graph -- so the instance table is a cell table,
+            # and this column makes it one that the cell-type plugins
+            # (`filtration_curves`, `per_niche_cell_type_enrichment`) can read.
+            #
+            # It is the root cell's own type, not a summary of the
+            # neighbourhood: summarising here would silently turn cell-level
+            # statistics into statistics over neighbourhood labels. The
+            # neighbourhood composition is already exported separately as the
+            # `comp_*` columns.
+            prefix_len = len(composition_prefix)
+            labels = [
+                name[prefix_len:] if name.startswith(composition_prefix) else name
+                for name in comp_cols
+            ]
+            root_types = _resolve_instance_root_cell_types(
+                payload.instance_graphs, labels=labels, composition_label=cell_type_column
+            )
+            if root_types is not None:
+                data[cell_type_column] = root_types
     elif require_composition:
         raise ValueError(
             "Composition columns are required for interpretability export but "
@@ -437,3 +503,134 @@ def _resolve_graph_edge_distances(graph: object, n_edges: int) -> Optional[torch
     if dist_col >= int(edge_attr.shape[1]):
         return None
     return edge_attr[:, dist_col].float().view(-1)
+
+
+def _edge_distance_column(graph: Any, n_edges: int) -> Optional[torch.Tensor]:
+    """Per-edge distances, preferring the column named ``distance``."""
+    return _resolve_graph_edge_distances(graph, n_edges)
+
+
+def build_cell_tables(
+    payload: BatchPredictionPayload,
+    instance_ids: Sequence[str],
+    *,
+    composition_column_names: Optional[Sequence[str]] = None,
+    composition_prefix: str = "comp_",
+    composition_label: str = "cell_type",
+    cell_id_column: str = "cell_id",
+    instance_id_column: str = "instance_id",
+) -> Optional[tuple]:
+    """Cell-level node and edge tables pooled over every sampled ego-graph.
+
+    The instance tables describe neighbourhoods: one row per ego-graph, with the
+    cell content reduced to composition fractions. Several analyses are only
+    meaningful over the cells themselves -- cell-type neighbourhood enrichment
+    within a niche, per-cell-type spatial autocorrelation, filtration over edge
+    distances -- and cannot be recovered from that summary.
+
+    These tables restore it. Every node of every sampled subgraph becomes a row,
+    carrying its own cell type and coordinates, and every intra-subgraph edge
+    becomes a row with its distance. Joining ``instance_id`` against niche labels
+    gives each cell the niche of the ego-graph it came from, which is what makes
+    per-niche cell-level statistics possible.
+
+    Cells are pooled *with duplicates*: overlapping ego-graphs revisit the same
+    cell, and each visit is a row. ``node_id`` carries the id in the source graph
+    so callers can deduplicate when that is the right thing to do.
+
+    Returns ``(cell_table, cell_edge_table)``, or None when the payload carries
+    no subgraphs.
+    """
+    graphs = payload.instance_graphs
+    if graphs is None:
+        return None
+    if len(graphs) != len(instance_ids):
+        raise ValueError(
+            "Mismatch between instance_graphs and instance ids: "
+            f"{len(graphs)} vs {len(instance_ids)}."
+        )
+
+    labels: Optional[List[str]] = None
+    if composition_column_names is not None:
+        prefix_len = len(composition_prefix)
+        labels = [
+            name[prefix_len:] if name.startswith(composition_prefix) else name
+            for name in composition_column_names
+        ]
+
+    cell_rows: List[Dict[str, Any]] = []
+    edge_rows: List[Dict[str, Any]] = []
+
+    for instance_id, graph in zip(instance_ids, graphs):
+        codes = getattr(graph, "categorical_codes", None)
+        if not isinstance(codes, torch.Tensor):
+            return None
+        codes_2d = codes if codes.ndim == 2 else codes.view(-1, 1)
+        column = 0
+        slices = getattr(graph, "categorical_slices", None)
+        if isinstance(slices, dict) and composition_label in slices:
+            column = int(slices[composition_label])
+        if column >= int(codes_2d.shape[1]):
+            return None
+
+        n_nodes = int(codes_2d.shape[0])
+        pos = getattr(graph, "pos", None)
+        pos = pos.detach().cpu() if isinstance(pos, torch.Tensor) else None
+        n_id = getattr(graph, "n_id", None)
+        n_id = n_id.detach().cpu().long().view(-1) if isinstance(n_id, torch.Tensor) else None
+
+        try:
+            root_global = _resolve_instance_root_node_id(graph)
+        except ValueError:
+            root_global = None
+
+        cell_ids = [f"{instance_id}::n{idx}" for idx in range(n_nodes)]
+        for idx in range(n_nodes):
+            code = int(codes_2d[idx, column])
+            row: Dict[str, Any] = {
+                cell_id_column: cell_ids[idx],
+                instance_id_column: instance_id,
+                composition_label: (
+                    labels[code] if labels is not None and 0 <= code < len(labels) else str(code)
+                ),
+            }
+            node_id = int(n_id[idx]) if n_id is not None and idx < int(n_id.numel()) else None
+            row["node_id"] = node_id
+            # node_id is patch-local, so (patch_id, node_id) identifies a real
+            # cell. Overlapping ego-graphs revisit cells; dedupe on that pair.
+            patch = getattr(graph, "patch_id", None)
+            if isinstance(patch, (list, tuple)) and patch:
+                patch = patch[0]
+            row["patch_id"] = None if patch is None else str(patch)
+            row["is_root"] = bool(root_global is not None and node_id == int(root_global))
+            if pos is not None and idx < int(pos.shape[0]) and int(pos.shape[1]) >= 2:
+                row["x"] = float(pos[idx, 0])
+                row["y"] = float(pos[idx, 1])
+            cell_rows.append(row)
+
+        edge_index = getattr(graph, "edge_index", None)
+        if isinstance(edge_index, torch.Tensor) and edge_index.numel():
+            edge_index = edge_index.detach().cpu().long()
+            n_edges = int(edge_index.shape[1])
+            distances = _edge_distance_column(graph, n_edges)
+            for e in range(n_edges):
+                src = int(edge_index[0, e])
+                dst = int(edge_index[1, e])
+                if src >= n_nodes or dst >= n_nodes:
+                    continue
+                edge_rows.append(
+                    {
+                        "source_id": cell_ids[src],
+                        "target_id": cell_ids[dst],
+                        "distance": (
+                            float(distances[e]) if distances is not None else float("nan")
+                        ),
+                        instance_id_column: instance_id,
+                    }
+                )
+
+    cell_table = pd.DataFrame(cell_rows)
+    edge_table = pd.DataFrame(
+        edge_rows, columns=["source_id", "target_id", "distance", instance_id_column]
+    )
+    return cell_table, edge_table

@@ -240,3 +240,153 @@ def test_build_instance_table_attention_class_index_is_selectable() -> None:
 
     with pytest.raises(ValueError, match="out of range"):
         build_instance_table(payload, require_composition=True, attention_class_index=5)
+
+
+def _instance_graph(codes, n_id, root_global):
+    """Minimal stand-in for a sampled ego-graph."""
+    from torch_geometric.data import Data
+
+    g = Data(x=torch.zeros(len(n_id), 1))
+    g.categorical_codes = torch.tensor(codes).view(-1, 1)
+    g.n_id = torch.tensor(n_id)
+    g.root_n_id = torch.tensor([root_global])
+    g.root_n_id_is_global = torch.tensor([True])
+    g.categorical_slices = {"cell_type": 0}
+    return g
+
+
+def test_build_instance_table_emits_the_root_cell_type() -> None:
+    """One label per instance: the type of the cell it is rooted at.
+
+    There is exactly one instance per cell -- an instance is that cell's k-hop
+    ego-graph -- so the instance table is a cell table. `filtration_curves` and
+    `per_niche_cell_type_enrichment` both need this column and raise without it.
+
+    It must be the root cell's own type. Summarising the neighbourhood instead
+    (its dominant type, say) would quietly turn cell-level statistics into
+    statistics over neighbourhood labels. The neighbourhood composition is
+    exported separately as `comp_*`.
+    """
+    # Instance 0 is rooted at global node 7, whose code is 1 ("Tcell"), even
+    # though its neighbourhood is mostly code 0 ("Epithelial").
+    graphs = [
+        _instance_graph(codes=[0, 0, 1], n_id=[5, 6, 7], root_global=7),
+        _instance_graph(codes=[0, 1, 1], n_id=[8, 9, 10], root_global=8),
+    ]
+    payload = BatchPredictionPayload(
+        bag_ids=["b0"],
+        bag_logits=torch.tensor([[1.0]]),
+        bag_targets=None,
+        bag_attention=None,
+        instance_logits=torch.tensor([[0.2], [0.5]]),
+        instance_patch_ids=["p0", "p1"],
+        instance_bag_ids=["b0", "b0"],
+        instance_region_ids=["r0", "r0"],
+        instance_sample_ids=["s0", "s0"],
+        instance_embeddings=torch.tensor([[0.1, 0.2], [0.3, 0.4]]),
+        instance_composition=torch.tensor([[0.67, 0.33], [0.33, 0.67]]),
+        instance_graphs=graphs,
+    )
+    frame = build_instance_table(
+        payload,
+        require_composition=True,
+        composition_column_names=["comp_Epithelial", "comp_Tcell"],
+    )
+    assert "cell_type" in frame.columns
+    # Root types, not the neighbourhood majority: instance 0 is majority
+    # Epithelial but rooted at a Tcell, and instance 1 the other way round.
+    assert frame["cell_type"].tolist() == ["Tcell", "Epithelial"]
+
+
+def test_instance_cell_type_column_can_be_disabled() -> None:
+    graphs = [_instance_graph(codes=[0, 1], n_id=[3, 4], root_global=3)]
+    payload = BatchPredictionPayload(
+        bag_ids=["b0"],
+        bag_logits=torch.tensor([[1.0]]),
+        bag_targets=None,
+        bag_attention=None,
+        instance_logits=torch.tensor([[0.2]]),
+        instance_patch_ids=["p0"],
+        instance_bag_ids=["b0"],
+        instance_region_ids=["r0"],
+        instance_sample_ids=["s0"],
+        instance_embeddings=torch.tensor([[0.1, 0.2]]),
+        instance_composition=torch.tensor([[0.7, 0.3]]),
+        instance_graphs=graphs,
+    )
+    frame = build_instance_table(payload, require_composition=True, cell_type_column=None)
+    assert "cell_type" not in frame.columns
+
+
+def test_build_cell_tables_pools_every_node_with_its_own_type() -> None:
+    """Cell-level tables: one row per node of every sampled ego-graph.
+
+    The instance table describes neighbourhoods, reducing their cell content to
+    composition fractions. Cell-type enrichment within a niche, per-cell-type
+    autocorrelation and distance filtration all need the cells themselves, which
+    that summary cannot reconstruct.
+
+    Cells are pooled with duplicates -- overlapping ego-graphs revisit the same
+    cell -- so (patch_id, node_id) identifies a real cell, not cell_id.
+    """
+    from grass_mil.inference.interpretability_export import build_cell_tables
+
+    g0 = _instance_graph(codes=[0, 1, 1], n_id=[5, 6, 7], root_global=5)
+    g0.pos = torch.tensor([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]])
+    g0.edge_index = torch.tensor([[0, 1], [1, 2]])
+    g0.edge_attr = torch.tensor([[1.0, 1.0], [2.0, 1.0]])
+    g0.edge_attr_names = ["distance", "neighbor"]
+    g0.patch_id = ["patchA"]
+
+    payload = BatchPredictionPayload(
+        bag_ids=["b0"],
+        bag_logits=torch.tensor([[1.0]]),
+        bag_targets=None,
+        bag_attention=None,
+        instance_logits=torch.tensor([[0.2]]),
+        instance_patch_ids=["p0"],
+        instance_bag_ids=["b0"],
+        instance_region_ids=["r0"],
+        instance_sample_ids=["s0"],
+        instance_embeddings=torch.tensor([[0.1, 0.2]]),
+        instance_composition=torch.tensor([[0.34, 0.66]]),
+        instance_graphs=[g0],
+    )
+    cells, edges = build_cell_tables(
+        payload,
+        ["inst0"],
+        composition_column_names=["comp_Epithelial", "comp_Tcell"],
+    )
+
+    # Every node becomes a row, carrying its own type -- not the neighbourhood's.
+    assert len(cells) == 3
+    assert cells["cell_type"].tolist() == ["Epithelial", "Tcell", "Tcell"]
+    assert cells["instance_id"].unique().tolist() == ["inst0"]
+    assert cells["patch_id"].unique().tolist() == ["patchA"]
+    # Exactly one root, and it is the node whose n_id matches root_n_id.
+    assert cells["is_root"].sum() == 1
+    assert cells.loc[cells["is_root"], "node_id"].tolist() == [5]
+
+    # Edges carry their distance, so filtration over thresholds is possible.
+    assert len(edges) == 2
+    assert edges["distance"].tolist() == [1.0, 2.0]
+    assert set(edges["source_id"]) <= set(cells["cell_id"])
+
+
+def test_build_cell_tables_returns_none_without_subgraphs() -> None:
+    from grass_mil.inference.interpretability_export import build_cell_tables
+
+    payload = BatchPredictionPayload(
+        bag_ids=["b0"],
+        bag_logits=torch.tensor([[1.0]]),
+        bag_targets=None,
+        bag_attention=None,
+        instance_logits=torch.tensor([[0.2]]),
+        instance_patch_ids=["p0"],
+        instance_bag_ids=["b0"],
+        instance_region_ids=["r0"],
+        instance_sample_ids=["s0"],
+        instance_embeddings=torch.tensor([[0.1, 0.2]]),
+        instance_composition=torch.tensor([[0.7, 0.3]]),
+    )
+    assert build_cell_tables(payload, ["inst0"]) is None

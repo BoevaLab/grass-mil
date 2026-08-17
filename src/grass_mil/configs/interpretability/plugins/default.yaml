@@ -3,38 +3,6 @@ enabled:
 params:
   niche_profiles:
     variance_estimator: unbiased
-  neighborhood_enrichment:
-    label_column: niche_label
-    # One of: zscore, obs-exp, log2fc.
-    enrichment_mode: zscore
-    # n_perms=0 uses analytical expected/std (runtime warning emitted).
-    # Set n_perms>0 for Squidpy-style permutation expected/std + p-values.
-    n_perms: 0
-  diff_neighborhood_enrichment:
-    label_column: niche_label
-    condition_column: condition
-    permutation_group_column: sample_id
-    # One of: zscore, obs-exp, log2fc.
-    enrichment_mode: zscore
-    # n_perms=0 computes pairwise differentials without permutation p-values.
-    n_perms: 0
-  filtration_curves:
-    # Distances and thresholds are interpreted in micrometers.
-    threshold_start: 0.0
-    threshold_stop: 55.0
-    threshold_count: 500
-  per_niche_cell_type_enrichment:
-    cell_type_column: cell_type
-    niche_column: niche_label
-    # Niches with fewer than 2 instances, and Background (-1) when
-    # skip_background is true, are omitted.
-    skip_background: true
-    # One of: zscore, obs-exp, log2fc.
-    enrichment_mode: obs-exp
-    # n_perms=0 uses analytical expected/std (runtime warning emitted).
-    n_perms: 0
-    random_state: 42
-    undirected: false
   margin_attribution:
     # Per-class attention columns, emitted when the head has one attention
     # channel per class. Falls back to the single `attention` column.
@@ -53,23 +21,6 @@ params:
     # heads (the class-0 margin is its exact negation) and every class for
     # multi-class heads, each with a one-vs-rest margin.
     focus_classes: null
-  morans_i:
-    feature_prefix: comp_
-    n_perms: 100
-    random_state: 0
-    min_nodes: 3
-    # Contrast every niche against this one; -1 is the Background label.
-    reference_group: -1
-  ripley:
-    label_column: niche_label
-    group_column: null
-    x_column: center_x
-    y_column: center_y
-    n_radii: 50
-    max_fraction: 0.25
-    min_count: 5
-    # median | max | first. `first` reproduces the legacy order-dependent grid.
-    radius_source: median
   niche_agreement:
     active_name: active
     # Columns holding partitions from other representation spaces, e.g. joined
@@ -87,3 +38,35 @@ params:
     edge_width: 0.5
     edge_opacity: 0.25
     reverse_y: true
+  # --- cell-level analyses (need interpretability.cells.enabled at predict) ---
+  cell_type_enrichment_per_niche:
+    cell_type_column: cell_type
+    niche_column: niche_label
+    # n_perms=0 uses the analytical null; >0 gives permutation z-scores.
+    n_perms: 0
+    enrichment_mode: zscore
+    min_cells: 10
+    skip_background: false
+    differential_vs_background: true
+    reference_niche: -1
+  cell_type_moran_per_niche:
+    cell_type_column: cell_type
+    niche_column: niche_label
+    n_perms: 100
+    min_nodes: 3
+  niche_label_moran:
+    niche_column: niche_label
+    n_perms: 100
+  cell_filtration_curves:
+    cell_type_column: cell_type
+    niche_column: niche_label
+    threshold_start: 0.0
+    threshold_stop: 55.0
+    threshold_count: 500
+  cell_type_ripley_per_niche:
+    cell_type_column: cell_type
+    niche_column: niche_label
+    x_column: x
+    y_column: y
+    n_radii: 50
+    min_count: 5

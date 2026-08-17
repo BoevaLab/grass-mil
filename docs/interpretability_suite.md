@@ -286,30 +286,41 @@ Plugin registration is per pipeline run (fresh `PluginRegistry`).
 
 Built-in plugins:
 
-- `niche_profiles`
-- `margin_attribution`
-- `neighborhood_enrichment`
-- `diff_neighborhood_enrichment`
-- `per_niche_cell_type_enrichment`
-- `filtration_curves`
-- `morans_i`
-- `ripley`
-- `niche_agreement`
-- `tissue_graph`
+| Plugin | Unit |
+|---|---|
+| `niche_profiles` | instances, composition over all their cells |
+| `margin_attribution` | instances |
+| `cell_type_enrichment_per_niche` | cells, within each niche |
+| `cell_type_moran_per_niche` | cells, within each niche |
+| `cell_filtration_curves` | cell-cell edges, within each niche |
+| `cell_type_ripley_per_niche` | cells, within each niche |
+| `cell_type_diff_enrichment_by_condition` | cells, differenced between conditions |
+| `niche_label_moran` | instances, globally |
+| `niche_agreement` | instances |
+| `tissue_graph` | instances (visualisation) |
 
-Four of these are not enabled by any shipped preset because each needs an input
-the pipeline cannot infer:
+The tier-2 statistics are cell-level: the instance-level versions were removed,
+because treating a whole ego-graph as one node measures how neighbourhood
+*labels* relate rather than how cells do. Two niches with identical composition
+but opposite spatial arrangement are indistinguishable to an instance-level
+analysis.
+
+The cell-level plugins need `cell_table` and `cell_edge_table`, exported by
+`grass-mil-predict interpretability.cells.enabled=true` and passed to the report
+as `data.cell_table` / `data.cell_edge_table`.
+
+Three plugins are not in any shipped preset, because each needs an input the
+pipeline cannot infer:
 
 | Plugin | Additional input required |
 |---|---|
-| `diff_neighborhood_enrichment` | a condition column, plus a permutation group column in permutation mode |
+| `cell_type_diff_enrichment_by_condition` | a condition column, plus a permutation group column in permutation mode |
 | `tissue_graph` | an explicit `sample_value` (no auto-pick) |
-| `niche_agreement` | a second niche labeling column to compare against |
-| `per_niche_cell_type_enrichment` | enabled in `full.yaml`; needs `cell_type` |
+| `niche_agreement` | a second niche labelling column to compare against |
 
-`filtration_curves` default threshold grid:
+`cell_filtration_curves` default threshold grid:
 
-- notebook-parity default is `np.linspace(0.0, 55.0, 500)`
+- `np.linspace(0.0, 55.0, 500)`
 - thresholds are interpreted in micrometers
 
 `tissue_graph` behavior:
@@ -535,8 +546,7 @@ Subgroups:
 - `configs/interpretability/clustering/*.yaml`
 - `configs/interpretability/plugins/default.yaml` — `niche_profiles` only
 - `configs/interpretability/plugins/full.yaml` — composes `default` and adds
-  `margin_attribution`, `neighborhood_enrichment`,
-  `per_niche_cell_type_enrichment`, `filtration_curves`, `morans_i`, `ripley`
+  `margin_attribution`, the four cell-level analyses, and `niche_label_moran`
 
 Select a preset with:
 
@@ -686,3 +696,55 @@ Outputs use the language a biologist reads, not the algorithm's:
 The *algorithm* is still clustering, so `run_clustering`, `ClusteringResult` and
 the sklearn parameters (`n_clusters`, `min_cluster_size`) keep their names. The
 distinction is deliberate: those are the method, the niches are the result.
+
+## What the tier-2 statistics are computed over
+
+Every tier-2 analysis runs on the **instance graph**, not on the cell graph.
+Confusing the two makes the results easy to over-read, so be explicit about it:
+
+- A row of `instance_table` is one **k-hop ego-graph**, rooted at one cell.
+- An edge in `spatial_table` connects two **instances**, i.e. two roots.
+- `comp_*` are the cell-type fractions among **all cells inside** that
+  ego-graph. This is the only place the full cell content survives.
+- `cell_type` is the **root cell's own type**, so that the instance graph can be
+  treated as a (sampled) cell graph.
+- `center_x`/`center_y` are the **mean position of all cells** in the ego-graph,
+  not the root cell's coordinates.
+
+What each analysis therefore measures:
+
+| Analysis | Unit | Measures |
+|---|---|---|
+| `cell_type_enrichment_per_niche` | cell pairs inside a niche | how often two cell types are in contact, versus chance |
+| `cell_type_moran_per_niche` | cells inside a niche | whether each cell type forms contiguous patches |
+| `cell_filtration_curves` | cell-cell edges inside a niche | cells of each type reached as the distance threshold grows |
+| `cell_type_ripley_per_niche` | cells inside a niche | cross-L between cell types, from their own coordinates |
+| `niche_label_moran` | instances, globally | whether niches form contiguous territories |
+| `niche_profiles` | instances | mean `comp_*` per niche, which reflects every cell in the ego-graphs |
+
+**Roots are a weighted sample, not every cell.** With
+`data.sampler.runtime.proportional_root_sampling=true` (the default) roots are
+drawn with inverse-frequency weighting by `property_name`, so rare cell types
+are deliberately over-represented and one cell can root several instances. Any
+cell-type distribution over instances therefore reflects that sampling design
+rather than the tissue. Set `proportional_root_sampling=false` for an unweighted
+draw.
+
+### Cell-level analyses
+
+Export `cell_table` and `cell_edges` with
+`grass-mil-predict interpretability.cells.enabled=true`, pass them to the report
+as `data.cell_table` / `data.cell_edge_table`, and these become available:
+
+| Analysis | Unit | Measures |
+|---|---|---|
+| `cell_type_enrichment_per_niche` | cell pairs within a niche | cell-type x cell-type contact enrichment, using only edges whose both endpoints lie in the niche; optionally differenced against Background |
+| `cell_type_moran_per_niche` | cells within a niche | Moran's I of each cell-type indicator, as a niche x cell-type table |
+| `cell_filtration_curves` | cell pairs within a niche | cells of each type reached as the edge-distance threshold grows, counting both endpoints |
+| `cell_type_ripley_per_niche` | cells within a niche | centred cross-L between cell types, from the cells' own coordinates |
+| `niche_label_moran` | instances, globally | whether niches form contiguous territories rather than interleaving |
+
+Each cell inherits the niche of the ego-graph it was sampled into, so a cell
+appearing in several overlapping ego-graphs contributes to each. This mirrors
+the pooling the legacy NSCLC reports do.
+

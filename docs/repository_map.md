@@ -13,15 +13,14 @@ Scope rules used here:
 - `.project-root`: Root marker used by `rootutils.setup_root(...)`.
 - `.gitignore`: Ignore rules for generated artifacts, envs, logs, and data outputs.
 - `.env.example`: Example environment variable file loaded by Hydra/OmegaConf env references.
-- `.pre-commit-config.yaml`: Code quality hooks (format/lint/notebook cleanup/docs checks).
+- `.pre-commit-config.yaml`: Code quality hooks (ruff lint + format, plus basic file hygiene checks).
 - `LICENSE`: Project license text.
 - `README.md`: Primary entrypoint documentation and navigation index.
 - `Makefile`: Convenience targets for clean, format, tests, and default training.
 - `pyproject.toml`: Package metadata, dependencies, optional extras, console
   entry points (`grass-mil-train`, `-eval`, `-loocv`, `-predict`, `-report`),
   and pytest/coverage/ruff configuration.
-- `environment.yaml`: Conda environment alternative with pinned major versions.
-- `environment.ci-spatial.yaml`: Fully pinned environment used by CI.
+- `environment.yaml`: Conda environment alternative for local development, pinned to major versions. CI does not use it; the CI stack is pinned inline in `.github/workflows/test.yml`.
 
 ## CI/DevOps And Contribution Files
 
@@ -32,7 +31,7 @@ Scope rules used here:
 - `.github/workflows/code-quality-main.yaml`: Pre-commit quality checks on pushes to `main`.
 - `.github/workflows/code-quality-pr.yaml`: Pre-commit quality checks on changed PR files.
 - `.github/workflows/release-drafter.yml`: Automated draft release workflow.
-- `.github/workflows/test.yml`: Multi-OS, multi-Python automated test workflow.
+- `.github/workflows/test.yml`: Multi-OS (Linux/macOS) test workflow, plus coverage and a from-source packaging job.
 
 ## Rules And Contracts
 
@@ -84,9 +83,6 @@ Sampler subgroup:
 ### Experiment Config Group
 
 - `configs/experiment/debug.yaml`: Dummy-data composition for notebook/debug experiments.
-- `configs/experiment/notebook_data_shadow_custom.yaml`: Notebook data-loading scenario with shadow sampler.
-- `configs/experiment/notebook_model_components.yaml`: Notebook scenario for component-combination checks.
-- `configs/experiment/notebook_training_logic.yaml`: Notebook scenario for training-regime smoke tests.
 
 ### Extras/Hydra/Paths Groups
 
@@ -112,7 +108,7 @@ Root model module configs:
 
 - `configs/model/supervised_module.yaml`: Unified supervised module defaults (mean/MIL via task config).
 - `configs/model/bgrl_module.yaml`: BGRL pretraining module defaults.
-- `configs/model/components.yaml`: Component-instantiation playground config used in notebooks/tests.
+- `configs/model/components.yaml`: Component-instantiation config used by the component tests.
 
 Encoder presets:
 
@@ -412,12 +408,11 @@ Reporting:
 - `docs/interpretability_suite.md`: Interpretability architecture, contracts and plugin catalog.
 - `docs/interpretability_extension_guide.md`: How to add a new analysis plugin.
 
-### Notebooks
+### Vignettes
 
-- `notebooks/.gitkeep`: Placeholder to keep notebook directory tracked.
-- `notebooks/data_loading_testing.ipynb`: Interactive data-loading and graph-construction smoke notebook.
-- `notebooks/model_components_testing.ipynb`: Interactive model-component combinatorial smoke notebook.
-- `notebooks/training_logic_testing.ipynb`: Interactive training-regime smoke notebook.
+- `vignettes/README.md`: Index, dataset description and honest scope notes.
+- `vignettes/01_anndata_to_spatial_graphs.ipynb`: squidpy AnnData to manifest to cellular graphs.
+- `vignettes/02_pretraining_and_niches.ipynb`: BGRL pretraining, embedding export and niche discovery.
 
 ### Data/Logs Placeholders
 

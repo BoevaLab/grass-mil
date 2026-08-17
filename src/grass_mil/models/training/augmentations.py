@@ -16,7 +16,7 @@ new graph rather than mutating its input.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Mapping, Optional, Sequence
+from typing import Any, Callable, Mapping, Optional, Sequence
 
 import torch
 

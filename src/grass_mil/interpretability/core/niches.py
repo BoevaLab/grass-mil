@@ -18,7 +18,7 @@ Two conventions:
 
 from __future__ import annotations
 
-from typing import Iterable, List, Optional, Sequence
+from typing import Iterable, List
 
 import numpy as np
 import pandas as pd

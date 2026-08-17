@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, Optional
 
 import torch
-import torch.nn.functional as F
 
 
 def compute_supervised_loss(

@@ -23,6 +23,10 @@ data:
   instance_table: ???
   bag_table: null
   spatial_table: null
+  # Cell-level tables from `grass-mil-predict interpretability.cells.enabled=true`.
+  # Required by the analyses that measure cells rather than neighbourhoods.
+  cell_table: null
+  cell_edge_table: null
   id_column: instance_id
   bag_id_column: bag_id
   cell_type_column: cell_type

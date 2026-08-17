@@ -12,6 +12,9 @@ license = { file = "LICENSE" }
 dependencies = [
   "torch>=2.0",
   "lightning>=2.0",
+  # Imported directly by utils/{pylogger,rich_utils,logging_utils}.py rather
+  # than relied on transitively through lightning.
+  "lightning-utilities>=0.10",
   "torchmetrics>=0.11.4",
   "torch-geometric>=2.5",
   "hydra-core==1.3.2",
@@ -21,6 +24,9 @@ dependencies = [
   "pandas",
   "scipy>=1.11",
   "scikit-learn",
+  # Imported directly by interpretability/core/transfer.py to persist niche
+  # transfer bundles; not relied on transitively through scikit-learn.
+  "joblib",
   "rich",
   "rootutils",
 ]
@@ -30,6 +36,9 @@ interpretability = ["plotly", "umap-learn", "jinja2"]
 report = ["kaleido", "playwright"]
 spatial-stats = ["squidpy", "scanpy", "anndata"]
 io = ["anndata", "shapely"]
+# SingleCellExperiment / .rds inputs. Also needs an R runtime with Bioconductor;
+# rpy2 alone is not sufficient.
+sce = ["rpy2"]
 
 [project.scripts]
 grass-mil-train = "grass_mil.train:main"
@@ -67,8 +76,13 @@ exclude_lines = [
 
 [tool.ruff]
 line-length = 99
-target-version = "py312"
+target-version = "py311"  # matches requires-python floor
 exclude = ["logs", "data"]
 
 [tool.ruff.lint]
-ignore = ["E203", "E402", "E501", "F401", "F841"]
+# E402: train.py/eval.py must call rootutils.setup_root() before importing the
+#       package, so module-level imports legitimately follow executable code.
+# E501: a handful of long string literals the formatter will not wrap.
+# F401/F841/E203 were previously ignored too. They are now clean and enforced,
+# so unused imports and dead locals cannot creep back in.
+ignore = ["E402", "E501"]
