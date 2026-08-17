@@ -16,12 +16,19 @@ from hydra import compose, initialize_config_module
 from hydra.core.global_hydra import GlobalHydra
 
 CONFIG_MODULE = "grass_mil.configs"
-ROOT_CONFIGS = ["train", "eval"]
+# Every root config that builds a SupervisedModule. `inference/predict` was
+# missing here, and it had the same defaults-ordering bug: it composed a
+# single-logit head, then failed to load a two-class fine-tuned checkpoint with
+# a size mismatch.
+ROOT_CONFIGS = ["train", "eval", "inference/predict"]
 SUPERVISED_TASKS = ["finetune_mean", "finetune_mil", "finetune_survival"]
 
 
 def _compose(config_name: str, overrides: list[str]):
     GlobalHydra.instance().clear()
+    if config_name == "inference/predict":
+        # Mandatory field; irrelevant to what these tests assert.
+        overrides = [*overrides, "ckpt_path=/tmp/none.ckpt"]
     with initialize_config_module(version_base="1.3", config_module=CONFIG_MODULE):
         cfg = compose(config_name=config_name, overrides=overrides)
     GlobalHydra.instance().clear()
