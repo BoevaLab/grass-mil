@@ -194,6 +194,12 @@ class SupervisedModule(L.LightningModule):
             self.encoder.eval()
 
         if self.head_init_path:
+            if str(self.head_init_path).strip().lower() == "auto":
+                raise ValueError(
+                    "task.head_init_path='auto' is only resolved by grass-mil-nested-cv, which "
+                    "fits a probe head per split. For a single run, fit one with grass-mil-probe "
+                    "and pass task.head_init_path=/path/to/probe_head.pt."
+                )
             self._load_head_init(str(self.head_init_path))
         if self.freeze_head:
             for p in self.graph_head.parameters():

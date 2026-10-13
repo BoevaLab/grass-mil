@@ -16,6 +16,8 @@ class ProcessedIndexEntry:
     region_id: Optional[str]
     patch_id: str
     split: Optional[str] = None
+    patient_id: Optional[str] = None
+    graph_y: Optional[List[float]] = None
 
 
 def _migrate_legacy_attributes(data):

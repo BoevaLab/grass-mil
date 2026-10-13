@@ -11,6 +11,7 @@ from .components.feature_reducers import FeatureReducerConfig
 from .components.graph_builders import GraphBuilderConfig
 from .components.loaders import CsvConfig, H5adConfig, SceConfig
 from .components.patching import TileConfig
+from .components.splits import ExplicitSplit
 from .components.precompute import (
     CategoricalFeatureConfig,
     GraphLabelConfig,
@@ -83,6 +84,18 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             split_by=split["split_by"],
             loocv=LoocvConfig.from_dict(split.get("loocv")),
         )
+        # Explicit id-list splits (nested CV): applied in setup() on top of the
+        # persisted precompute, without re-processing the graphs.
+        self.explicit_split = ExplicitSplit.from_dict(split.get("explicit"))
+        if self.explicit_split is not None:
+            reducer_name = str(feature_reducer.get("name", "identity")).strip().lower()
+            fit_mode = str(feature_reducer.get("fit_mode", "train_only")).strip().lower()
+            if reducer_name != "identity" and fit_mode == "train_only":
+                raise ValueError(
+                    "data.split.explicit re-partitions an existing precompute, so a feature "
+                    "reducer fitted on the persisted training split would leak into the new "
+                    "test split. Use feature_reducer.name=identity or fit_mode=global."
+                )
         self.csv_config = CsvConfig.from_dict(csv, use_molecular_features)
         self.h5ad_config = H5adConfig.from_dict(h5ad, use_molecular_features)
         self.sce_config = SceConfig.from_dict(sce, use_molecular_features)
@@ -171,27 +184,26 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         index_path = Path(self.processed_dir) / "processed_index.json"
         base_dataset = SpatialOmicsGraphDataset(index_path)
 
-        if not _entries_have_persisted_splits(base_dataset.entries):
-            raise ValueError(
-                "processed_index.json must contain valid per-entry split labels "
-                "('train', 'val', 'test'). Run data precompute/prepare_data() "
-                "to regenerate processed artifacts."
-            )
+        if self.explicit_split is not None:
+            members = _apply_explicit_split(base_dataset, self.explicit_split)
+        else:
+            if not _entries_have_persisted_splits(base_dataset.entries):
+                raise ValueError(
+                    "processed_index.json must contain valid per-entry split labels "
+                    "('train', 'val', 'test'). Run data precompute/prepare_data() "
+                    "to regenerate processed artifacts."
+                )
+            members = {
+                name: [entry for entry in base_dataset.entries if entry.split == name]
+                for name in ("train", "val", "test")
+            }
 
         self.dataset_train = _subset_dataset_from_entries(
-            base_dataset,
-            [entry for entry in base_dataset.entries if entry.split == "train"],
-            self.transforms,
+            base_dataset, members["train"], self.transforms
         )
-        self.dataset_val = _subset_dataset_from_entries(
-            base_dataset,
-            [entry for entry in base_dataset.entries if entry.split == "val"],
-            self.transforms,
-        )
+        self.dataset_val = _subset_dataset_from_entries(base_dataset, members["val"], self.transforms)
         self.dataset_test = _subset_dataset_from_entries(
-            base_dataset,
-            [entry for entry in base_dataset.entries if entry.split == "test"],
-            self.transforms,
+            base_dataset, members["test"], self.transforms
         )
         self._ensure_sampler_strategy()
         self._ensure_val_sampler_strategy()
@@ -255,6 +267,37 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         precompute whose entries carry the split you want.
         """
         return self.test_dataloader()
+
+
+def _apply_explicit_split(
+    dataset: SpatialOmicsGraphDataset, split: ExplicitSplit
+) -> Dict[str, list]:
+    """Entries per split from explicit id lists; ids not listed are dropped.
+
+    The same id may sit in ``val`` and ``test`` (refit runs log the held-out fold
+    as validation and score it as test), so membership is resolved per split
+    rather than by a single label on the entry.
+    """
+    import dataclasses
+
+    by_key: Dict[str, Any] = {}
+    for entry in dataset.entries:
+        key = str(entry.region_id) if split.id_kind == "region" else str(entry.sample_id)
+        by_key.setdefault(key, []).append(entry)
+    wanted = {name: [str(r) for r in getattr(split, name)] for name in ("train", "val", "test")}
+    missing = sorted({r for ids in wanted.values() for r in ids} - set(by_key))
+    if missing:
+        raise ValueError(
+            f"split.explicit names {len(missing)} {split.id_kind} id(s) with no processed "
+            f"graph (first: {missing[:10]}). Check the ids against processed_index.json."
+        )
+    members: Dict[str, list] = {}
+    for name, ids in wanted.items():
+        members[name] = [
+            dataclasses.replace(entry, split=name) for rid in ids for entry in by_key[rid]
+        ]
+    dataset.entries = [e for group in members.values() for e in group]
+    return members
 
 
 def _all_roots_sampler_config(train_cfg: SamplerConfig) -> Optional[SamplerConfig]:

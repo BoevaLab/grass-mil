@@ -3,7 +3,6 @@ fine-tune augmentation, regime presets and region-level metrics."""
 
 from pathlib import Path
 
-import numpy as np
 import pytest
 import torch
 from hydra import compose, initialize_config_module

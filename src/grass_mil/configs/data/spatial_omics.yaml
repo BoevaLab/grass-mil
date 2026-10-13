@@ -33,6 +33,15 @@ split:
     validation_strategy: heldout_fold_items # heldout_fold_items | patches_from_train_items
     val_ratio: 0.1 # exactly 0.0 disables val; non-zero guarantees at least one val item
     seed: 42
+  # Explicit id lists (region ids by default, or sample ids with id_kind: sample)
+  # re-partition an existing precompute without re-processing. Each entry is a
+  # list or a path to a .json / .txt file; ids not listed are dropped. This is
+  # what `grass-mil-nested-cv` and `grass-mil-probe` use.
+  explicit:
+    train: null
+    val: null
+    test: null
+    id_kind: region # region | sample
 
 manifest:
   sample_id: sample_id
@@ -95,5 +104,6 @@ graph_labels:
   id_column: id
   tasks: null
   scope: region
+  patient_column: null # grouping column; attached as data.patient_id, never a target
 
 transforms: []

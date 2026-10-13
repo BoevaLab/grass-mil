@@ -49,7 +49,10 @@ class EpochMetricsWriter(L.Callback):
         if trainer.is_global_zero and self.path.exists():
             self.path.unlink()
 
-    def on_validation_epoch_end(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
+    def on_validation_end(self, trainer: L.Trainer, pl_module: L.LightningModule) -> None:
+        # ``on_validation_end`` runs after the module's ``on_validation_epoch_end``
+        # (where the region-level metrics are logged), unlike the callback's own
+        # ``on_validation_epoch_end``, which would see the previous epoch's values.
         if trainer.sanity_checking or not trainer.is_global_zero:
             return
         row: Dict[str, Any] = {

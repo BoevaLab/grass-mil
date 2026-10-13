@@ -8,7 +8,9 @@ defaults:
 regime_name: linear_probehead
 
 task:
-  head_init_path: ???   # output of grass-mil-probe for this split
+  # "auto" = fitted per split by grass-mil-nested-cv; for a single grass-mil-train
+  # run pass the output of grass-mil-probe (task.head_init_path=/path/probe_head.pt).
+  head_init_path: auto
   freeze_head: true
   optimization:
     encoder_lr_scale: 0.0

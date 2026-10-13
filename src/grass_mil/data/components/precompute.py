@@ -49,6 +49,10 @@ class GraphLabelConfig:
     id_column: str = "id"
     tasks: Optional[Sequence[str]] = None
     scope: str = "region"  # region | patch | sample
+    # Optional grouping column (patient / donor). It is never used as a target;
+    # the value is attached as ``data.patient_id`` and recorded in the processed
+    # index so patient-grouped splits can be built without loading graphs.
+    patient_column: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Optional[Dict[str, object]]) -> "GraphLabelConfig":
@@ -244,6 +248,10 @@ class SpatialOmicsPreprocessor:
                     "region_id": unit.region_id,
                     "patch_id": unit.patch_id,
                     "split": unit.split,
+                    "patient_id": getattr(data, "patient_id", None),
+                    "graph_y": (
+                        data.graph_y.view(-1).tolist() if hasattr(data, "graph_y") else None
+                    ),
                 }
             )
 
@@ -640,7 +648,17 @@ class SpatialOmicsPreprocessor:
             )
             if label_id in graph_label_df.index:
                 row = graph_label_df.loc[label_id]
-                tasks = self.graph_label_config.tasks or list(row.index)
+                patient_column = self.graph_label_config.patient_column
+                tasks = self.graph_label_config.tasks or [
+                    c for c in row.index if c != patient_column
+                ]
+                if patient_column:
+                    if patient_column not in row.index:
+                        raise ValueError(
+                            f"graph_labels.patient_column '{patient_column}' not found in "
+                            f"{self.graph_label_config.label_file}"
+                        )
+                    data.patient_id = str(row[patient_column])
                 graph_values = []
                 for task in tasks:
                     value = row[task]
