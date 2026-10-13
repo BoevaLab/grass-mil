@@ -1,0 +1,21 @@
+# @package _global_
+# GRASS-MIL encoder pretraining (preprint "A3"):
+#   grass-mil-train experiment=grass_mil_pretrain_a3 data.raw_manifest_path=... \
+#       data.processed_dir=... data.csv.molecular_columns=[SIZE]
+# All regions are used label-free; override task.total_steps / data.sampler
+# runtime keys / model.encoder.* freely.
+defaults:
+  - override /model: bgrl_a3
+  - override /task: pretrain_bgrl_a3
+  - override /callbacks: pretrain_checkpoint
+  - override /data/sampler: ego_graph_pretrain
+
+task_name: pretrain_a3
+tags: ["grass_mil", "pretrain", "a3"]
+test: false
+
+data:
+  split:
+    train_val_test_split: [1.0, 0.0, 0.0]
+    split_by: region
+  val_sampler: null

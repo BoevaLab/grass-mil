@@ -1,0 +1,28 @@
+defaults:
+  - encoder: gine_length
+  - _self_
+
+# BGRL pretraining of the GRASS-MIL encoder (preprint "A3" recipe): the same
+# GINE ego-graph encoder as model/grass_mil, encoder dropout 0.1 during
+# pretraining only, predictor Linear(256->512) -> PReLU -> Linear(512->256).
+# Use with `task=pretrain_bgrl_a3` (experiment=grass_mil_pretrain_a3 bundles
+# model, task, sampler and callbacks). Every key can be overridden.
+
+_target_: grass_mil.models.bgrl_module.BGRLModule
+_recursive_: false
+
+encoder:
+  dropout: 0.1
+
+ssl:
+  method: bgrl
+  predictor:
+    hidden_size: 512
+
+optim: ${oc.select:optim,null}
+scheduler: ${oc.select:scheduler,null}
+task: ${task}
+
+init_from_ckpt: null
+init_strict: false
+encoder_init_map: auto_bgrl_or_identity

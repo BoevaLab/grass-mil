@@ -1,0 +1,19 @@
+# Pretraining: a checkpoint every N optimizer steps (preprint: 5000), all kept,
+# plus last.ckpt. No validation metric is involved.
+defaults:
+  - model_checkpoint
+  - model_summary
+  - rich_progress_bar
+  - _self_
+
+model_checkpoint:
+  dirpath: ${paths.output_dir}/checkpoints
+  filename: "step_{step:07d}"
+  monitor: null
+  save_last: True
+  save_top_k: -1
+  every_n_train_steps: 5000
+  auto_insert_metric_name: False
+
+model_summary:
+  max_depth: -1

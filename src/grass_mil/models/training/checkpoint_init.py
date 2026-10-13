@@ -34,8 +34,12 @@ def remap_encoder_keys(
 ) -> Dict[str, torch.Tensor]:
     if encoder_init_map == "identity":
         return dict(state_dict)
+    if encoder_init_map == "spacegm_bgrl":
+        return remap_spacegm_bgrl_keys(state_dict)
     if encoder_init_map != "auto_bgrl_or_identity":
-        raise ValueError("encoder_init_map must be one of ['identity', 'auto_bgrl_or_identity']")
+        raise ValueError(
+            "encoder_init_map must be one of ['identity', 'auto_bgrl_or_identity', 'spacegm_bgrl']"
+        )
     remapped: Dict[str, torch.Tensor] = {}
     for key, value in state_dict.items():
         new_key = key
@@ -47,6 +51,51 @@ def remap_encoder_keys(
             new_key = f"encoder.{key[len('model.online_encoder.') :]}"
         remapped[new_key] = value
     return remapped
+
+
+def remap_spacegm_bgrl_keys(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    """Import an encoder pretrained with the original SPACE-GM style BGRL code.
+
+    Maps ``online_encoder.x_embedding`` -> ``encoder.input_proj.embedding``,
+    ``online_encoder.feat_embedding`` -> ``encoder.input_proj.linear``,
+    ``online_encoder.gnns.{i}.gine.{nn.0,nn.2,lin,eps}`` -> ``encoder.layers.{i}.*``
+    and ``online_encoder.batch_norms.{i}`` -> ``encoder.norms.{i}``. The unused
+    GIN MLP copies, edge-type embeddings, the target encoder and the predictor
+    are dropped. The continuous input width must match the public model's
+    (``input_proj.linear.weight`` has one column per continuous node feature);
+    select columns beforehand if the legacy run carried masked extra columns.
+    """
+    import re
+
+    out: Dict[str, torch.Tensor] = {}
+    layer_re = re.compile(
+        r"^online_encoder\.gnns\.(\d+)\.gine\.(nn\.0|nn\.2|lin|eps)(\.(weight|bias))?$"
+    )
+    norm_re = re.compile(
+        r"^online_encoder\.batch_norms\.(\d+)\.(weight|bias|running_mean|running_var|num_batches_tracked)$"
+    )
+    for key, value in state_dict.items():
+        if key == "online_encoder.x_embedding.weight":
+            out["encoder.input_proj.embedding.weight"] = value
+            continue
+        if key in ("online_encoder.feat_embedding.weight", "online_encoder.feat_embedding.bias"):
+            out[key.replace("online_encoder.feat_embedding", "encoder.input_proj.linear")] = value
+            continue
+        m = layer_re.match(key)
+        if m:
+            suffix = m.group(2) + (m.group(3) or "")
+            out[f"encoder.layers.{m.group(1)}.{suffix}"] = value
+            continue
+        m = norm_re.match(key)
+        if m:
+            out[f"encoder.norms.{m.group(1)}.{m.group(2)}"] = value
+            continue
+        # gnns.{i}.mlp.* (unused duplicate), edge_embedding, target_encoder, predictor: dropped
+    if not out:
+        raise ValueError(
+            "No SPACE-GM BGRL encoder keys (online_encoder.*) found in the checkpoint."
+        )
+    return out
 
 
 def read_graph_head_bias(

@@ -400,6 +400,13 @@ class _RuntimeUnitShadowDatasetLoader:
         if subgraph_batch_size <= 0:
             subgraph_batch_size = max(1, int(self.dataset_batch_size))
 
+        if self.runtime.merge_units:
+            total_roots = sum(
+                self._num_selected_roots_for_unit(self.dataset[idx])
+                for idx in range(len(self.dataset))
+            )
+            return int((total_roots + subgraph_batch_size - 1) // subgraph_batch_size)
+
         total_batches = 0
         for idx in range(len(self.dataset)):
             unit_data = self.dataset[idx]
@@ -433,8 +440,92 @@ class _RuntimeUnitShadowDatasetLoader:
                 )
         return total_batches
 
+    def _num_selected_roots_for_unit(self, unit_data: Data) -> int:
+        effective_node_idx = self.runtime.node_idx
+        interior_idx = _resolve_interior_indices(unit_data, self.runtime, self._interior_cache)
+        if interior_idx is not None:
+            effective_node_idx = interior_idx
+        num_candidate_roots = _resolve_num_roots(unit_data, effective_node_idx)
+        return _resolve_num_selected_roots(
+            num_candidate_roots,
+            subsample_fraction=float(self.runtime.subsample_fraction),
+            subsample_count=self.runtime.subsample_count,
+        )
+
+    def _iter_merged(self, subgraph_batch_size: int):
+        """One pass over the roots of ALL units pooled into a single graph.
+
+        The preprint's BGRL draws every 64-root batch from the merged
+        all-region graph, so a batch mixes ego-graphs of different regions.
+        Root selection per unit follows the same rules as the per-unit path
+        (interior seeds, subsample fraction/count, fixed seeds); weighted
+        (cell-type proportional) root sampling is not applied in merged mode.
+        """
+        from grass_mil.data.components.merge import merge_graph_units
+
+        units = [self.dataset[idx] for idx in range(len(self.dataset))]
+        merged = merge_graph_units(units)
+        roots: list[torch.Tensor] = []
+        subsample_generator = None
+        if self.runtime.subsample_seed is not None:
+            subsample_generator = torch.Generator()
+            subsample_generator.manual_seed(int(self.runtime.subsample_seed))
+        offsets = merged.unit_ptr
+        for idx, unit_data in enumerate(units):
+            effective_node_idx = self.runtime.node_idx
+            interior_idx = _resolve_interior_indices(
+                unit_data, self.runtime, self._interior_cache
+            )
+            if interior_idx is not None:
+                effective_node_idx = interior_idx
+            candidates = _resolve_root_candidates(unit_data, effective_node_idx)
+            unit_generator = _per_unit_generator(self.runtime.fixed_per_unit_seed, idx)
+            candidates = _subsample_root_candidates(
+                candidates,
+                subsample_fraction=float(self.runtime.subsample_fraction),
+                generator=unit_generator if unit_generator is not None else subsample_generator,
+                subsample_count=self.runtime.subsample_count,
+            )
+            if candidates.numel() == 0:
+                continue
+            roots.append(candidates.long() + int(offsets[idx]))
+        if not roots:
+            return
+        node_idx = torch.cat(roots)
+        if self.shuffle:
+            node_idx = node_idx[torch.randperm(node_idx.numel())]
+        unit_loader_kwargs: Dict[str, Any] = {
+            "num_workers": self.num_workers,
+            "pin_memory": self.pin_memory,
+            "persistent_workers": self.kwargs.get("persistent_workers", False)
+            if self.num_workers > 0
+            else False,
+        }
+        if self.num_workers > 0 and "prefetch_factor" in self.kwargs:
+            unit_loader_kwargs["prefetch_factor"] = self.kwargs["prefetch_factor"]
+        loader = self.strategy.build_unit_loader(
+            data=merged,
+            depth=int(self.runtime.depth),
+            num_neighbors=int(self.runtime.num_neighbors),
+            batch_size=subgraph_batch_size,
+            node_idx=node_idx,
+            replace=bool(self.runtime.replace),
+            shuffle=False,
+            transform=_compose_ego_radius_transform(self.kwargs.get("transform"), self.runtime),
+            **unit_loader_kwargs,
+        )
+        for sub_batch in loader:
+            yield _normalize_shadow_batch(sub_batch, merged)
+
     def __iter__(self):
         if len(self.dataset) == 0:
+            return
+
+        if self.runtime.merge_units:
+            subgraph_batch_size = int(self.runtime.subgraph_batch_size)
+            if subgraph_batch_size <= 0:
+                subgraph_batch_size = max(1, int(self.dataset_batch_size))
+            yield from self._iter_merged(subgraph_batch_size)
             return
 
         indices = torch.arange(len(self.dataset), dtype=torch.long)

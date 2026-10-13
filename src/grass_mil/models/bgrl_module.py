@@ -29,7 +29,23 @@ def _molecular_feature_names(module) -> Optional[list]:
     if dataset is None or len(dataset) == 0:
         return None
     names = getattr(dataset[0], "molecular_feature_names", None)
-    return list(names) if names else None
+    if names:
+        return list(names)
+    # Older precomputes record the names only in metadata.json next to the index.
+    index_path = getattr(getattr(dataset, "dataset", dataset), "index_path", None)
+    if index_path is not None:
+        import json
+        from pathlib import Path
+
+        meta = Path(index_path).parent / "metadata.json"
+        if meta.exists():
+            try:
+                names = json.loads(meta.read_text()).get("molecular_feature_names")
+            except (OSError, ValueError):
+                names = None
+            if names:
+                return list(map(str, names))
+    return None
 
 
 class BGRLModule(L.LightningModule):
@@ -72,12 +88,23 @@ class BGRLModule(L.LightningModule):
         )
         self._augmentation_seed = int(self.task_cfg.get("augmentation_seed", 0))
         self._view_generator: Optional[torch.Generator] = None
+        # EMA momentum of the target encoder: cosine from `momentum` to
+        # `momentum_final` (preprint: 0.99 -> 1.0, no warmup). `momentum_min` is
+        # the legacy name of the final value.
         self._momentum_base = float(self.task_cfg.get("momentum", 0.99))
-        self._momentum_min = float(self.task_cfg.get("momentum_min", 0.99))
+        final = self.task_cfg.get("momentum_final")
+        if final is None:
+            final = self.task_cfg.get("momentum_min", self._momentum_base)
+        self._momentum_min = float(final)
         self._warmup_steps = int(self.task_cfg.get("warmup_steps", 0))
+        momentum_warmup = self.task_cfg.get("momentum_warmup_steps")
+        self._momentum_warmup_steps = (
+            self._warmup_steps if momentum_warmup is None else int(momentum_warmup)
+        )
         self._total_steps = int(self.task_cfg.get("total_steps", 0))
 
         self._momentum_scheduler: Optional[CosineWarmup] = None
+        self._last_momentum_step = 0
         # When set, replaces the uniform drop_edge/drop_feat views.
         self._augmentation_cfg = self.task_cfg.get("augmentation")
         self._augmentation = None
@@ -125,7 +152,7 @@ class BGRLModule(L.LightningModule):
             self.log("init/total_steps_warning", float(total_steps), prog_bar=False)
         self._momentum_scheduler = CosineWarmup(
             base_value=self._momentum_base,
-            warmup_steps=max(0, self._warmup_steps),
+            warmup_steps=max(0, self._momentum_warmup_steps),
             total_steps=max(1, total_steps),
             min_value=self._momentum_min,
         )
@@ -186,12 +213,20 @@ class BGRLModule(L.LightningModule):
         self.log("test/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         return loss
 
-    def on_before_zero_grad(self, optimizer) -> None:
+    def on_train_batch_end(self, outputs, batch, batch_idx) -> None:
+        """EMA update of the target encoder after every optimizer step.
+
+        Runs once per completed optimizer step (``global_step`` has just been
+        incremented), with the momentum of that zero-based step, exactly like
+        the reference loop (``update_target_network(mm_now)`` after ``step()``).
+        """
         if self.ssl_model is None or self._momentum_scheduler is None:
             return
-        # Lightning increments global_step after optimizer.step(); map back to zero-based step.
-        step = max(int(self.global_step) - 1, 0)
-        momentum = self._momentum_scheduler.value(step)
+        completed = int(self.global_step)
+        if completed <= self._last_momentum_step:
+            return  # gradient-accumulation sub-batch: no optimizer step happened
+        self._last_momentum_step = completed
+        momentum = self._momentum_scheduler.value(completed - 1)
         self.ssl_model.update_target_network(momentum)
         self.log("train/momentum", momentum, on_step=True, on_epoch=False, prog_bar=False)
 
@@ -204,10 +239,20 @@ class BGRLModule(L.LightningModule):
                 "(for example '+optim=adamw') or set model.optim explicitly."
             )
         optimizer = instantiate_optimizer(self.optim_cfg, self.ssl_model.trainable_parameters())
+        # `scheduler.T_max: auto` = cosine over the steps after the LR warmup, so
+        # the learning rate reaches eta_min exactly at `task.total_steps`.
+        warm_cfg = self.task_cfg.get("lr_warmup") or {}
+        lr_warmup_steps = (
+            int(warm_cfg.get("warmup_steps", 0)) if bool(warm_cfg.get("enabled", False)) else 0
+        )
+        t_max_auto = None
+        if self._total_steps > 0:
+            t_max_auto = max(1, self._total_steps - max(0, lr_warmup_steps))
         scheduler = instantiate_scheduler_with_warmup(
             self.scheduler_cfg,
             optimizer,
             warmup_cfg=self.task_cfg.get("lr_warmup"),
+            t_max_auto=t_max_auto,
         )
         if scheduler is None:
             return optimizer

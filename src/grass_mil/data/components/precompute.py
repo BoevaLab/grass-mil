@@ -634,6 +634,15 @@ class SpatialOmicsPreprocessor:
             and table.molecular_features is not None
         ):
             data.x_raw = torch.from_numpy(table.molecular_features[indices]).float()
+        if (
+            embedded is not None
+            and table.molecular_feature_names is not None
+            and self.feature_reducer_config.name == "identity"
+            and len(table.molecular_feature_names) == int(embedded.shape[1])
+        ):
+            # Column names of `x` (identity reducer only), so augmentations can
+            # address continuous features by name (e.g. feature_noise_columns: [SIZE]).
+            data.molecular_feature_names = list(map(str, table.molecular_feature_names))
 
         self._attach_categorical_indices(
             data, table.categorical_labels, label_maps, indices
