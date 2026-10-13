@@ -1,16 +1,18 @@
 # Repository Map
 
-Every tracked file (`git ls-files`) with a one-line purpose. Regenerate with the
-script in the git history of this file after adding files.
+Every tracked file (`git ls-files`) with a one-line purpose. Regenerate with
+`python tools/update_repository_map.py` after adding files.
 
 ## Root metadata and tooling
 
 - `.gitignore`: Ignore rules for generated artefacts, environments, logs, data and vignette outputs.
 - `.pre-commit-config.yaml`: Code-quality hooks (ruff lint + format, file hygiene checks).
 - `.project-root`: Root marker used by `rootutils.setup_root(...)`.
+- `CHANGELOG.md`: Release notes.
+- `CITATION.cff`: Machine-readable citation (preprint DOI 10.64898/2026.10.08.757722).
 - `LICENSE`: MIT license.
 - `Makefile`: Convenience targets: `test`, `format`, `clean`, `clean-logs`.
-- `README.md`: Landing page: method summary, install, quick start, workflow table, citation.
+- `README.md`: Landing page: method summary, install, typical usage, workflow table, citation.
 - `environment.yaml`: Conda environment alternative for local development.
 - `pyproject.toml`: Package metadata, dependencies, extras, console entry points (`grass-mil-*`), pytest/ruff configuration.
 
@@ -25,6 +27,10 @@ script in the git history of this file after adding files.
 - `.github/workflows/release-drafter.yml`: CI: draft release notes from merged pull requests.
 - `.github/workflows/test.yml`: CI: pytest on Linux and macOS, coverage, install-from-source smoke test.
 - `.vscode/settings.json`: Editor settings.
+
+## Maintenance tools
+
+- `tools/update_repository_map.py`: Regenerates this map.
 
 ## Package: entry points and shared modules
 
@@ -197,7 +203,8 @@ script in the git history of this file after adding files.
 - `src/grass_mil/configs/debug/overfit.yaml`: overfits to 3 batches.
 - `src/grass_mil/configs/debug/profiler.yaml`: runs with execution time profiling.
 - `src/grass_mil/configs/eval.yaml`: Hydra config: `eval`.
-- `src/grass_mil/configs/experiment/grass_mil_pretrain_a3.yaml`: GRASS-MIL encoder pretraining (preprint "A3"):
+- `src/grass_mil/configs/experiment/example_cohort.yaml`: Template for a cohort of whole regions (cores, ROIs, slides) given as CSV cell.
+- `src/grass_mil/configs/experiment/grass_mil_pretrain_a3.yaml`: Same recipe as `regime=pretrain_a3`, for runs without a cohort experiment file:
 - `src/grass_mil/configs/extract.yaml`: grass-mil-extract: per-cell cache (embeddings, instance logits, attention) of.
 - `src/grass_mil/configs/extras/default.yaml`: disable python warnings if they annoy you.
 - `src/grass_mil/configs/hydra/default.yaml`: https://hydra.cc/docs/configure_hydra/intro/.
@@ -251,6 +258,7 @@ script in the git history of this file after adding files.
 - `src/grass_mil/configs/regime/linear_probehead.yaml`: Preprint "probehead": frozen encoder, LINEAR head pre-fitted by grass-mil-probe.
 - `src/grass_mil/configs/regime/mil.yaml`: GRASS-MIL default regime: BGRL-initialised encoder fine-tuned end to end,.
 - `src/grass_mil/configs/regime/mil_frozen.yaml`: Frozen encoder (learning-rate scale 0, kept in eval mode); MLP head and.
+- `src/grass_mil/configs/regime/pretrain_a3.yaml`: GRASS-MIL encoder pretraining (preprint "A3"): BGRL on the ego-graphs of.
 - `src/grass_mil/configs/scheduler/cosine_epoch.yaml`: Hydra config: `cosine_epoch`.
 - `src/grass_mil/configs/scheduler/cosine_mil_step.yaml`: Cosine annealing per optimizer step over the whole run (preprint): with.
 - `src/grass_mil/configs/scheduler/cosine_step.yaml`: Hydra config: `cosine_step`.
@@ -273,19 +281,27 @@ script in the git history of this file after adding files.
 ## Documentation
 
 - `docs/capabilities_and_modes.md`: Capabilities And Modes.
+- `docs/configuration_guide.md`: Configuration Guide.
 - `docs/dataset_preparation.md`: Dataset Preparation Guide.
+- `docs/evaluation_stats.md`: Evaluation Statistics (`grass-mil-scores`).
+- `docs/getting_started.md`: Getting Started: Typical Usage On Your Own Cohort.
 - `docs/hyperparameter_reference.md`: Hyperparameter Reference.
 - `docs/inference_utility_suite.md`: Inference Utility Suite.
 - `docs/interpretability_extension_guide.md`: Interpretability Extension Guide.
 - `docs/interpretability_suite.md`: Interpretability Suite.
+- `docs/method_correspondence.md`: Method Correspondence With The Preprint.
 - `docs/model_component_contracts.md`: Model Component Contracts.
+- `docs/nested_cv.md`: Nested Cross-Validation (the preprint protocol).
+- `docs/niche_discovery.md`: Niche Discovery And Cross-Fold Replication.
 - `docs/repository_map.md`: Repository Map.
+- `docs/spatial_statistics.md`: Classical Spatial Statistics (`grass-mil-spatial-stats`).
 - `docs/workflows_train_infer.md`: Training And Inference Workflows.
 
 ## Vignettes
 
 - `vignettes/01_anndata_to_spatial_graphs.ipynb`: Vignette 1: AnnData -> manifest -> cellular graphs.
 - `vignettes/02_pretraining_and_niches.ipynb`: Vignette 2: BGRL pretraining, fine-tuning, instance export, interpretability report.
+- `vignettes/03_nested_cv_niches_and_metaclusters.ipynb`: Vignette 3: nested CV, cell extraction, niches, metaclusters, scores, spatial statistics.
 - `vignettes/README.md`: Index of the worked examples on the public MIBI-TOF dataset.
 
 ## Tests
@@ -343,6 +359,7 @@ script in the git history of this file after adding files.
 - `tests/spatial_stats/__init__.py`: Package marker / re-exports.
 - `tests/spatial_stats/test_fidelity_phase8.py`: Phase 8: classical spatial statistics.
 - `tests/test_configs.py`: Tests for configs.
+- `tests/test_e2e_synthetic.py`: End-to-end smoke test of the public analysis chain on the synthetic cohort.
 - `tests/test_eval.py`: Tests for eval.
 - `tests/test_loocv.py`: Tests for loocv.
 - `tests/test_packaging.py`: Guards on the installable-package contract.
