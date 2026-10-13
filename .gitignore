@@ -154,3 +154,6 @@ configs/local/default.yaml
 
 # Vignette scratch space (downloaded data, graphs, runs)
 vignettes/vignette_work/
+
+# vignette datasets are downloaded at runtime (squidpy.datasets.mibitof)
+vignettes/data/
