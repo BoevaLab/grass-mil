@@ -907,7 +907,13 @@ class SupervisedModule(L.LightningModule):
         if out["bag_targets"] is not None:
             self._val_bag_targets_chunks.append(out["bag_targets"].detach().cpu())
         self._val_instance_logits_chunks.append(metadata["instance_logits"].detach().cpu())
-        self._val_instance_patch_ids.extend([str(v) for v in metadata["instance_patch_ids"]])
+        if str(self.task_cfg.get("bag_key", "region_id")) == "patch_id":
+            # Patch-level bags: group instances by the bag they were pooled in
+            # (the tile), not by their ego-graph id, so the epoch-end
+            # re-aggregation reproduces the training bags exactly.
+            self._val_instance_patch_ids.extend([str(v) for v in metadata["instance_bag_ids"]])
+        else:
+            self._val_instance_patch_ids.extend([str(v) for v in metadata["instance_patch_ids"]])
         self._val_instance_region_ids.extend(metadata["instance_region_ids"])
         self._val_instance_sample_ids.extend(metadata["instance_sample_ids"])
         if "instance_attention_logits" in metadata:
@@ -1073,10 +1079,14 @@ class SupervisedModule(L.LightningModule):
         if payload is None or payload.bag_targets is None:
             self._reset_val_epoch_buffers()
             return
+        # Region-level metrics are computed per bag unit: the task's bag key
+        # decides whether a unit is a region (default), a patch/tile or a sample.
+        bag_key = str(self.task_cfg.get("bag_key", "region_id"))
+        bag_scope = {"patch_id": "patch", "sample_id": "sample"}.get(bag_key, "region")
         aggregated = aggregate_group_logits(
             payload,
             mode="attention_weighted" if self.use_attention else "mean",
-            bag_scope="region",
+            bag_scope=bag_scope,
             subsample_fraction=1.0,
             subsample_seed=None,
         )

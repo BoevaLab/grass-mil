@@ -268,3 +268,28 @@ def test_explicit_split_patch_id_kind_and_unit_key():
     assert split.id_kind == "patch"
     with pytest.raises(ValueError):
         ExplicitSplit.from_dict({"train": ["a"], "id_kind": "tile"})
+
+
+def test_patch_bags_log_region_level_metrics(cohort, tmp_path):
+    """Tiles as bags (task.bag_key=patch_id): validation AUROC is computed per tile."""
+    from grass_mil.train import train
+
+    cfg = compose_cfg(
+        "train",
+        cohort_overrides(cohort, tmp_path)
+        + [
+            f"data.processed_dir={tmp_path / 'processed_tiles'}",
+            "data.sample_unit=tile",
+            "data.tiling.tile_size_um=300",
+            "data.tiling.stride_um=300",
+            "data.tiling.min_cells=5",
+            "data.split.split_by=region",
+            "task.bag_key=patch_id",
+            "trainer.max_epochs=1",
+        ],
+    )
+    metrics, objects = train(cfg)
+    assert "val/auroc" in metrics and "test/auroc" in metrics
+    preds = pd.read_csv(tmp_path / "test_predictions.csv")
+    assert preds["bag_id"].str.contains("patch").all()
+    assert preds["bag_id"].nunique() == len(preds) > len(set(preds["region_id"]))

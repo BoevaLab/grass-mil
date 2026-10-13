@@ -44,8 +44,8 @@ NSCLC runs (private data; the converter lives outside the repository):
 
 | Check | Reference | Public package | Status |
 |---|---|---|---|
-| Frozen embeddings of one core (per-cell cosine with the reference cache) | 1.0 | pending | |
-| Probe region AUROC on the outer-fold-2 development split | reference value | pending | |
+| Frozen embeddings of three cores (per-cell cosine with the reference fp16 cache; 875-5150 cells each) | 1.0 | median 0.993-0.995, minimum 0.97, 91-95 % of cells >= 0.99 | passed |
+| Probe region AUROC, outer fold 2, inner fold 0 (validation regions) | 0.482 | 0.471 | passed (within 0.02) |
 | Held-out AUROC, `linear_ftall_reg`, outer fold 2 | 0.664 | pending | |
 | Held-out AUROC, `linear_probehead`, outer fold 2 | 0.627 | pending | |
 | Niches of fold 2: cluster count, noise, Spearman(emp, relattn) | reference report | pending | |

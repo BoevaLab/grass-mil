@@ -213,8 +213,10 @@ def _train_run(
 ) -> Dict[str, Any]:
     done_path = output_dir / "done.json"
     if done_path.exists() and bool(cfg.nested_cv.get("resume", True)):
-        log.info(f"resume: {output_dir} already finished")
-        return json.loads(done_path.read_text())
+        if not test or _predictions_cover(output_dir, test_ids, _id_kind(cfg)):
+            log.info(f"resume: {output_dir} already finished")
+            return json.loads(done_path.read_text())
+        log.warning(f"resume: {output_dir} has stale test predictions; rerunning")
     fold_cfg = _with_split(
         cfg, train_ids=train_ids, val_ids=val_ids, test_ids=test_ids, output_dir=output_dir
     )
@@ -262,6 +264,18 @@ def _train_run(
     result["selection_metric_used"] = best[1] if best else None
     done_path.write_text(json.dumps(result, indent=1))
     return result
+
+
+def _predictions_cover(output_dir: Path, test_ids, kind: str) -> bool:
+    """True when the run's test predictions hold exactly the expected unit ids."""
+    path = output_dir / "test_predictions.csv"
+    if not path.exists():
+        return False
+    df = pd.read_csv(path)
+    col = "bag_id" if kind != "region" else "region_id"
+    if col not in df.columns:
+        return False
+    return set(df[col].astype(str)) == {str(r) for r in test_ids}
 
 
 def _read_test_predictions(output_dir: Path) -> pd.DataFrame:
