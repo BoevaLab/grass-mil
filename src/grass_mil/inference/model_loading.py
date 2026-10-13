@@ -35,6 +35,18 @@ def load_trained_module(
     The datamodule must already be set up (``setup("fit")``) so the module can
     infer its input widths. Returns the module in eval mode on ``device``.
     """
+    import copy
+
+    from omegaconf import open_dict
+
+    cfg = copy.deepcopy(cfg)
+    with open_dict(cfg):
+        # The checkpoint carries the trained head; a probe pre-fit request
+        # (linear_* regimes: task.head_init_path=auto) is a training-time step.
+        if "task" in cfg and cfg.task.get("head_init_path") is not None:
+            cfg.task.head_init_path = None
+        if "init_from_ckpt" in cfg.model:
+            cfg.model.init_from_ckpt = None
     model = hydra.utils.instantiate(cfg.model)
     trainer = hydra.utils.instantiate(cfg.trainer, logger=False, enable_checkpointing=False)
     attach_datamodule(model, datamodule, trainer)

@@ -117,6 +117,19 @@ def test_end_to_end_synthetic_chain(tmp_path):
     )
     cells_dir = Path(ext["output_dir"])
     assert sorted(p.name for p in cells_dir.iterdir()) == ["fold0", "fold1"]
+    # a probe regime extracts from its refit checkpoints without a probe file
+    ext_lin = run_extract(
+        compose_cfg(
+            "extract",
+            cohort_overrides(c, root / "extract_lin")
+            + [
+                "regime=linear_probehead",
+                f"extract.nested_cv_summary={root / 'nested_linear_probehead' / 'nested_cv_summary.json'}",
+                "extract.device=cpu",
+            ],
+        )
+    )
+    assert len(ext_lin["models"]) == 2
 
     # 5. niches of one model (default backend with a small min_cluster_size) and a k-means override
     planted_found = False
