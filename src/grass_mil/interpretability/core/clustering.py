@@ -77,6 +77,18 @@ def run_clustering(
 # ----------------------------------------------------------------------------
 
 
+_HDBSCAN_ONLY = (
+    "min_cluster_size",
+    "min_samples",
+    "cluster_selection_method",
+    "cluster_selection_epsilon",
+    "allow_single_cluster",
+    "alpha",
+    "max_cluster_size",
+    "store_centers",
+)
+
+
 class NicheClusterModel:
     """A fitted "reduce on a sample, cluster, assign the rest" model.
 
@@ -198,7 +210,13 @@ def fit_niche_clustering(
 
     cl_method = str(clustering.get("method", "hdbscan")).strip().lower()
     cl_params = dict(clustering.get("params", {}) or {})
-    cl_params.pop("metric", None) if cl_method == "hdbscan" and l2_normalise else None
+    if cl_method == "hdbscan" and l2_normalise:
+        cl_params.pop("metric", None)
+    if cl_method != "hdbscan":
+        # The default params block is HDBSCAN's; switching the backend on the
+        # command line must not forward keys the other estimator does not take.
+        for key in _HDBSCAN_ONLY:
+            cl_params.pop(key, None)
     if cl_method == "hdbscan":
         cl_params.setdefault("min_cluster_size", 300)
         cl_params.setdefault("min_samples", 1)
@@ -215,8 +233,12 @@ def fit_niche_clustering(
     )
     labels_sample = np.asarray(result.labels).astype(int)
 
+    # Backends with a native predict (k-means, ...) assign unsampled rows
+    # themselves, exactly reproducing the sample labels; density backends
+    # (HDBSCAN, DBSCAN, OPTICS) have none, so a k-NN classifier on the reduced
+    # sample coordinates assigns the rest (the preprint's 15-NN step).
     assigner = None
-    if int(assign_k) > 0 or not hasattr(result.fitted_object, "predict"):
+    if not hasattr(result.fitted_object, "predict"):
         k = max(1, min(int(assign_k) if int(assign_k) > 0 else 15, int(sample_idx.size)))
         assigner = KNeighborsClassifier(k).fit(P_sample, labels_sample)
     model = NicheClusterModel(

@@ -54,8 +54,12 @@ def resolve_models(cfg: DictConfig) -> List[Dict[str, Any]]:
                     "held_out": held.get(int(fold["outer"]), []),
                 }
             )
+    held_cfg = dict(cfg.extract.get("held_out") or {})
     for name, path in dict(cfg.extract.get("models") or {}).items():
-        models.append({"name": str(name), "ckpt_path": str(path), "held_out": []})
+        held = held_cfg.get(str(name)) or []
+        models.append(
+            {"name": str(name), "ckpt_path": str(path), "held_out": [str(r) for r in held]}
+        )
     if not models:
         raise ValueError("Set extract.nested_cv_summary or extract.models={name: ckpt}.")
     return models

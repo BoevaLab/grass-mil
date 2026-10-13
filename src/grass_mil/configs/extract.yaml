@@ -21,6 +21,8 @@ extract:
   # recorded) or an explicit {name: checkpoint} mapping.
   nested_cv_summary: null
   models: {}
+  # Optional held-out region lists per explicit model: +extract.held_out.<name>=[...]
+  held_out: {}
   output_dir: ${paths.output_dir}/cells
   regions: null # optional list / json file of region ids to extract (null = all)
   batch_size: 512 # ego-graphs per forward pass
