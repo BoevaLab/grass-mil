@@ -10,6 +10,12 @@ from grass_mil.contracts import validate_attention_width
 
 
 def _aggregate_rows(values: torch.Tensor, mode: str) -> torch.Tensor:
+    if mode == "mean_probability":
+        # Mean of the per-row class probabilities, returned as log-probabilities
+        # so that softmax of the result is exactly the mean probability (patient
+        # score = mean of core probabilities, the preprint's default).
+        probs = torch.softmax(values.float(), dim=-1).mean(dim=0, keepdim=True)
+        return torch.log(probs.clamp_min(1e-12))
     if mode == "mean":
         return values.mean(dim=0, keepdim=True)
     if mode == "max":
@@ -104,7 +110,38 @@ def _normalize_group_ids_with_fallback(
     return resolved
 
 
-def _row_group_ids(payload: BatchPredictionPayload, *, bag_scope: str) -> List[str]:
+def _map_to_patient(ids: List[str], group_map: Optional[Dict[str, str]]) -> List[str]:
+    if group_map is None:
+        raise ValueError(
+            "bag_scope='patient' needs a region -> patient mapping (group_map); set "
+            "aggregation.patient_map in the predict config."
+        )
+    out: List[str] = []
+    missing: set[str] = set()
+    for rid in ids:
+        pid = group_map.get(str(rid))
+        if pid is None:
+            missing.add(str(rid))
+            pid = str(rid)
+        out.append(str(pid))
+    if missing:
+        warnings.warn(
+            f"{len(missing)} region(s) have no patient in the mapping and were kept as their "
+            f"own group (first: {sorted(missing)[:5]}).",
+            UserWarning,
+            stacklevel=3,
+        )
+    return out
+
+
+def _row_group_ids(
+    payload: BatchPredictionPayload,
+    *,
+    bag_scope: str,
+    group_map: Optional[Dict[str, str]] = None,
+) -> List[str]:
+    if bag_scope == "patient":
+        return _map_to_patient(_row_group_ids(payload, bag_scope="region"), group_map)
     if bag_scope == "patch":
         return [str(v) for v in payload.bag_ids]
     if bag_scope == "region":
@@ -122,16 +159,26 @@ def _row_group_ids(payload: BatchPredictionPayload, *, bag_scope: str) -> List[s
             name="row_sample_ids",
         )
     raise ValueError(
-        f"Unsupported bag_scope '{bag_scope}'. Expected one of ['patch', 'region', 'sample']."
+        f"Unsupported bag_scope '{bag_scope}'. Expected one of "
+        "['patch', 'region', 'sample', 'patient']."
     )
 
 
-def _instance_group_ids(payload: BatchPredictionPayload, *, bag_scope: str) -> List[str]:
+def _instance_group_ids(
+    payload: BatchPredictionPayload,
+    *,
+    bag_scope: str,
+    group_map: Optional[Dict[str, str]] = None,
+) -> List[str]:
     if payload.instance_logits is None:
         raise ValueError(
             "attention_weighted aggregation requires instance_logits in prediction payload."
         )
     n_instances = int(payload.instance_logits.shape[0])
+    if bag_scope == "patient":
+        # Merged bag: every instance of every core of the patient in ONE bag, so
+        # the attention softmax runs jointly over all of them.
+        return _map_to_patient(_instance_group_ids(payload, bag_scope="region"), group_map)
     if bag_scope == "patch":
         patch_ids = payload.instance_patch_ids
         if patch_ids is None:
@@ -160,12 +207,18 @@ def _instance_group_ids(payload: BatchPredictionPayload, *, bag_scope: str) -> L
             name="instance_sample_ids",
         )
     raise ValueError(
-        f"Unsupported bag_scope '{bag_scope}'. Expected one of ['patch', 'region', 'sample']."
+        f"Unsupported bag_scope '{bag_scope}'. Expected one of "
+        "['patch', 'region', 'sample', 'patient']."
     )
 
 
-def _group_row_indices(payload: BatchPredictionPayload, *, bag_scope: str) -> Dict[str, List[int]]:
-    row_group_ids = _row_group_ids(payload, bag_scope=bag_scope)
+def _group_row_indices(
+    payload: BatchPredictionPayload,
+    *,
+    bag_scope: str,
+    group_map: Optional[Dict[str, str]] = None,
+) -> Dict[str, List[int]]:
+    row_group_ids = _row_group_ids(payload, bag_scope=bag_scope, group_map=group_map)
     return _group_indices(row_group_ids)
 
 
@@ -201,8 +254,16 @@ def aggregate_group_logits(
     bag_scope: str = "patch",
     subsample_fraction: float = 1.0,
     subsample_seed: Optional[int] = None,
+    group_map: Optional[Dict[str, str]] = None,
 ) -> AggregatedPredictionPayload:
-    """Aggregate duplicated bag rows into one logit row per bag."""
+    """Aggregate duplicated bag rows into one logit row per bag.
+
+    ``bag_scope='patient'`` groups regions through ``group_map`` (region id ->
+    patient id). With ``mode='mean_probability'`` the patient score is the mean
+    of its regions' class probabilities; with ``mode='attention_weighted'`` all
+    instances of the patient's regions form one merged bag with a joint
+    attention softmax.
+    """
     _validate_subsample_fraction(subsample_fraction)
     if mode == "none":
         return AggregatedPredictionPayload(
@@ -231,7 +292,7 @@ def aggregate_group_logits(
             "Mismatch between bag_ids and attention rows for aggregation: "
             f"{len(payload.bag_ids)} ids vs {len(payload.bag_attention)} attention rows."
         )
-    grouped_row_indices = _group_row_indices(payload, bag_scope=bag_scope)
+    grouped_row_indices = _group_row_indices(payload, bag_scope=bag_scope, group_map=group_map)
 
     if mode == "attention_weighted":
         if payload.instance_attention_logits is None:
@@ -239,7 +300,7 @@ def aggregate_group_logits(
                 "attention_weighted aggregation requires instance_attention_logits "
                 "in prediction payload."
             )
-        instance_group_ids = _instance_group_ids(payload, bag_scope=bag_scope)
+        instance_group_ids = _instance_group_ids(payload, bag_scope=bag_scope, group_map=group_map)
         grouped_instance_indices = _group_indices(instance_group_ids)
         if payload.instance_attention_logits.shape[0] != payload.instance_logits.shape[0]:
             raise ValueError(
@@ -289,8 +350,8 @@ def aggregate_group_logits(
             else:
                 aggregated_row_region_ids.append(bag_id if bag_scope == "region" else None)
                 aggregated_row_sample_ids.append(bag_id if bag_scope == "sample" else None)
-    elif payload.instance_logits is not None:
-        instance_group_ids = _instance_group_ids(payload, bag_scope=bag_scope)
+    elif payload.instance_logits is not None and mode != "mean_probability":
+        instance_group_ids = _instance_group_ids(payload, bag_scope=bag_scope, group_map=group_map)
         grouped_instance_indices = _group_indices(instance_group_ids)
         for bag_id in sorted(grouped_instance_indices):
             indices = grouped_instance_indices[bag_id]
@@ -320,7 +381,9 @@ def aggregate_group_logits(
                 aggregated_row_region_ids.append(bag_id if bag_scope == "region" else None)
                 aggregated_row_sample_ids.append(bag_id if bag_scope == "sample" else None)
     else:
-        row_group_ids = _row_group_ids(payload, bag_scope=bag_scope)
+        # Row-level aggregation (mean_probability always works on the per-region
+        # rows: a patient's score is the mean of its regions' probabilities).
+        row_group_ids = _row_group_ids(payload, bag_scope=bag_scope, group_map=group_map)
         grouped_row_indices = _group_indices(row_group_ids)
         for bag_id in sorted(grouped_row_indices):
             indices = grouped_row_indices[bag_id]

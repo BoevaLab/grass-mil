@@ -1,0 +1,29 @@
+# @package _global_
+# grass-mil-extract: per-cell cache (embeddings, instance logits, attention) of
+# one or more trained models over ALL cells of every region.
+#
+#   grass-mil-extract regime=linear_ftall_reg data=... \
+#       extract.nested_cv_summary=<nested_cv_dir>/nested_cv_summary.json
+#   grass-mil-extract regime=mil data=... +extract.models.final=/path/to/last.ckpt
+#
+# The model is composed from the same `regime`/`model` keys as the training run
+# so the checkpoint fits; the ego-graph settings come from `data.sampler`.
+defaults:
+  - train
+  - _self_
+
+task_name: "extract"
+train: false
+test: false
+
+extract:
+  # Either a nested-CV summary (one model per outer fold, held-out regions
+  # recorded) or an explicit {name: checkpoint} mapping.
+  nested_cv_summary: null
+  models: {}
+  output_dir: ${paths.output_dir}/cells
+  regions: null # optional list / json file of region ids to extract (null = all)
+  batch_size: 512 # ego-graphs per forward pass
+  autocast: true # fp16 autocast on GPU
+  device: auto
+  resume: true

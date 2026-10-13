@@ -168,6 +168,7 @@ def compose_cfg(config_name: str, overrides: Sequence[str]) -> DictConfig:
     with initialize_config_module(version_base="1.3", config_module="grass_mil.configs"):
         cfg = compose(config_name=config_name, overrides=list(overrides))
     GlobalHydra.instance().clear()
-    with open_dict(cfg):
-        cfg.trainer.default_root_dir = cfg.paths.output_dir
+    if "trainer" in cfg:
+        with open_dict(cfg):
+            cfg.trainer.default_root_dir = cfg.paths.output_dir
     return cfg

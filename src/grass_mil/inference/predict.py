@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import hydra
 from lightning import LightningDataModule, LightningModule, Trainer
@@ -192,6 +192,24 @@ def _preforward_decision_to_dict(
     }
 
 
+def _load_patient_map(cfg_map) -> Optional[Dict[str, str]]:
+    """Region -> patient mapping from ``aggregation.patient_map`` (label CSV columns)."""
+    if not cfg_map or not cfg_map.get("label_file"):
+        return None
+    import pandas as pd
+
+    df = pd.read_csv(str(cfg_map.label_file))
+    df.columns = [str(c).strip() for c in df.columns]
+    id_col = str(cfg_map.get("id_column", "REGION_ID"))
+    pat_col = str(cfg_map.get("patient_column", "PATIENT"))
+    for col in (id_col, pat_col):
+        if col not in df.columns:
+            raise ValueError(
+                f"aggregation.patient_map: column '{col}' not in {cfg_map.label_file}"
+            )
+    return {str(r): str(p) for r, p in zip(df[id_col], df[pat_col])}
+
+
 @task_wrapper
 def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     ckpt_path = cfg.get("ckpt_path")
@@ -348,6 +366,7 @@ def predict(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             bag_scope=str(cfg.aggregation.get("bag_scope", "patch")),
             subsample_fraction=aggregation_subsample_fraction,
             subsample_seed=aggregation_subsample_seed,
+            group_map=_load_patient_map(cfg.aggregation.get("patient_map")),
         )
         aggregation_metadata = dict(getattr(aggregated, "metadata", {}))
         aggregation_metadata["preforward_subsampling_applied"] = bool(

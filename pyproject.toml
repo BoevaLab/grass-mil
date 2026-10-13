@@ -46,6 +46,8 @@ grass-mil-eval = "grass_mil.eval:main"
 grass-mil-loocv = "grass_mil.loocv:main"
 grass-mil-probe = "grass_mil.probe:main"
 grass-mil-nested-cv = "grass_mil.nested_cv:main"
+grass-mil-extract = "grass_mil.extract:main"
+grass-mil-scores = "grass_mil.evaluation.cli:main"
 grass-mil-predict = "grass_mil.inference.predict:main"
 grass-mil-report = "grass_mil.interpretability.report_cli:main"
 
