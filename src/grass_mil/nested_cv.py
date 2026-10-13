@@ -266,16 +266,28 @@ def _train_run(
     return result
 
 
+def _unit_ids(df: pd.DataFrame, kind: str) -> pd.Series:
+    """Unit id of every prediction row.
+
+    Region bags carry their region id in ``region_id``; patch and sample bags
+    are identified by the bag id, which the bagging code namespaces as
+    ``sample::region::patch`` (or ``sample::patch``) for patches, so the unit is
+    its last segment.
+    """
+    if kind == "region":
+        return df["region_id"].astype(str)
+    return df["bag_id"].astype(str).str.split("::").str[-1]
+
+
 def _predictions_cover(output_dir: Path, test_ids, kind: str) -> bool:
     """True when the run's test predictions hold exactly the expected unit ids."""
     path = output_dir / "test_predictions.csv"
     if not path.exists():
         return False
     df = pd.read_csv(path)
-    col = "bag_id" if kind != "region" else "region_id"
-    if col not in df.columns:
+    if ("region_id" if kind == "region" else "bag_id") not in df.columns:
         return False
-    return set(df[col].astype(str)) == {str(r) for r in test_ids}
+    return set(_unit_ids(df, kind)) == {str(r) for r in test_ids}
 
 
 def _read_test_predictions(output_dir: Path) -> pd.DataFrame:
@@ -428,9 +440,9 @@ def run_nested_cv(cfg: DictConfig) -> Dict[str, Any]:
         preds.insert(0, "outer", i)
         kind = _id_kind(cfg)
         if kind != "region":
-            # the bag id is the unit id (patch or sample); keep it in region_id
-            # so every downstream table has one id column
-            preds["region_id"] = preds["bag_id"].astype(str)
+            # keep the unit id (patch or sample) in region_id so every
+            # downstream table has one id column
+            preds["region_id"] = _unit_ids(preds, kind)
         preds["patient_id"] = [table.group_of(r) for r in preds["region_id"].astype(str)]
         preds.to_csv(outer_dir / "oof_predictions.csv", index=False)
         score_col = "prob_class_1" if "prob_class_1" in preds.columns else None
