@@ -72,6 +72,9 @@ filterwarnings = [
   "ignore::UserWarning",
 ]
 log_cli = "True"
+markers = [
+  "slow: end-to-end chains that take more than a minute (deselect with -m 'not slow')",
+]
 minversion = "6.0"
 testpaths = "tests/"
 

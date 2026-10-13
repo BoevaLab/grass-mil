@@ -15,6 +15,8 @@ def _tensor_to_2d_cpu(values: Optional[torch.Tensor]) -> Optional[torch.Tensor]:
     if values is None:
         return None
     values = values.detach().cpu()
+    if values.is_floating_point():
+        values = values.float()
     if values.ndim == 1:
         values = values.unsqueeze(-1)
     return values

@@ -19,6 +19,8 @@ def ensure_output_dir(base_output_dir: Path, output_subdir: str) -> Path:
 
 def _tensor_columns(prefix: str, values: torch.Tensor) -> Dict[str, Any]:
     values = values.detach().cpu()
+    if values.is_floating_point():
+        values = values.float()  # bf16/fp16 autocast outputs have no numpy dtype
     if values.ndim == 1:
         values = values.unsqueeze(-1)
     data: Dict[str, Any] = {}

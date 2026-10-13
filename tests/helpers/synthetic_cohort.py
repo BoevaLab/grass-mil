@@ -100,11 +100,12 @@ def make_synthetic_cohort(
     label_path = raw / "labels.csv"
     pd.DataFrame(label_rows).to_csv(label_path, index=False)
 
-    # Patient-grouped outer folds (patients dealt round-robin, labels balanced).
+    # Patient-grouped outer folds: consecutive (negative, positive) patient pairs
+    # are dealt round-robin, so every fold holds both classes.
     patients = sorted(set(patient_of.values()))
     folds: List[List[str]] = [[] for _ in range(n_outer_folds)]
     for i, patient in enumerate(patients):
-        folds[i % n_outer_folds].extend(r for r in region_ids if patient_of[r] == patient)
+        folds[(i // 2) % n_outer_folds].extend(r for r in region_ids if patient_of[r] == patient)
     folds_path = raw / "folds.json"
     folds_path.write_text(json.dumps(folds))
 
