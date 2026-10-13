@@ -32,7 +32,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-interpretability = ["plotly", "umap-learn", "jinja2"]
+interpretability = ["plotly", "umap-learn", "jinja2", "matplotlib"]
+stats = ["statsmodels"]
+plots = ["matplotlib", "umap-learn"]
 report = ["kaleido", "playwright"]
 spatial-stats = ["squidpy", "scanpy", "anndata"]
 io = ["anndata", "shapely"]
@@ -48,6 +50,7 @@ grass-mil-probe = "grass_mil.probe:main"
 grass-mil-nested-cv = "grass_mil.nested_cv:main"
 grass-mil-extract = "grass_mil.extract:main"
 grass-mil-scores = "grass_mil.evaluation.cli:main"
+grass-mil-niches = "grass_mil.interpretability.niches_cli:main"
 grass-mil-predict = "grass_mil.inference.predict:main"
 grass-mil-report = "grass_mil.interpretability.report_cli:main"
 

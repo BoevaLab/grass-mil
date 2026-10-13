@@ -21,6 +21,7 @@ from grass_mil.contracts import (
 )
 from grass_mil.interpretability.core.biomarkers import niche_composition_summary
 from grass_mil.interpretability.core.niches import relabel_niches_by_composition
+from grass_mil.contracts import ClusteringResult
 from grass_mil.interpretability.core.clustering import run_clustering
 from grass_mil.interpretability.core.data import extract_embedding_set
 from grass_mil.interpretability.core.reduction import run_reduction
@@ -178,8 +179,39 @@ def run_interpretability_pipeline(
         params = _resolve_adaptive_min_cluster_size(
             params, n_instances=int(clustering_input.shape[0]), method=method
         )
-        clustering_result = run_clustering(method, clustering_input, **params)
-        labels = clustering_result.labels
+        sample_size = clustering_cfg.get("sample_size")
+        l2_normalise = bool(clustering_cfg.get("l2_normalise", False))
+        if sample_size is not None or l2_normalise:
+            # Preprint recipe: cluster a sample on L2-normalised coordinates and
+            # assign the remaining instances by k-NN (see core.clustering).
+            from grass_mil.interpretability.core.clustering import fit_niche_clustering
+
+            cl_params = {
+                k: v for k, v in params.items() if k not in {"n_clusters", "random_state"}
+            }
+            niche_model, labels = fit_niche_clustering(
+                clustering_input,
+                reduction={"method": "none"},
+                clustering={
+                    "method": method,
+                    "params": cl_params,
+                    "n_clusters": params.get("n_clusters"),
+                    "random_state": params.get("random_state", 42),
+                },
+                sample_size=int(sample_size) if sample_size is not None else None,
+                l2_normalise=l2_normalise,
+                assign_k=int(clustering_cfg.get("assign_k", 15)),
+                seed=int(clustering_cfg.get("seed", 0)),
+            )
+            clustering_result = ClusteringResult(
+                method=str(method).lower(),
+                labels=np.asarray(labels),
+                params={**params, **niche_model.params},
+                fitted_object=niche_model,
+            )
+        else:
+            clustering_result = run_clustering(method, clustering_input, **params)
+            labels = clustering_result.labels
 
     niche_relabel_map: Dict[Any, Any] = {}
     if labels is not None and bool(config.get("relabel_niches_by_composition", True)):

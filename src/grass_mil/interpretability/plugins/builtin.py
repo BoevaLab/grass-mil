@@ -203,6 +203,30 @@ def _resolve_logit_bias(params: Dict[str, Any]) -> Optional[List[float]]:
     return bias
 
 
+def _bag_logits_from_table(bag_table, *, bag_id_column: str, logit_prefix: str):
+    """``{bag_id: [logit_0, logit_1, ...]}`` from a predictions table, or None.
+
+    With the bag logits available the attribution reports a real
+    ``identity_residual`` (max |sum_i A[i,c] l[i,c] - L_c| over bags) instead
+    of NaN, so the additive identity is checked rather than assumed.
+    """
+    if bag_table is None or bag_id_column not in bag_table.columns:
+        return None
+    import re
+
+    pattern = re.compile(rf"^{re.escape(logit_prefix)}(\d+)$")
+    cols = sorted(
+        (c for c in bag_table.columns if pattern.match(str(c))),
+        key=lambda c: int(pattern.match(str(c)).group(1)),
+    )
+    if not cols:
+        return None
+    return {
+        str(row[bag_id_column]): [float(row[c]) for c in cols]
+        for _, row in bag_table[[bag_id_column, *cols]].iterrows()
+    }
+
+
 @dataclass
 class MarginAttributionPlugin(InterpretabilityPlugin):
     """Exact additive attribution of bag decisions to instance niches.
@@ -236,16 +260,22 @@ class MarginAttributionPlugin(InterpretabilityPlugin):
                 "Enable the interpretability export in the predict step."
             )
 
+        bag_id_column = str(params.get("bag_id_column", dataset.bag_id_column))
         result = niche_attribution_summary(
             table,
             labels,
             attention_columns=attention_columns,
             logit_columns=logit_columns,
-            bag_id_column=str(params.get("bag_id_column", dataset.bag_id_column)),
+            bag_id_column=bag_id_column,
             logit_bias=_resolve_logit_bias(params),
             n_bootstrap=int(params.get("n_bootstrap", 200)),
             random_state=int(params.get("random_state", 0)),
             margin_eps=float(params.get("margin_eps", 1e-6)),
+            bag_logits=_bag_logits_from_table(
+                getattr(dataset, "bag_table", None),
+                bag_id_column=str(params.get("bag_table_id_column", "bag_id")),
+                logit_prefix=str(params.get("bag_logit_prefix", "logit_")),
+            ),
             focus_classes=params.get("focus_classes"),
         )
         payload = {

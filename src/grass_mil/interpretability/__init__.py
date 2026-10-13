@@ -1,7 +1,14 @@
 from grass_mil.interpretability.core.biomarkers import (
     niche_composition_summary,
 )
-from grass_mil.interpretability.core.clustering import run_clustering
+from grass_mil.interpretability.core.clustering import (
+    cosine_hdbscan,
+    fit_niche_clustering,
+    run_clustering,
+)
+from grass_mil.interpretability.core.attribution import niche_attribution_summary
+from grass_mil.interpretability.core.agreement import compute_niche_agreement
+from grass_mil.interpretability.niches import run_niche_discovery
 from grass_mil.interpretability.core.reduction import run_reduction
 from grass_mil.interpretability.core.transfer import (
     apply_niche_transfer,
@@ -24,6 +31,11 @@ from grass_mil.interpretability.tier2.tissue_graph import (
 __all__ = [
     "run_reduction",
     "run_clustering",
+    "cosine_hdbscan",
+    "fit_niche_clustering",
+    "run_niche_discovery",
+    "niche_attribution_summary",
+    "compute_niche_agreement",
     "niche_composition_summary",
     "run_neighborhood_enrichment",
     "run_diff_neighborhood_enrichment",
