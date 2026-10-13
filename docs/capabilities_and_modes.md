@@ -10,7 +10,7 @@ This document catalogs operational modes and non-default capabilities in `grass-
 | Supervised MIL | `finetune_mil` | `supervised_module` | Per-class attention aggregation; region cross-entropy is the sole objective |
 | Cox survival MIL | `finetune_survival` | `supervised_module` | Scalar log-hazard per bag, scored by c-index |
 | SSL pretrain | `pretrain_bgrl` | `bgrl_module` | Representation learning before supervised fine-tuning |
-| GRASS-MIL pretrain (A3) | `experiment=grass_mil_pretrain_a3` | `bgrl_a3` | The preprint's pretraining recipe |
+| GRASS-MIL pretrain (A3) | `regime=pretrain_a3` | `bgrl_a3` | The preprint's pretraining recipe |
 | GRASS-MIL fine-tuning | `regime=mil` (`mil_frozen`, `linear_probehead`, `linear_ftall`, `linear_ftall_reg`) | `grass_mil` | One region = one bag, scaled learning rates, probe pre-fit, region-level selection |
 
 ## 1b) Analysis Entry Points

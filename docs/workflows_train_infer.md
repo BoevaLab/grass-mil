@@ -2,6 +2,11 @@
 
 This guide provides flow-through instructions for all major `grass-mil` workflows.
 
+> New here? The GRASS-MIL path (pretraining, regimes, nested CV, niches) is
+> walked through in [getting_started.md](getting_started.md), and the
+> configuration system in [configuration_guide.md](configuration_guide.md).
+> This page covers the generic training and inference machinery underneath.
+
 Interpretability workflows are documented in:
 
 - `docs/interpretability_suite.md`
@@ -267,10 +272,8 @@ Training artifacts (`paths.output_dir`):
 The GRASS-MIL recipe ("A3" in the preprint) is one experiment preset:
 
 ```bash
-grass-mil-train experiment=grass_mil_pretrain_a3 data=spatial_omics \
-  data.raw_manifest_path=... data.processed_dir=... data.sample_unit=full \
-  data.csv.categorical_label_columns=[cell_type] data.csv.molecular_columns=[SIZE] \
-  trainer=gpu
+grass-mil-train experiment=my_cohort regime=pretrain_a3 paths.output_dir=runs/pretrain_a3 trainer=gpu
+# or, without a cohort file: grass-mil-train experiment=grass_mil_pretrain_a3 data.raw_manifest_path=... data.processed_dir=...
 ```
 
 It composes `model=bgrl_a3`, `task=pretrain_bgrl_a3`, `callbacks=pretrain_checkpoint`

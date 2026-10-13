@@ -12,7 +12,7 @@ Public release accompanying the preprint
 - Projected gated attention with one channel per class (32 / 8, kaiming) and logit-space pooling, so every bag logit is an exact sum of per-cell contributions.
 - One region = one bag: all sampled ego-graphs of a region in one batch, one attention softmax, one loss; region-level validation metrics and selection.
 - Training regimes as presets (`regime=mil|mil_frozen|linear_probehead|linear_ftall|linear_ftall_reg`) with per-component learning-rate scales, head pre-fit by a logistic probe, class weights from the training split, per-step cosine schedule, gradient accumulation over regions, AMP-safe scheduler stepping, elementwise feature drop with an unassigned token.
-- BGRL "A3" pretraining preset (`experiment=grass_mil_pretrain_a3`): roots drawn from the union of all regions, momentum 0.99 -> 1.0, DropImportance + feature noise, checkpoint every 5000 steps.
+- BGRL "A3" pretraining preset (`regime=pretrain_a3`): roots drawn from the union of all regions, momentum 0.99 -> 1.0, DropImportance + feature noise, checkpoint every 5000 steps.
 - Import of legacy SPACE-GM style BGRL checkpoints (`model.encoder_init_map=spacegm_bgrl`).
 
 ### Analyses

@@ -1,15 +1,15 @@
 # @package _global_
-# GRASS-MIL encoder pretraining (preprint "A3"):
-#   grass-mil-train experiment=grass_mil_pretrain_a3 data.raw_manifest_path=... \
-#       data.processed_dir=... data.csv.molecular_columns=[SIZE]
-# All regions are used label-free; override task.total_steps / data.sampler
-# runtime keys / model.encoder.* freely.
+# Same recipe as `regime=pretrain_a3`, for runs without a cohort experiment file:
+#   grass-mil-train experiment=grass_mil_pretrain_a3 data.raw_manifest_path=... data.processed_dir=...
+# With a cohort file use `experiment=my_cohort regime=pretrain_a3` (one experiment
+# file per command). Keep the two files identical.
 defaults:
   - override /model: bgrl_a3
   - override /task: pretrain_bgrl_a3
   - override /callbacks: pretrain_checkpoint
   - override /data/sampler: ego_graph_pretrain
 
+regime_name: pretrain_a3
 task_name: pretrain_a3
 tags: ["grass_mil", "pretrain", "a3"]
 test: false

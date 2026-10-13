@@ -349,8 +349,8 @@ to `metrics_per_epoch.jsonl`; `test_predictions.csv` holds one row per bag.
 
 ## 3.4 `configs/task/pretrain_bgrl_a3.yaml` (GRASS-MIL pretraining)
 
-Selected by `experiment=grass_mil_pretrain_a3` (with `model=bgrl_a3`,
-`callbacks=pretrain_checkpoint`, `data/sampler=ego_graph_pretrain`).
+Selected by `regime=pretrain_a3` (with `model=bgrl_a3`, `callbacks=pretrain_checkpoint`,
+`data/sampler=ego_graph_pretrain`); `experiment=grass_mil_pretrain_a3` is an alias.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -855,7 +855,9 @@ and sets the keys below; each is an ordinary override afterwards.
 | `linear_ftall` | 1e-4 / 1e-3 | 1.0 | linear, probe pre-fit | 0.01 / 1e-3 | 2.0 | 256 | 0.0 | 0 / 0 | 25 (10) |
 | `linear_ftall_reg` | 1e-4 / 1e-2 | 0.3 | linear, probe pre-fit | 0.01 / 1e-3 | 2.0 | 256 | 0.2 | 0.05 / 0.05 | 25 (10) |
 
-Shared: `task.region_accumulation.hyperbatch_size=12`, `task.grad_clip_norm=1.0`,
+`regime=pretrain_a3` is the pretraining recipe (section 3.4): it swaps the model, task, callbacks and sampler groups and needs no labels.
+
+Shared by the fine-tuning regimes: `task.region_accumulation.hyperbatch_size=12`, `task.grad_clip_norm=1.0`,
 `trainer.precision=16-mixed`, `data.val_sampler` = fixed 1024-root subset per
 region (`fixed_per_unit_seed=0`), `data.test_sampler` = all roots.
 

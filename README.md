@@ -73,8 +73,37 @@ jupyter lab vignettes/
 ```
 
 1. [`01_anndata_to_spatial_graphs.ipynb`](vignettes/01_anndata_to_spatial_graphs.ipynb): AnnData -> manifest -> cellular graphs.
-2. [`02_pretraining_and_niches.ipynb`](vignettes/02_pretraining_and_niches.ipynb): BGRL pretraining (`experiment=grass_mil_pretrain_a3`), fine-tuning (`regime=mil`), instance export, interpretability report.
+2. [`02_pretraining_and_niches.ipynb`](vignettes/02_pretraining_and_niches.ipynb): BGRL pretraining (`regime=pretrain_a3`), fine-tuning (`regime=mil`), instance export, interpretability report.
 3. [`03_nested_cv_niches_and_metaclusters.ipynb`](vignettes/03_nested_cv_niches_and_metaclusters.ipynb): nested CV, cell extraction, niches, metaclusters, scores, spatial statistics.
+
+## Typical usage on your own cohort
+
+Describe the cohort once (copy
+[`configs/experiment/example_cohort.yaml`](src/grass_mil/configs/experiment/example_cohort.yaml)
+to `my_cohort.yaml`, fill in paths and column names), then:
+
+```bash
+grass-mil-train      experiment=my_cohort +trainer.fast_dev_run=true                       # build the graphs
+grass-mil-train      experiment=my_cohort regime=pretrain_a3 \
+                     paths.output_dir=runs/pretrain_a3 trainer=gpu                           # pretrain, label-free
+grass-mil-nested-cv  experiment=my_cohort regime=linear_ftall_reg \
+                     model.init_from_ckpt=runs/pretrain_a3/checkpoints/last.ckpt \
+                     paths.output_dir=runs/nested trainer=gpu                                # nested CV, OOF scores
+grass-mil-scores     input=runs/nested/oof_predictions.csv output_dir=runs/scores          # CIs, operating points
+grass-mil-extract    experiment=my_cohort regime=linear_ftall_reg \
+                     extract.nested_cv_summary=runs/nested/nested_cv_summary.json \
+                     extract.output_dir=runs/cells                                            # every cell, every fold model
+grass-mil-niches     cells_dir=runs/cells/fold2 output_dir=runs/niches_fold2                # niches of one model
+grass-mil-metaclusters cells_dir=runs/cells output_dir=runs/meta labels.label_file=... \
+                     labels.label_column=STAS labels.patient_column=PATIENT                  # replication across folds
+grass-mil-spatial-stats cells_dir=runs/cells/fold0 output_dir=runs/spatial labels.label_file=... \
+                     labels.label_column=STAS labels.patient_column=PATIENT reference=[tumor]  # model-free statistics
+```
+
+Step by step, with inputs, outputs and the variants (one split, tiles as
+units, h5ad inputs, patient-level prediction):
+[`docs/getting_started.md`](docs/getting_started.md). How configuration works
+and how to change any setting: [`docs/configuration_guide.md`](docs/configuration_guide.md).
 
 ## Workflows
 
@@ -86,7 +115,7 @@ of lists of unit ids). See [`docs/dataset_preparation.md`](docs/dataset_preparat
 | Step | Command | Preset / keys | Outputs | Doc |
 |---|---|---|---|---|
 | Build graphs | `grass-mil-train data=... +trainer.fast_dev_run=true` (or any run) | `data.graph_builder.kwargs.edge_features=[log_distance,neighbor]`, `data.sample_unit=full` | `processed_index.json`, graph `.pt` files | [dataset_preparation](docs/dataset_preparation.md) |
-| Pretrain the encoder | `grass-mil-train experiment=grass_mil_pretrain_a3 data=...` | `model=bgrl_a3`, `task=pretrain_bgrl_a3`, `data/sampler=ego_graph_pretrain` | `checkpoints/last.ckpt` | [workflows](docs/workflows_train_infer.md) |
+| Pretrain the encoder | `grass-mil-train experiment=my_cohort regime=pretrain_a3` | `model=bgrl_a3`, `task=pretrain_bgrl_a3`, `data/sampler=ego_graph_pretrain` | `checkpoints/last.ckpt` | [workflows](docs/workflows_train_infer.md) |
 | Fine-tune one split | `grass-mil-train regime=mil data=... model.init_from_ckpt=...` | `regime=mil|mil_frozen|linear_probehead|linear_ftall|linear_ftall_reg`, `data.split.explicit.*` | checkpoints, `metrics_per_epoch.jsonl`, `test_predictions.csv` | [nested_cv](docs/nested_cv.md) |
 | Probe head | `grass-mil-probe regime=linear_probehead data=...` | `probe.*` | `probe_head.pt` | [nested_cv](docs/nested_cv.md) |
 | Nested cross-validation | `grass-mil-nested-cv regime=... nested_cv.folds_file=folds.json` | `nested_cv.*` | `nested_cv_summary.json`, `oof_predictions.csv`, `oof_patient_predictions.csv` | [nested_cv](docs/nested_cv.md) |
@@ -104,7 +133,7 @@ The preprint's numbers come from this chain with the default settings:
 
 1. graphs with `edge_features=[log_distance,neighbor]` and the cohort's native
    coordinate units (`neighbor_cutoff_um` is the contact distance in those units);
-2. `experiment=grass_mil_pretrain_a3` on every region, label-free;
+2. `regime=pretrain_a3` on every region, label-free;
 3. `grass-mil-nested-cv` with patient-grouped outer folds, inner `k=3`, the
    regimes `linear_probehead` ("probehead"), `linear_ftall` ("ftALL"),
    `linear_ftall_reg` ("ftALL, lr x0.3 + regularisation") and `mil`;
@@ -146,6 +175,8 @@ Every key is documented in [`docs/hyperparameter_reference.md`](docs/hyperparame
 
 ## Documentation
 
+- [Getting started: typical usage on your own cohort](docs/getting_started.md)
+- [Configuration guide: groups, presets, precedence, every knob by concern](docs/configuration_guide.md)
 - [Dataset preparation](docs/dataset_preparation.md): manifest, inputs, labels, patient column, fold files
 - [Training and inference workflows](docs/workflows_train_infer.md)
 - [Nested cross-validation and regimes](docs/nested_cv.md)

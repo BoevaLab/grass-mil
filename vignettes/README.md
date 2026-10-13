@@ -7,7 +7,7 @@ before pointing the framework at your own cohort.
 | Vignette | What it covers |
 |---|---|
 | [`01_anndata_to_spatial_graphs.ipynb`](01_anndata_to_spatial_graphs.ipynb) | Turning a `squidpy` dataset into the manifest + per-sample files `grass-mil` expects, building the cellular graphs, and inspecting them |
-| [`02_pretraining_and_niches.ipynb`](02_pretraining_and_niches.ipynb) | GRASS-MIL pretraining (BGRL, `experiment=grass_mil_pretrain_a3`), fine-tuning with `regime=mil`, exporting per-instance embeddings, and discovering spatial niches with the interpretability report |
+| [`02_pretraining_and_niches.ipynb`](02_pretraining_and_niches.ipynb) | GRASS-MIL pretraining (BGRL, `regime=pretrain_a3`), fine-tuning with `regime=mil`, exporting per-instance embeddings, and discovering spatial niches with the interpretability report |
 | [`03_nested_cv_niches_and_metaclusters.ipynb`](03_nested_cv_niches_and_metaclusters.ipynb) | The preprint's analysis chain on the same tiles: nested cross-validation, cell extraction, niche attribution, cross-fold metaclusters, evaluation statistics and classical spatial statistics |
 
 Run them in order: the second reads the graphs the first builds, the third
