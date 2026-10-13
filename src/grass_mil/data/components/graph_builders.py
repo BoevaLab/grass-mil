@@ -59,13 +59,33 @@ def get_graph_builder(config: GraphBuilderConfig) -> GraphBuilder:
 
 @register_graph_builder("delaunay")
 class DelaunayGraphBuilder(GraphBuilder):
+    """Delaunay triangulation over cell centroids.
+
+    Edge features (``edge_features``):
+
+    - ``distance``: raw Euclidean distance in coordinate units.
+    - ``log_distance``: ``clip((ln(d + eps) - log_lower) / (log_upper - log_lower), 0, 1)``,
+      the bounded log-distance used as the GINE edge input in the GRASS-MIL preprint
+      (defaults ``log_lower=2.0``, ``log_upper=5.0``; with coordinates in pixels this maps
+      ~7 px -> 0 and ~148 px -> 1).
+    - ``neighbor``: 1 if ``distance <= neighbor_cutoff_um`` else 0.
+    """
+
     def __init__(
         self,
         edge_features: Optional[List[str]] = None,
         neighbor_cutoff_um: Optional[float] = None,
+        log_lower: float = 2.0,
+        log_upper: float = 5.0,
+        log_eps: float = 1e-5,
     ) -> None:
         self.edge_features = edge_features or []
         self.neighbor_cutoff_um = neighbor_cutoff_um
+        if log_upper <= log_lower:
+            raise ValueError("log_upper must be greater than log_lower")
+        self.log_lower = float(log_lower)
+        self.log_upper = float(log_upper)
+        self.log_eps = float(log_eps)
 
     def build(self, coords: np.ndarray) -> GraphBuildResult:
         if coords.shape[0] < 2:
@@ -74,7 +94,13 @@ class DelaunayGraphBuilder(GraphBuilder):
             edges = {(0, 1), (1, 0)} if coords.shape[0] == 2 else set()
             edge_index = _edges_to_tensor(edges)
             edge_attr, edge_attr_names = _build_edge_attr(
-                edge_index, coords, self.edge_features, self.neighbor_cutoff_um
+                edge_index,
+                coords,
+                self.edge_features,
+                self.neighbor_cutoff_um,
+                log_lower=self.log_lower,
+                log_upper=self.log_upper,
+                log_eps=self.log_eps,
             )
             return GraphBuildResult(
                 edge_index=edge_index,
@@ -95,7 +121,13 @@ class DelaunayGraphBuilder(GraphBuilder):
                     edges.add((b, a))
         edge_index = _edges_to_tensor(edges)
         edge_attr, edge_attr_names = _build_edge_attr(
-            edge_index, coords, self.edge_features, self.neighbor_cutoff_um
+            edge_index,
+            coords,
+            self.edge_features,
+            self.neighbor_cutoff_um,
+            log_lower=self.log_lower,
+            log_upper=self.log_upper,
+            log_eps=self.log_eps,
         )
         return GraphBuildResult(
             edge_index=edge_index, edge_attr=edge_attr, edge_attr_names=edge_attr_names
@@ -109,11 +141,22 @@ def _edges_to_tensor(edges: set[tuple[int, int]]) -> torch.Tensor:
     return edge_index
 
 
+def log_distance_feature(
+    distances: np.ndarray, log_lower: float = 2.0, log_upper: float = 5.0, eps: float = 1e-5
+) -> np.ndarray:
+    """Bounded log-distance edge feature: clip((ln(d + eps) - lower) / (upper - lower), 0, 1)."""
+    log_d = np.log(np.asarray(distances, dtype=np.float64) + eps)
+    return np.clip((log_d - log_lower) / (log_upper - log_lower), 0.0, 1.0).astype(np.float32)
+
+
 def _build_edge_attr(
     edge_index: torch.Tensor,
     coords: np.ndarray,
     edge_features: List[str],
     neighbor_cutoff_um: Optional[float],
+    log_lower: float = 2.0,
+    log_upper: float = 5.0,
+    log_eps: float = 1e-5,
 ) -> tuple[Optional[torch.Tensor], Optional[List[str]]]:
     if not edge_features:
         return None, None
@@ -131,6 +174,8 @@ def _build_edge_attr(
     for feat in edge_features:
         if feat == "distance":
             columns.append(distances.astype(np.float32))
+        elif feat == "log_distance":
+            columns.append(log_distance_feature(distances, log_lower, log_upper, log_eps))
         elif feat == "neighbor":
             if neighbor_cutoff_um is None:
                 raise ValueError(

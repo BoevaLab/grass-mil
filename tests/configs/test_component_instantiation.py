@@ -1,53 +1,84 @@
-from pathlib import Path
+"""Compose the model/encoder and model/attention groups through Hydra and build them.
+
+The groups ship as plain parameter dictionaries (no ``_target_``) that the
+module factories turn into components, so the only faithful test is to compose
+them the way the CLI does and instantiate the resulting module.
+"""
+
+import pytest
+from hydra import compose, initialize_config_module
+from hydra.core.global_hydra import GlobalHydra
+from omegaconf import OmegaConf
 
 from tests.helpers.config_paths import CONFIGS_DIR
 
-import hydra
-from omegaconf import OmegaConf
+CONFIG_MODULE = "grass_mil.configs"
+ENCODERS = ["gin", "gcn", "gat", "graphsage", "gine", "gine_length"]
+ATTENTIONS = ["gated", "gated_projected"]
 
 
-def _instantiate_yaml(path: Path):
-    cfg = OmegaConf.load(path)
-    return hydra.utils.instantiate(cfg)
+def _compose(overrides: list[str]):
+    GlobalHydra.instance().clear()
+    with initialize_config_module(version_base="1.3", config_module=CONFIG_MODULE):
+        cfg = compose(config_name="train", overrides=overrides)
+    GlobalHydra.instance().clear()
+    return cfg
 
 
-def test_model_component_yaml_instantiation():
-    base = CONFIGS_DIR / "model"
-    targets = [
-        base / "encoder" / "gin.yaml",
-        base / "encoder" / "gcn.yaml",
-        base / "encoder" / "gat.yaml",
-        base / "encoder" / "graphsage.yaml",
-        base / "encoder" / "gine.yaml",
-        base / "attention" / "gated.yaml",
-        base / "attention" / "gated_projected.yaml",
-        base / "heads" / "graph.yaml",
-        base / "loss" / "categorical_ce.yaml",
-        base / "loss" / "categorical_bce.yaml",
-        base / "loss" / "regression_mse.yaml",
-        base / "loss" / "regression_huber.yaml",
-        base / "loss" / "survival_coxsgd.yaml",
-    ]
-    for path in targets:
-        obj = _instantiate_yaml(path)
-        assert obj is not None
+@pytest.mark.parametrize("encoder", ENCODERS)
+def test_encoder_group_builds(encoder: str) -> None:
+    from grass_mil.models.components.backbones import EncoderConfig, GNNEncoder
+
+    cfg = _compose([f"model/encoder={encoder}", "model.encoder.input_dim=8"])
+    enc_cfg = OmegaConf.to_container(cfg.model.encoder, resolve=True)
+    if enc_cfg.get("categorical_embedding") is not None:
+        enc_cfg["categorical_embedding"] = {
+            **enc_cfg["categorical_embedding"],
+            "num_embeddings": 5,
+            "column_index": 0,
+        }
+    encoder_module = GNNEncoder(EncoderConfig(**enc_cfg))
+    assert encoder_module.output_dim == int(cfg.model.encoder.out_dim)
 
 
-def test_training_module_yaml_instantiation():
-    base = CONFIGS_DIR / "model"
-    cases = [
-        ("bgrl_module.yaml", "pretrain_bgrl.yaml", "cosine_step.yaml"),
-        ("supervised_module.yaml", "finetune_mean.yaml", "cosine_epoch.yaml"),
-        ("supervised_module.yaml", "finetune_mil.yaml", "cosine_epoch.yaml"),
-    ]
-    for model_name, task_name, scheduler_name in cases:
-        path = base / model_name
-        cfg = OmegaConf.load(path)
-        cfg.optim = OmegaConf.load(CONFIGS_DIR / "optim" / "adamw.yaml")
-        cfg.scheduler = OmegaConf.load(CONFIGS_DIR / "scheduler" / scheduler_name)
-        cfg.task = OmegaConf.load(CONFIGS_DIR / "task" / task_name).task
-        obj = hydra.utils.instantiate(cfg)
-        assert obj is not None
+@pytest.mark.parametrize("attention", ATTENTIONS)
+def test_attention_group_builds(attention: str) -> None:
+    from grass_mil.models.components.factory import build_attention
+
+    cfg = _compose([f"model/attention={attention}", "task=finetune_mil"])
+    attn_cfg = OmegaConf.to_container(cfg.model.attention, resolve=True)
+    module = build_attention(use_attention=True, **attn_cfg)
+    assert module is not None
+    assert module.attention_c.out_features == int(cfg.model.graph_head.output_dim)
+
+
+@pytest.mark.parametrize(
+    ("model_name", "task_name"),
+    [
+        ("bgrl_module", "pretrain_bgrl"),
+        ("supervised_module", "finetune_mean"),
+        ("supervised_module", "finetune_mil"),
+        ("grass_mil", "finetune_mil"),
+    ],
+)
+def test_training_module_presets_instantiate(model_name: str, task_name: str) -> None:
+    import hydra
+
+    cfg = _compose([f"model={model_name}", f"task={task_name}"])
+    module = hydra.utils.instantiate(cfg.model)
+    assert module is not None
+
+
+def test_grass_mil_preset_defaults_match_preprint() -> None:
+    cfg = _compose(["model=grass_mil", "task=finetune_mil"])
+    enc = cfg.model.encoder
+    assert enc.conv_type == "gine" and int(enc.num_layers) == 4 and int(enc.hidden_dim) == 256
+    assert enc.norm == "layernorm" and enc.pooling == "max" and bool(enc.train_eps)
+    assert int(enc.edge_feature_index) == 0 and int(enc.edge_attr_dim) == 1
+    att = cfg.model.attention
+    assert int(att.projection_dim) == 32 and int(att.hidden_dim) == 8 and bool(att.dropout)
+    assert int(att.n_classes) == 2 and int(cfg.model.graph_head.output_dim) == 2
+    assert int(cfg.model.graph_head.num_layers) == 2
 
 
 def test_sampler_strategy_resolution():
@@ -60,11 +91,6 @@ def test_sampler_strategy_resolution():
         assert strategy is not None
 
 
-def test_default_component_and_data_sampler_configs():
-    model_cfg = OmegaConf.load(CONFIGS_DIR / "model" / "components.yaml")
-    assert model_cfg.model.attention._target_ == (
-        "grass_mil.models.components.attention.AttnNetGatedProjected"
-    )
-
+def test_default_data_sampler_config():
     data_cfg = OmegaConf.load(CONFIGS_DIR / "data" / "spatial_omics.yaml")
     assert data_cfg.sampler.name == "shadow_custom"

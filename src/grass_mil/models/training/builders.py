@@ -138,13 +138,39 @@ def resolve_encoder_cfg(
         num_embeddings, column_index = (
             infer_categorical_binding(module, label) if module is not None else (None, None)
         )
+        label_map = infer_categorical_label_map(module, label) if module is not None else None
         resolved = resolve_categorical_embedding_config(
             categorical_cfg,
             cardinalities={label: num_embeddings} if num_embeddings is not None else None,
             slices={label: column_index} if column_index is not None else None,
+            label_maps={label: label_map} if label_map else None,
         )
         cfg["categorical_embedding"] = asdict(resolved)
     return cfg
+
+
+def infer_categorical_label_map(
+    module: Optional[L.LightningModule], label: str
+) -> Optional[Dict[str, int]]:
+    """Return ``{category: code}`` for ``label`` from the attached datamodule, if any."""
+    if module is None:
+        return None
+    try:
+        trainer = module.trainer
+    except RuntimeError:
+        return None
+    if trainer is None or trainer.datamodule is None:
+        return None
+    dataset = getattr(trainer.datamodule, "dataset_train", None)
+    if dataset is None:
+        return None
+    inner = dataset
+    while not hasattr(inner, "label_maps") and hasattr(inner, "dataset"):
+        inner = inner.dataset
+    label_maps = getattr(inner, "label_maps", None)
+    if isinstance(label_maps, dict) and label in label_maps:
+        return {str(k): int(v) for k, v in label_maps[label].items()}
+    return None
 
 
 def build_supervised_components(

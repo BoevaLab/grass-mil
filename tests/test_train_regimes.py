@@ -9,7 +9,16 @@ from tests.helpers.config_paths import CONFIGS_DIR
 
 
 def _load_model_cfg(name: str):
-    return OmegaConf.load(CONFIGS_DIR / "model" / f"{name}.yaml")
+    # Model presets carry a defaults list (model/encoder, model/attention groups),
+    # so they must be composed through Hydra rather than loaded as plain YAML.
+    from hydra import compose, initialize_config_module
+    from hydra.core.global_hydra import GlobalHydra
+
+    GlobalHydra.instance().clear()
+    with initialize_config_module(version_base="1.3", config_module="grass_mil.configs"):
+        cfg = compose(config_name="train", overrides=[f"model={name}"])
+    GlobalHydra.instance().clear()
+    return cfg.model
 
 
 def _load_task_cfg(name: str):

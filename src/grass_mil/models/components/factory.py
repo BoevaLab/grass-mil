@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
+import torch
+
 from .attention import AttnNetGated, AttnNetGatedProjected
 from .backbones import EncoderConfig, GNNEncoder
 from .heads import GraphPredictionHead
@@ -67,8 +69,29 @@ def build_ssl(use_ssl: bool, encoder, ssl_config: Optional[Dict[str, Any]] = Non
     return BGRL(encoder=encoder, predictor=predictor)
 
 
+def _as_weight_tensor(value):
+    """Accept tensors, lists/tuples and OmegaConf sequences for loss weights."""
+    if value is None or isinstance(value, torch.Tensor):
+        return value
+    try:
+        from omegaconf import ListConfig, OmegaConf
+
+        if isinstance(value, ListConfig):
+            value = OmegaConf.to_container(value, resolve=True)
+    except ImportError:  # pragma: no cover
+        pass
+    if isinstance(value, (list, tuple)):
+        return torch.as_tensor([float(v) for v in value], dtype=torch.float32)
+    if isinstance(value, (int, float)):
+        return torch.as_tensor([float(value)], dtype=torch.float32)
+    raise TypeError(f"Loss weight must be a tensor or a sequence of floats, got {type(value)!r}.")
+
+
 def build_loss(loss_type: str, **kwargs):
     name = loss_type.lower()
+    for key in ("class_weight", "pos_weight"):
+        if key in kwargs:
+            kwargs[key] = _as_weight_tensor(kwargs[key])
     if name == "categorical_ce":
         return WeightedCrossEntropyLoss(**kwargs)
     if name == "categorical_bce":

@@ -38,18 +38,34 @@ class CategoricalEmbeddingConfig:
         reserve_unassigned: Reserve one extra row so augmentations can mark a
             dropped node as "unassigned" without resizing the table. The
             reserved code is the last row.
+        unassigned_label: Alternatively, name an EXISTING category (for example
+            ``"other"``) as the unassigned token; augmentations then write that
+            category's code instead of a reserved row. Resolved to
+            ``unassigned_index`` from the datamodule label map. Mutually
+            exclusive with ``reserve_unassigned``.
+        unassigned_index: Explicit code of the unassigned token (set directly,
+            or resolved from ``unassigned_label``).
     """
 
     label: str = "cell_type"
     num_embeddings: Optional[int] = None
     column_index: Optional[int] = None
     reserve_unassigned: bool = True
+    unassigned_label: Optional[str] = None
+    unassigned_index: Optional[int] = None
 
     @classmethod
     def from_dict(cls, cfg: Optional[Mapping[str, Any]]) -> Optional["CategoricalEmbeddingConfig"]:
         if cfg is None:
             return None
-        allowed = {"label", "num_embeddings", "column_index", "reserve_unassigned"}
+        allowed = {
+            "label",
+            "num_embeddings",
+            "column_index",
+            "reserve_unassigned",
+            "unassigned_label",
+            "unassigned_index",
+        }
         unknown = set(cfg) - allowed
         if unknown:
             raise ValueError(
@@ -72,13 +88,17 @@ class NodeInputEmbedding(nn.Module):
         input_dim: int,
         hidden_dim: int,
         categorical: Optional[CategoricalEmbeddingConfig] = None,
+        init: str = "default",
     ) -> None:
         super().__init__()
         if input_dim < 0:
             raise ValueError(f"input_dim must be >= 0, got {input_dim}.")
+        if init not in {"default", "xavier"}:
+            raise ValueError(f"init must be 'default' or 'xavier', got {init!r}.")
         self.input_dim = int(input_dim)
         self.hidden_dim = int(hidden_dim)
         self.categorical = categorical
+        self.init = init
 
         if self.input_dim == 0:
             # Cell-type-only cohorts: precompute emits an empty feature matrix
@@ -111,6 +131,15 @@ class NodeInputEmbedding(nn.Module):
                 raise ValueError(
                     f"categorical.num_embeddings must be >= 1, got {categorical.num_embeddings}."
                 )
+            if categorical.reserve_unassigned and (
+                categorical.unassigned_label is not None
+                or categorical.unassigned_index is not None
+            ):
+                raise ValueError(
+                    "categorical.reserve_unassigned=True cannot be combined with "
+                    "unassigned_label/unassigned_index: either reserve an extra row or name an "
+                    "existing category as the unassigned token."
+                )
             num_rows = int(categorical.num_embeddings) + int(categorical.reserve_unassigned)
             self.embedding = nn.Embedding(num_rows, self.hidden_dim)
             self._column_index = (
@@ -122,6 +151,30 @@ class NodeInputEmbedding(nn.Module):
                 )
             if categorical.reserve_unassigned:
                 self._unassigned_index = num_rows - 1
+            elif categorical.unassigned_index is not None:
+                idx = int(categorical.unassigned_index)
+                if idx < 0 or idx >= num_rows:
+                    raise ValueError(
+                        f"categorical.unassigned_index={idx} is out of range for an embedding "
+                        f"with {num_rows} rows."
+                    )
+                self._unassigned_index = idx
+            elif categorical.unassigned_label is not None:
+                raise ValueError(
+                    f"categorical.unassigned_label={categorical.unassigned_label!r} was not "
+                    "resolved to a code; use resolve_categorical_embedding_config with the "
+                    "datamodule label map, or set unassigned_index."
+                )
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        if self.init == "xavier":
+            if self.embedding is not None:
+                nn.init.xavier_uniform_(self.embedding.weight)
+            if isinstance(self.linear, nn.Linear):
+                # Weight only, as in the reference implementation; the bias keeps
+                # the torch default.
+                nn.init.xavier_uniform_(self.linear.weight)
 
     @property
     def unassigned_index(self) -> Optional[int]:
@@ -182,11 +235,13 @@ def resolve_categorical_embedding_config(
     *,
     cardinalities: Optional[Dict[str, int]] = None,
     slices: Optional[Mapping[str, int]] = None,
+    label_maps: Optional[Mapping[str, Mapping[str, int]]] = None,
 ) -> Optional[CategoricalEmbeddingConfig]:
-    """Fill in vocabulary size and column index from datamodule metadata.
+    """Fill in vocabulary size, column index and unassigned code from datamodule metadata.
 
     Explicit config values always win; ``None`` triggers inference, mirroring
-    the ``encoder.input_dim`` contract.
+    the ``encoder.input_dim`` contract. ``label_maps`` (``{label: {category: code}}``)
+    is used to turn ``unassigned_label`` into ``unassigned_index``.
     """
     resolved = CategoricalEmbeddingConfig.from_dict(cfg)
     if resolved is None:
@@ -205,9 +260,21 @@ def resolve_categorical_embedding_config(
             f"'{resolved.label}'. Set model.encoder.categorical_embedding.num_embeddings "
             "explicitly, or include the label in data.categorical_features.include_labels."
         )
+    unassigned_index = resolved.unassigned_index
+    if unassigned_index is None and resolved.unassigned_label is not None:
+        mapping = (label_maps or {}).get(resolved.label)
+        if not mapping or resolved.unassigned_label not in mapping:
+            raise ValueError(
+                f"categorical.unassigned_label={resolved.unassigned_label!r} is not a category "
+                f"of '{resolved.label}'. Known categories: "
+                f"{sorted(mapping) if mapping else 'none (no label map available)'}."
+            )
+        unassigned_index = int(mapping[resolved.unassigned_label])
     return CategoricalEmbeddingConfig(
         label=resolved.label,
         num_embeddings=int(num_embeddings),
         column_index=None if column_index is None else int(column_index),
         reserve_unassigned=resolved.reserve_unassigned,
+        unassigned_label=resolved.unassigned_label,
+        unassigned_index=unassigned_index,
     )

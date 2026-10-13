@@ -44,6 +44,11 @@ class EncoderConfig:
     # `edge_attr_dim` is 1. Leave unset to pass the whole edge_attr vector.
     edge_feature_index: Optional[int] = None
     categorical_embedding: Optional[Dict[str, Any]] = None
+    # GIN/GINE epsilon: learnable (the GRASS-MIL preprint trains it) or fixed at 0.
+    train_eps: bool = True
+    # Initialisation of the input projection (embedding table + linear): "default"
+    # keeps the torch defaults, "xavier" applies xavier_uniform_ to both (preprint).
+    input_init: Literal["default", "xavier"] = "xavier"
 
 
 def _get_activation(name: str) -> nn.Module:
@@ -82,6 +87,7 @@ class GNNEncoder(nn.Module):
             input_dim=cfg.input_dim,
             hidden_dim=cfg.hidden_dim,
             categorical=CategoricalEmbeddingConfig.from_dict(cfg.categorical_embedding),
+            init=cfg.input_init,
         )
 
         self.layers = nn.ModuleList([self._build_conv_layer() for _ in range(cfg.num_layers)])
@@ -113,7 +119,7 @@ class GNNEncoder(nn.Module):
                 nn.ReLU(),
                 nn.Linear(hdim * 2, hdim),
             )
-            return GINConv(mlp)
+            return GINConv(mlp, train_eps=self.cfg.train_eps)
         if ctype == "gcn":
             return GCNConv(hdim, hdim, add_self_loops=True, normalize=True)
         if ctype == "gat":
@@ -138,7 +144,7 @@ class GNNEncoder(nn.Module):
                 nn.ReLU(),
                 nn.Linear(hdim * 2, hdim),
             )
-            return GINEConv(mlp, edge_dim=self.cfg.edge_attr_dim)
+            return GINEConv(mlp, edge_dim=self.cfg.edge_attr_dim, train_eps=self.cfg.train_eps)
         raise ValueError(f"Unsupported conv_type: {ctype}")
 
     def _supports_edge_attr(self) -> bool:
