@@ -45,8 +45,8 @@ NSCLC runs (private data; the converter lives outside the repository):
 | Check | Reference | Public package | Status |
 |---|---|---|---|
 | Frozen embeddings of three cores (per-cell cosine with the reference fp16 cache; 875-5150 cells each) | 1.0 | median 0.993-0.995, minimum 0.97, 91-95 % of cells >= 0.99 | passed |
-| Probe region AUROC, outer fold 2, inner fold 0 (validation regions) | 0.482 | 0.471 | passed (within 0.02) |
+| Probe region AUROC, outer fold 2: inner folds 0 / 1 / 2 and refit (scored on the held-out fold) | 0.482 / 0.304 / 0.564 / 0.661 | 0.471 / 0.354 / 0.555 / 0.685 | passed (max deviation 0.05 on inner fold 1, 0.024 on the refit) |
 | Held-out AUROC, `linear_ftall_reg`, outer fold 2 | 0.664 | pending | |
-| Held-out AUROC, `linear_probehead`, outer fold 2 | 0.627 | pending | |
+| Held-out AUROC, `linear_probehead`, outer fold 2 (inner best epochs, refit length E) | 0.627 (10 / 14 / 1, E = 10) | 0.665 (16 / 15 / 1, E = 15) | deviation 0.038, slightly above the 0.03 target; single-seed runs on 86 held-out regions (bootstrap CI about +/- 0.12) |
 | Niches of fold 2: cluster count, noise, Spearman(emp, relattn) | reference report | pending | |
-| Neighbourhood-enrichment z-scores vs the reference table (Spearman over pairs) | > 0.9 | pending | |
+| Neighbourhood-enrichment z-scores on all 426 cores (numpy backend, 200 permutations) vs the reference squidpy table: Spearman of the patient-mean z per group pair, 225 pairs | > 0.9 | 0.984 (STAS+) and 0.977 (STAS-); the same six pairs lead the ranked test table | passed |
