@@ -154,7 +154,7 @@ def test_spatial_stats_cli_finds_planted_niche(cache_dir, tmp_path):
             "crossk.radii=[30,60]",
         ],
     )
-    res = run(cfg)
+    run(cfg)
     out = tmp_path / "spatial"
     for name in (
         "nhood_tests.csv",

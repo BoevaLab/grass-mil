@@ -139,11 +139,11 @@ def test_identity_residual_from_bag_table():
     bag_rows = []
     for b in range(3):
         n = 10
-        l = rng.normal(size=(n, 2))
+        lg = rng.normal(size=(n, 2))
         a_logit = rng.normal(size=(n, 2))
         a = np.exp(a_logit - a_logit.max(0))
         a /= a.sum(0)
-        L = (a * l).sum(0)
+        L = (a * lg).sum(0)
         bag_rows.append({"bag_id": f"b{b}", "logit_0": L[0], "logit_1": L[1]})
         for i in range(n):
             rows.append(
@@ -151,8 +151,8 @@ def test_identity_residual_from_bag_table():
                     "bag_id": f"b{b}",
                     "attention_c0": a[i, 0],
                     "attention_c1": a[i, 1],
-                    "logit_0": l[i, 0],
-                    "logit_1": l[i, 1],
+                    "logit_0": lg[i, 0],
+                    "logit_1": lg[i, 1],
                 }
             )
     table = pd.DataFrame(rows)

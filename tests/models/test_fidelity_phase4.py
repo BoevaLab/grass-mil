@@ -46,11 +46,6 @@ def test_merge_units_sampler_mixes_regions_and_covers_all_roots():
     assert len(loader) == int(np.ceil(120 / 32))
     batches = list(loader)
     assert len(batches) == len(loader)
-    roots = (
-        torch.cat([b.root_n_id.view(-1) for b in batches])
-        if hasattr(batches[0], "root_n_id")
-        else None
-    )
     n_graphs = sum(int(b.ptr.numel() - 1) for b in batches)
     assert n_graphs == 120  # every root of every unit exactly once
     # A full-size batch spans more than one unit: units are pooled, not iterated.

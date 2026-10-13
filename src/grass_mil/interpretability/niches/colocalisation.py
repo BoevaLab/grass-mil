@@ -12,8 +12,8 @@ __all__ = ["cluster_colocalisation"]
 def cluster_colocalisation(
     labels: np.ndarray, edge_index: np.ndarray
 ) -> Tuple[np.ndarray, List[int]]:
-    """``log2((O + 1) / (E + 1))`` with ``E_ab = d_a d_b / sum(d)`` from the
-    symmetrised cluster-cluster edge count matrix ``O`` (noise cells ignored)."""
+    """``log2((observed + 1) / (E + 1))`` with ``E_ab = d_a d_b / sum(d)`` from the
+    symmetrised cluster-cluster edge count matrix ``observed`` (noise cells ignored)."""
     labels = np.asarray(labels).astype(int)
     ei = np.asarray(edge_index).astype(int)
     la, lb = labels[ei[0]], labels[ei[1]]
@@ -22,13 +22,13 @@ def cluster_colocalisation(
     clusters = sorted(set(labels.tolist()) - {-1})
     idx = {c: i for i, c in enumerate(clusters)}
     n = len(clusters)
-    O = np.zeros((n, n))
+    observed = np.zeros((n, n))
     if la.size:
         ia = np.vectorize(idx.get)(la)
         ib = np.vectorize(idx.get)(lb)
-        np.add.at(O, (ia, ib), 1)
-    O = O + O.T
-    deg = O.sum(axis=1)
+        np.add.at(observed, (ia, ib), 1)
+    observed = observed + observed.T
+    deg = observed.sum(axis=1)
     total = deg.sum()
-    E = np.outer(deg, deg) / total if total > 0 else np.zeros_like(O)
-    return np.log2((O + 1.0) / (E + 1.0)), clusters
+    expected = np.outer(deg, deg) / total if total > 0 else np.zeros_like(observed)
+    return np.log2((observed + 1.0) / (expected + 1.0)), clusters
