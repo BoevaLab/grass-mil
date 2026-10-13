@@ -142,15 +142,29 @@ def _split_hash(train_ids: Sequence[str], cfg: DictConfig) -> str:
     return h.hexdigest()[:10]
 
 
+def _id_kind(cfg: DictConfig) -> str:
+    kind = str(cfg.nested_cv.get("id_kind", "region")).lower()
+    if kind not in {"region", "sample", "patch"}:
+        raise ValueError("nested_cv.id_kind must be region, sample or patch")
+    return kind
+
+
 def _with_split(cfg: DictConfig, *, train_ids, val_ids, test_ids, output_dir: Path) -> DictConfig:
     fold_cfg = copy.deepcopy(cfg)
+    kind = _id_kind(cfg)
     with open_dict(fold_cfg):
         fold_cfg.data.split.explicit = {
             "train": [str(r) for r in train_ids],
             "val": [str(r) for r in val_ids],
             "test": [str(r) for r in test_ids],
-            "id_kind": "region",
+            "id_kind": kind,
         }
+        if kind == "patch":
+            fold_cfg.task.bag_key = "patch_id"
+            fold_cfg.data.graph_labels.scope = "patch"
+        elif kind == "sample":
+            fold_cfg.task.bag_key = "sample_id"
+            fold_cfg.data.graph_labels.scope = "sample"
         fold_cfg.paths.output_dir = str(output_dir)
         fold_cfg.trainer.default_root_dir = str(output_dir)
     return fold_cfg
@@ -398,6 +412,11 @@ def run_nested_cv(cfg: DictConfig) -> Dict[str, Any]:
         )
         preds = _read_test_predictions(outer_dir / "refit")
         preds.insert(0, "outer", i)
+        kind = _id_kind(cfg)
+        if kind != "region":
+            # the bag id is the unit id (patch or sample); keep it in region_id
+            # so every downstream table has one id column
+            preds["region_id"] = preds["bag_id"].astype(str)
         preds["patient_id"] = [table.group_of(r) for r in preds["region_id"].astype(str)]
         preds.to_csv(outer_dir / "oof_predictions.csv", index=False)
         score_col = "prob_class_1" if "prob_class_1" in preds.columns else None

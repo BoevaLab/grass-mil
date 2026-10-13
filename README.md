@@ -1,198 +1,181 @@
-# grass-mil
+# GRASS-MIL: graph-based representation and discovery of phenotype-associated spatial structures with multiple instance learning
 
-Geometric deep learning framework for spatial omics data, built around a Hydra-configured pipeline from raw cell tables to graph-level training and evaluation.
+[![Preprint](https://img.shields.io/badge/bioRxiv-10.64898%2F2026.10.08.757722-b31b1b)](https://www.biorxiv.org/content/10.64898/2026.10.08.757722v1)
+[![Tests](https://github.com/BoevaLab/grass-mil/actions/workflows/test.yml/badge.svg)](https://github.com/BoevaLab/grass-mil/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+![Python](https://img.shields.io/badge/python-%E2%89%A53.11-blue)
 
-## Project Purpose And Architecture
+GRASS-MIL predicts a patient- or region-level phenotype from cell-resolved
+spatial omics data (multiplexed imaging, spatial transcriptomics with cell
+types) and tells you *which spatial structures* carry the prediction. It
+represents every cell by its spatial neighbourhood, learns those
+representations without labels, pools them with per-class attention into a
+bag prediction whose every logit is an exact sum of per-cell contributions,
+and turns the contributions into **niches**: recurrent cellular
+neighbourhoods with an association to the phenotype and an attribution by
+the model, checked for replication across cross-validation folds.
 
-`grass-mil` provides a configurable end-to-end workflow for:
+This repository is the public implementation accompanying the preprint:
 
-1. Loading spatial omics data (`csv`/`tsv`, `h5ad`, `SingleCellExperiment`/`rds`)
-2. Building graph units (tiling/polygon patches + PyG graphs)
-3. Running supervised training (mean aggregation or MIL attention)
-4. Running self-supervised pretraining (BGRL)
-5. Evaluating checkpoints with reproducible Hydra config composition
+> Rabuzin L, Yates J, Xu M, Boeva V. *GRASS-MIL: graph-based representation
+> and discovery of phenotype-associated spatial structures with multiple
+> instance learning.* bioRxiv (2026).
+> doi: [10.64898/2026.10.08.757722](https://www.biorxiv.org/content/10.64898/2026.10.08.757722v1)
 
-Core architecture:
+## The method in one paragraph
 
-- Data pipeline: `src/grass_mil/data/` + `configs/data/`
-- Model/runtime pipeline: `src/grass_mil/models/` + `configs/model/` + `configs/task/`
-- Interpretability pipeline: `src/grass_mil/interpretability/` + `configs/interpretability/`
-- Entrypoints: `src/grass_mil/train.py`, `src/grass_mil/eval.py`
-- Configuration system: `configs/` (Hydra groups)
+Cells of a region form a Delaunay graph whose edges carry the bounded log
+edge length. A GINE graph network encodes the *k*-hop ego-graph around every
+cell (4 hops, width 256 by default) and is pretrained with BGRL on all regions,
+label-free. For prediction, the ego-graphs of a region are the instances of
+one bag: an instance head gives per-class logits, a projected gated attention
+net gives per-class weights, and the bag logit is `L_c = sum_i A[i,c] * l[i,c]`
+(logit-space pooling), so every cell's contribution `A[i,c] (l[i,c] - b_c)` is
+exact rather than approximated. Fine-tuning regimes range from attention-only
+on a frozen encoder with a probe-fitted linear head to end-to-end fine-tuning.
+Evaluation is a nested, patient-grouped cross-validation. Interpretation
+clusters the held-out cells of each fold model in its own embedding space
+(cosine HDBSCAN by default), scores every cluster by its empirical association
+and its attention-weighted margin, and matches clusters across folds into
+metaclusters that replicate. Every setting above is a default of a Hydra
+config, not a constant: depth, width, ego-graph hops, node and edge features,
+attention sizes, learning rates, bag sizes, schedules, augmentations, fold
+counts and clustering settings are all overridable from the command line.
 
-## Interpretability
-
-`grass-mil` includes a first-class interpretability suite:
-
-- parameterized dimensionality reduction (`pca`, `umap`, `tsne`)
-- parameterized clustering (`kmeans`, `agglomerative`, `hdbscan`, `spectral`, `optics`, `dbscan`)
-- core (composition-based) and tier-2 (spatial) analyses via a plugin registry
-- report generation to interactive Plotly HTML and static PDF (Playwright)
-
-Quick run:
+## Install
 
 ```bash
-grass-mil-report \
-  data.instance_table=/absolute/path/to/instance_table.csv \
-  data.spatial_table=/absolute/path/to/spatial_table.csv
-```
-
-## Start Here
-
-### 1) Install
-
-```bash
-git clone git@github.com:BoevaLab/grass-mil.git
+git clone https://github.com/BoevaLab/grass-mil.git
 cd grass-mil
-python -m venv .venv
-source .venv/bin/activate
-
-# Editable install for development; drop -e for a plain install.
-pip install -e .
-
-# Optional extras: interpretability plots, report rendering, spatial statistics,
-# and the h5ad/SingleCellExperiment readers.
-pip install -e ".[interpretability,report,spatial-stats,io]"
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[interpretability,io,stats,plots]"
 ```
 
-Installing exposes the CLI entrypoints (`grass-mil-train`, `grass-mil-eval`,
-`grass-mil-loocv`, `grass-mil-predict`, `grass-mil-report`). The Hydra config
-tree ships inside the package, so it resolves from any working directory.
+`torch-geometric` needs the compiled `torch-sparse` / `torch-scatter` wheels
+matching your PyTorch build for the ego-graph sampler (see
+[`.github/workflows/test.yml`](.github/workflows/test.yml) for the exact pip
+lines used in CI, or use [`environment.yaml`](environment.yaml) with conda).
+Extras: `interpretability` (UMAP, plotly, matplotlib), `io` (h5ad, polygons),
+`stats` (statsmodels), `plots`, `report` (PDF rendering), `spatial-stats`
+(squidpy backend), `sce` (R inputs).
 
-Hydra's `paths.root_dir` defaults to the `PROJECT_ROOT` environment variable
-when set (`rootutils` exports it automatically from the `.project-root` marker
-in a source checkout) and otherwise falls back to the current working
-directory. Set it explicitly to place `data/` and `logs/` elsewhere:
+Installing exposes the CLI entry points below; the Hydra config tree ships
+inside the package, so every command works from any directory.
+
+## Quick start (public demo data, CPU, a few minutes)
+
+The vignettes run the whole chain on `squidpy.datasets.mibitof()` (three
+MIBI-TOF images, ~3,300 cells):
 
 ```bash
-export PROJECT_ROOT=/path/to/your/workspace
+pip install squidpy jupyter
+jupyter lab vignettes/
 ```
 
-### 2) Prepare New Data
+1. [`01_anndata_to_spatial_graphs.ipynb`](vignettes/01_anndata_to_spatial_graphs.ipynb): AnnData -> manifest -> cellular graphs.
+2. [`02_pretraining_and_niches.ipynb`](vignettes/02_pretraining_and_niches.ipynb): BGRL pretraining (`experiment=grass_mil_pretrain_a3`), fine-tuning (`regime=mil`), instance export, interpretability report.
+3. [`03_nested_cv_niches_and_metaclusters.ipynb`](vignettes/03_nested_cv_niches_and_metaclusters.ipynb): nested CV, cell extraction, niches, metaclusters, scores, spatial statistics.
 
-Create a raw manifest at `data/raw/manifest.csv` (or override `data.raw_manifest_path`) with at least:
+## Workflows
 
-- `sample_id`
-- `input_path`
-- `input_type`
+Inputs are a manifest CSV (`sample_id,input_path,input_type[,region_id,polygons_path]`),
+per-sample cell tables (CSV/TSV, h5ad, SingleCellExperiment), a label CSV with a
+unit-id column, a target column and a patient column, and a fold file (JSON list
+of lists of unit ids). See [`docs/dataset_preparation.md`](docs/dataset_preparation.md).
 
-Optional:
-
-- `region_id`
-- `polygons_path`
-
-For the full onboarding checklist and dataset schema details, see
-[`docs/dataset_preparation.md`](docs/dataset_preparation.md).
-
-### 3) Run Default Supervised Pipeline
-
-```bash
-grass-mil-train task=finetune_mean model=supervised_module data=spatial_omics
-```
-
-### 4) Evaluate A Checkpoint
-
-```bash
-grass-mil-eval \
-  ckpt_path=/absolute/path/to/checkpoint.ckpt \
-  task=finetune_mean \
-  model=supervised_module \
-  data=spatial_omics
-```
-
-## Documentation Index
-
-- Worked examples on a public dataset: [`vignettes/`](vignettes/README.md)
-- Full tracked-file map: [`docs/repository_map.md`](docs/repository_map.md)
-- Dataset onboarding and preparation checklist: [`docs/dataset_preparation.md`](docs/dataset_preparation.md)
-- End-to-end workflows (new data, SSL pretrain->finetune, model adjustments, inference): [`docs/workflows_train_infer.md`](docs/workflows_train_infer.md)
-- Inference utility suite (prediction artifacts, metrics, embeddings): [`docs/inference_utility_suite.md`](docs/inference_utility_suite.md)
-- Interpretability suite architecture and usage: [`docs/interpretability_suite.md`](docs/interpretability_suite.md)
-- Interpretability extension guide (plugins/new analyses): [`docs/interpretability_extension_guide.md`](docs/interpretability_extension_guide.md)
-- Exhaustive hyperparameter reference for repo configs: [`docs/hyperparameter_reference.md`](docs/hyperparameter_reference.md)
-- Capability modes and operational options: [`docs/capabilities_and_modes.md`](docs/capabilities_and_modes.md)
-- Existing model contracts: [`docs/model_component_contracts.md`](docs/model_component_contracts.md)
-
-## Supported Training/Inference Modes
-
-| Mode | Task Config | Model Config | Entrypoint | Primary Output |
+| Step | Command | Preset / keys | Outputs | Doc |
 |---|---|---|---|---|
-| Supervised mean aggregation | `task=finetune_mean` | `model=supervised_module` | `src/grass_mil/train.py` | Region/sample-level logits via mean bag aggregation |
-| Supervised MIL attention | `task=finetune_mil` | `model=supervised_module` | `src/grass_mil/train.py` | Per-class attention-weighted bag logits |
-| Cox survival with MIL | `task=finetune_survival` | `model=supervised_module` | `src/grass_mil/train.py` | Scalar log-hazard per bag, scored by c-index |
-| SSL pretraining (BGRL) | `task=pretrain_bgrl` | `model=bgrl_module` | `src/grass_mil/train.py` | BGRL-pretrained encoder checkpoint |
-| Checkpoint evaluation | any compatible task/model | matching training stack | `src/grass_mil/eval.py` | Test metrics from selected checkpoint |
-| Advanced prediction (Python API) | compatible with `SupervisedModule.predict_step` | `model=supervised_module` | `Trainer.predict(...)` | `bag_ids`, `bag_logits`, `row_region_ids`, `row_sample_ids`, optional `bag_targets`, optional `bag_attention`, optional `instance_*`, optional `embedding_*` |
+| Build graphs | `grass-mil-train data=... +trainer.fast_dev_run=true` (or any run) | `data.graph_builder.kwargs.edge_features=[log_distance,neighbor]`, `data.sample_unit=full` | `processed_index.json`, graph `.pt` files | [dataset_preparation](docs/dataset_preparation.md) |
+| Pretrain the encoder | `grass-mil-train experiment=grass_mil_pretrain_a3 data=...` | `model=bgrl_a3`, `task=pretrain_bgrl_a3`, `data/sampler=ego_graph_pretrain` | `checkpoints/last.ckpt` | [workflows](docs/workflows_train_infer.md) |
+| Fine-tune one split | `grass-mil-train regime=mil data=... model.init_from_ckpt=...` | `regime=mil|mil_frozen|linear_probehead|linear_ftall|linear_ftall_reg`, `data.split.explicit.*` | checkpoints, `metrics_per_epoch.jsonl`, `test_predictions.csv` | [nested_cv](docs/nested_cv.md) |
+| Probe head | `grass-mil-probe regime=linear_probehead data=...` | `probe.*` | `probe_head.pt` | [nested_cv](docs/nested_cv.md) |
+| Nested cross-validation | `grass-mil-nested-cv regime=... nested_cv.folds_file=folds.json` | `nested_cv.*` | `nested_cv_summary.json`, `oof_predictions.csv`, `oof_patient_predictions.csv` | [nested_cv](docs/nested_cv.md) |
+| Predict / aggregate | `grass-mil-predict ckpt_path=... regime=...` | `aggregation.bag_scope=patient aggregation.mode=mean_probability|attention_weighted` | `predictions.csv`, `metrics.json`, instance tables | [inference](docs/inference_utility_suite.md) |
+| Extract cells | `grass-mil-extract regime=... extract.nested_cv_summary=...` | `extract.*` | `cells/<model>/<region>.npz` | [niche_discovery](docs/niche_discovery.md) |
+| Niches of one model | `grass-mil-niches cells_dir=cells/fold2` | `reduction.*`, `clustering.*`, `sample_size`, `assign_k` | `clusters.csv`, `cells.csv`, `report.md`, figures | [niche_discovery](docs/niche_discovery.md) |
+| Cross-fold replication | `grass-mil-metaclusters cells_dir=cells labels.label_file=...` | `stage`, `match.*`, `transfer.*`, `basis.*` | `metaclusters.csv`, patient shares and tests, transfer and basis reports | [niche_discovery](docs/niche_discovery.md) |
+| Evaluation statistics | `grass-mil-scores input=oof_predictions.csv` | `scores`, `strata`, `operating_rules` | AUROC CIs, DeLong, operating points | [evaluation_stats](docs/evaluation_stats.md) |
+| Classical spatial statistics | `grass-mil-spatial-stats cells_dir=... reference=[tumor]` | `analyses`, `group_map`, `nhood.*`, `cn.*`, `crossk.*` | neighbourhood enrichment, cellular neighbourhoods, contacts, cross-K tests | [spatial_statistics](docs/spatial_statistics.md) |
+| Interpretability report | `grass-mil-report data.instance_table=...` | `clustering.*`, plugins | HTML / PDF report | [interpretability_suite](docs/interpretability_suite.md) |
 
-## Required Inputs (Manifest Summary)
+## Running the analyses of the preprint
 
-Default data config expects:
+The preprint's numbers come from this chain with the default settings:
 
-- Manifest path: `${paths.data_dir}/raw/manifest.csv`
-- Processed output dir: `${paths.data_dir}/processed/spatial_omics`
+1. graphs with `edge_features=[log_distance,neighbor]` and the cohort's native
+   coordinate units (`neighbor_cutoff_um` is the contact distance in those units);
+2. `experiment=grass_mil_pretrain_a3` on every region, label-free;
+3. `grass-mil-nested-cv` with patient-grouped outer folds, inner `k=3`, the
+   regimes `linear_probehead` ("probehead"), `linear_ftall` ("ftALL"),
+   `linear_ftall_reg` ("ftALL, lr x0.3 + regularisation") and `mil`;
+   out-of-fold region scores, patient scores as the mean of a patient's regions
+   (merged bags via `grass-mil-predict`);
+4. `grass-mil-scores` for bootstrap intervals, per-fold means, DeLong
+   comparisons and operating points;
+5. `grass-mil-extract` of the fold refits, `grass-mil-niches` on each model's
+   held-out cells (PCA-10, L2, HDBSCAN mcs 300 / min_samples 1 / eom, 15-NN
+   assignment), `grass-mil-metaclusters` (Hellinger matching with cannot-link
+   within fold, transfer to all regions, shared k-means basis);
+6. `grass-mil-spatial-stats` for the model-free comparison.
 
-Manifest columns (defaults from `configs/data/spatial_omics.yaml`):
+[`docs/method_correspondence.md`](docs/method_correspondence.md) maps every
+section of the preprint to the preset, module and test that implements it and
+records the validation against the original runs.
 
-| Column | Required | Meaning |
-|---|---|---|
-| `sample_id` | yes | Logical sample identifier |
-| `input_path` | yes | Path to raw input table/file |
-| `input_type` | yes | One of `csv`, `tsv`, `h5ad`, `sce`, `rds` |
-| `region_id` | no | Region/group identifier for bagging/label scopes |
-| `polygons_path` | no | Polygon definitions for patch extraction/filtering |
-
-See full input contracts and file examples in [`docs/workflows_train_infer.md`](docs/workflows_train_infer.md).
-
-## Common Command Patterns (Hydra Overrides)
-
-### Switch aggregation regime
-
-```bash
-grass-mil-train task=finetune_mean model=supervised_module
-grass-mil-train task=finetune_mil model=supervised_module
-```
-
-### Run SSL pretraining
-
-```bash
-grass-mil-train task=pretrain_bgrl model=bgrl_module
-```
-
-### Change backbone
+### Changing the defaults
 
 ```bash
-grass-mil-train task=finetune_mil model=supervised_module \
-  model.encoder.conv_type=gine \
-  model.encoder.use_edge_attr=true \
-  model.encoder.edge_attr_dim=2
+# shallower encoder, 3-hop ego-graphs, cell type only (no size feature)
+grass-mil-nested-cv regime=mil model.encoder.num_layers=3 model.encoder.hidden_dim=128 \
+  model.encoder.out_dim=128 data.sampler.runtime.depth=3 data.csv.molecular_columns=[] ...
+
+# radius-capped ego-graphs and a different contact distance
+grass-mil-train regime=mil data.sampler.runtime.ego_radius.enabled=true \
+  data.sampler.runtime.ego_radius.radius_per_hop=30 data.graph_builder.kwargs.neighbor_cutoff_um=25 ...
+
+# more roots per bag, longer schedule, five inner folds
+grass-mil-nested-cv regime=linear_ftall data.sampler.runtime.subsample_count=512 \
+  trainer.max_epochs=40 nested_cv.inner_k=5 ...
+
+# niches with k-means instead of HDBSCAN, 20 PCs, no sampling
+grass-mil-niches cells_dir=... clustering.method=kmeans clustering.n_clusters=12 \
+  reduction.n_components=20 sample_size=null
 ```
 
-### Force data re-precompute
+Every key is documented in [`docs/hyperparameter_reference.md`](docs/hyperparameter_reference.md).
 
-```bash
-grass-mil-train data.force_precompute=true
+## Documentation
+
+- [Dataset preparation](docs/dataset_preparation.md): manifest, inputs, labels, patient column, fold files
+- [Training and inference workflows](docs/workflows_train_infer.md)
+- [Nested cross-validation and regimes](docs/nested_cv.md)
+- [Niche discovery and cross-fold replication](docs/niche_discovery.md)
+- [Evaluation statistics](docs/evaluation_stats.md)
+- [Classical spatial statistics](docs/spatial_statistics.md)
+- [Inference utility suite](docs/inference_utility_suite.md)
+- [Interpretability report suite](docs/interpretability_suite.md) and [extension guide](docs/interpretability_extension_guide.md)
+- [Hyperparameter reference](docs/hyperparameter_reference.md)
+- [Capabilities and modes](docs/capabilities_and_modes.md)
+- [Model component contracts](docs/model_component_contracts.md)
+- [Method correspondence with the preprint](docs/method_correspondence.md)
+- [Repository map](docs/repository_map.md)
+
+## Citation
+
+```bibtex
+@article{rabuzin2026grassmil,
+  title   = {GRASS-MIL: graph-based representation and discovery of phenotype-associated spatial structures with multiple instance learning},
+  author  = {Rabuzin, Lovro and Yates, Josephine and Xu, Mina and Boeva, Valentina},
+  journal = {bioRxiv},
+  year    = {2026},
+  doi     = {10.64898/2026.10.08.757722},
+  url     = {https://www.biorxiv.org/content/10.64898/2026.10.08.757722v1}
+}
 ```
 
-### Resume training
+A machine-readable citation is in [`CITATION.cff`](CITATION.cff).
 
-```bash
-grass-mil-train ckpt_path=/absolute/path/to/last.ckpt
-```
+## License and contact
 
-## Where Outputs Go
-
-Hydra runtime outputs:
-
-- Run logs and artifacts: `${paths.log_dir}/${task_name}/runs/<timestamp>/`
-- Multiruns: `${paths.log_dir}/${task_name}/multiruns/<timestamp>/<job_num>/`
-- Checkpoints (default callback): `${paths.output_dir}/checkpoints/`
-
-Data precompute outputs:
-
-- Graph files: `${data.processed_dir}/graphs/.../*.pt`
-- Index: `${data.processed_dir}/processed_index.json`
-- Metadata: `${data.processed_dir}/metadata.json`
-
-## Detailed documentation
-
-All currently supported capabilities are documented in [`docs/workflows_train_infer.md`](docs/workflows_train_infer.md), [`docs/hyperparameter_reference.md`](docs/hyperparameter_reference.md), and [`docs/capabilities_and_modes.md`](docs/capabilities_and_modes.md).
+MIT license. Questions and issues: open a GitHub issue, or contact the Boeva
+lab (Department of Computer Science, ETH Zurich).

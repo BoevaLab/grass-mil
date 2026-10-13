@@ -123,6 +123,7 @@ def run_extract(cfg: DictConfig) -> Dict[str, Any]:
             autocast=bool(ecfg.get("autocast", True)),
             device=device,
             resume=bool(ecfg.get("resume", True)),
+            unit_id=str(ecfg.get("unit_id", "auto")),
             log=log,
         )
         written.append(str(model_dir))

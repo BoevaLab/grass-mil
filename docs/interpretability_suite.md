@@ -107,8 +107,9 @@ Common optional columns:
 - `score_mode=softmax`: `score = softmax(logits)[score_logit_index]`
 - defaults (`sigmoid`, index `0`) keep notebook-era binary classification parity.
 - for survival/hazard-style interpretation, prefer `score_mode=identity`.
-- `instance_attention_logits` export requires shape `(N, 1)`; multi-column attention logits are
-  rejected as ambiguous.
+- `instance_attention_logits` with one column per class are exported as
+  `attention_c<k>` (within-bag softmax) and `attention_logit_c<k>` (raw) columns;
+  `attention` holds the canonical class (`attention_class_index`, default the last).
 
 Note: `niche_profiles` requires `comp_*` columns.
 There is no fallback to one-hot `cell_type` composition.
@@ -697,10 +698,20 @@ The *algorithm* is still clustering, so `run_clustering`, `ClusteringResult` and
 the sklearn parameters (`n_clusters`, `min_cluster_size`) keep their names. The
 distinction is deliberate: those are the method, the niches are the result.
 
+The report's clustering step also accepts the GRASS-MIL recipe used by
+`grass-mil-niches`: `clustering.sample_size` (fit on a random sample),
+`clustering.l2_normalise` (cluster on L2-normalised coordinates, i.e. cosine
+geometry) and `clustering.assign_k` (k-NN assignment of the remaining instances).
+The margin attribution plugin checks the additive identity against the bag
+logits of `data.bag_table` (`grass-mil-predict` predictions) and reports the
+residual.
+
 ## What the tier-2 statistics are computed over
 
-Every tier-2 analysis runs on the **instance graph**, not on the cell graph.
-Confusing the two makes the results easy to over-read, so be explicit about it:
+The instance-level tier-2 analyses run on the **instance graph**; the cell-level
+analyses (next section) run on the cell graph when `data.cell_table` and
+`data.cell_edge_table` are given. Confusing the two makes the results easy to
+over-read, so be explicit about it:
 
 - A row of `instance_table` is one **k-hop ego-graph**, rooted at one cell.
 - An edge in `spatial_table` connects two **instances**, i.e. two roots.

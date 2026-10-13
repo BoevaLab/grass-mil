@@ -145,6 +145,8 @@ dmypy.json
 
 # Lightning-Hydra-Template
 configs/local/default.yaml
+src/grass_mil/configs/local/*.yaml
+!src/grass_mil/configs/local/.gitkeep
 /data/
 /logs/
 .env

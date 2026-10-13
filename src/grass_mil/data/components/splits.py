@@ -33,7 +33,7 @@ class ExplicitSplit:
     train: List[str] = field(default_factory=list)
     val: List[str] = field(default_factory=list)
     test: List[str] = field(default_factory=list)
-    id_kind: str = "region"  # region | sample
+    id_kind: str = "region"  # region | sample | patch
 
     @classmethod
     def from_dict(cls, cfg: Optional[Mapping[str, Any]]) -> Optional["ExplicitSplit"]:
@@ -45,8 +45,8 @@ class ExplicitSplit:
         if train is None and val is None and test is None:
             return None
         id_kind = str(cfg.get("id_kind", "region"))
-        if id_kind not in {"region", "sample"}:
-            raise ValueError("split.explicit.id_kind must be 'region' or 'sample'.")
+        if id_kind not in {"region", "sample", "patch"}:
+            raise ValueError("split.explicit.id_kind must be 'region', 'sample' or 'patch'.")
 
         def _ids(value: Any) -> List[str]:
             if value is None:

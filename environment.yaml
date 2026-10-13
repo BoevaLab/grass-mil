@@ -61,6 +61,8 @@ dependencies:
       - hydra-colorlog
       - rootutils
       - umap-learn
+      - matplotlib
+      - statsmodels
       # optional: required only for SingleCellExperiment/rds loading, and also
       # needs an R runtime with Bioconductor
       # - rpy2

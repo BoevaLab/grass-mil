@@ -1,0 +1,33 @@
+cff-version: 1.2.0
+message: "If you use GRASS-MIL, please cite the preprint."
+title: "GRASS-MIL: graph-based representation and discovery of phenotype-associated spatial structures with multiple instance learning"
+type: software
+version: 1.0.0
+date-released: 2026-10-13
+license: MIT
+repository-code: https://github.com/BoevaLab/grass-mil
+authors:
+  - family-names: Rabuzin
+    given-names: Lovro
+  - family-names: Yates
+    given-names: Josephine
+  - family-names: Xu
+    given-names: Mina
+  - family-names: Boeva
+    given-names: Valentina
+preferred-citation:
+  type: article
+  title: "GRASS-MIL: graph-based representation and discovery of phenotype-associated spatial structures with multiple instance learning"
+  authors:
+    - family-names: Rabuzin
+      given-names: Lovro
+    - family-names: Yates
+      given-names: Josephine
+    - family-names: Xu
+      given-names: Mina
+    - family-names: Boeva
+      given-names: Valentina
+  journal: bioRxiv
+  year: 2026
+  doi: 10.64898/2026.10.08.757722
+  url: https://www.biorxiv.org/content/10.64898/2026.10.08.757722v1

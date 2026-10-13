@@ -19,6 +19,10 @@ defaults:
   - aggregation: default
   - embeddings: default
   - interpretability: default
+  # Training-regime presets compose here too, so `regime=mil` rebuilds the
+  # exact model (head width, attention, sampler depth) the checkpoint was trained with.
+  - /callbacks: none
+  - /regime: null
 
 task_name: "predict"
 tags: ["dev"]

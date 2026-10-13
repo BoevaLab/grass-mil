@@ -24,7 +24,9 @@ extract:
   # Optional held-out region lists per explicit model: +extract.held_out.<name>=[...]
   held_out: {}
   output_dir: ${paths.output_dir}/cells
-  regions: null # optional list / json file of region ids to extract (null = all)
+  regions: null # optional list / json file of unit ids to extract (null = all)
+  # auto = patch when the precompute holds several tiles per region, else region.
+  unit_id: auto # auto | region | sample | patch
   batch_size: 512 # ego-graphs per forward pass
   autocast: true # fp16 autocast on GPU
   device: auto

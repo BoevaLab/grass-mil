@@ -103,6 +103,35 @@ Behavior:
 
 Use a CSV file to attach supervision targets at `sample`, `region`, or `patch` scope.
 
+```csv
+REGION_ID,STAS,PATIENT
+P001_core1,1,P001
+P001_core2,1,P001
+P002_core1,0,P002
+```
+
+```bash
+data.graph_labels.label_file=labels.csv data.graph_labels.id_column=REGION_ID \
+data.graph_labels.tasks=[STAS] data.graph_labels.patient_column=PATIENT
+```
+
+`patient_column` is never a target: it is attached to every graph as
+`data.patient_id`, recorded in `processed_index.json`, and used by
+`grass-mil-nested-cv` to keep a patient's regions in one fold and by
+`grass-mil-predict` / `grass-mil-scores` for patient-level scores.
+
+### Fold files
+
+Cross-validation folds are a JSON list of lists of unit ids (regions by default):
+
+```json
+[["P001_core1", "P001_core2", "P007_core1"], ["P002_core1", "..."], ["..."]]
+```
+
+Build them once, patient-grouped, and keep them with the data
+(`grass_mil.data.components.splits.write_fold_json`); every regime is then
+evaluated on identical folds.
+
 ## 6) Run First Precompute/Training Pass
 
 Use a fresh processed directory when onboarding new data:

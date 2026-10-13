@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "grass-mil"
-version = "0.1.0"
-description = "Geometric deep learning framework for spatial omics data"
+version = "1.0.0"
+description = "GRASS-MIL: graph-based representation and discovery of phenotype-associated spatial structures with multiple instance learning"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
@@ -17,7 +17,7 @@ dependencies = [
   "lightning-utilities>=0.10",
   "torchmetrics>=0.11.4",
   "torch-geometric>=2.5",
-  "hydra-core==1.3.2",
+  "hydra-core>=1.3.5,<1.4",
   "hydra-colorlog==1.2.0",
   "omegaconf",
   "numpy",

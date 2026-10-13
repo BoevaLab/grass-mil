@@ -132,10 +132,23 @@ def extract_cell_cache(
     autocast: bool = True,
     device: Optional[torch.device | str] = None,
     resume: bool = True,
+    unit_id: str = "auto",
     log=None,
 ) -> Path:
-    """Run the model over every cell of every region and write the cache."""
+    """Run the model over every cell of every unit (region, sample or patch) and write the cache.
+
+    ``unit_id='auto'`` addresses units by patch id when the dataset holds several
+    tiles per region and by region id otherwise.
+    """
     from grass_mil.data.components.samplers import get_sampler_strategy
+    from grass_mil.data.spatial_omics_datamodule import unit_key
+
+    kind = str(unit_id).lower()
+    if kind == "auto":
+        regions_seen = {}
+        for e in dataset.entries:
+            regions_seen.setdefault(unit_key(e, "region"), set()).add(str(e.patch_id))
+        kind = "patch" if any(len(v) > 1 for v in regions_seen.values()) else "region"
 
     model_dir = Path(out_dir) / model_name
     model_dir.mkdir(parents=True, exist_ok=True)
@@ -148,7 +161,7 @@ def extract_cell_cache(
     t0 = time.time()
     for idx in range(len(dataset)):
         entry = dataset.entries[idx]
-        rid = str(entry.region_id if entry.region_id is not None else entry.sample_id)
+        rid = unit_key(entry, kind)
         if wanted is not None and rid not in wanted:
             continue
         npz = region_npz_path(model_dir, rid)
@@ -216,6 +229,7 @@ def extract_cell_cache(
         "regions": index_regions,
         "held_out_regions": [str(r) for r in held_out_regions] if held_out_regions else [],
         "head_bias": head_bias,
+        "unit_id": kind,
         "cell_type_names": list(cell_type_names) if cell_type_names else None,
         "embedding_dim": int(model.encoder.output_dim),
         "sampler_runtime": _plain(getattr(sampler_config, "runtime", {}) or {}),

@@ -16,6 +16,10 @@ defaults:
   - paths: default
   - extras: default
   - hydra: default
+  - callbacks: none
+  # Regime presets compose here too (`regime=mil`), so the evaluated model
+  # matches the checkpoint.
+  - regime: null
 
 task_name: "eval"
 

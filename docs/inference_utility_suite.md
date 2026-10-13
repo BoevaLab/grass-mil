@@ -157,5 +157,5 @@ High-value legacy utilities from `working_version` are mapped as:
   `collect_inference_payload` in `src/grass_mil/inference/collectors.py`
 - full-graph aggregation (`full_graph_*`) -> `src/grass_mil/inference/aggregation.py`
 - evaluation metrics (`graph_*_evaluate_fn`) -> `src/grass_mil/inference/metrics.py`
-- embedding collectors -> `src/grass_mil/inference/collectors.py` + `src/grass_mil/inference/embeddings.py`
+- embedding collectors -> `src/grass_mil/inference/collectors.py` + `src/grass_mil/inference/io.py`
 - interpretability table bridge -> `src/grass_mil/inference/interpretability_export.py`

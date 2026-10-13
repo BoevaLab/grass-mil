@@ -216,3 +216,26 @@ def test_pretrain_a3_preset_then_finetune_from_checkpoint(cohort, tmp_path):
     pretrained = pre_state["ssl_model.online_encoder.norms.0.weight"].detach().cpu()
     assert torch.allclose(loaded, pretrained, atol=5e-3)
     assert ft_module.encoder.dropout.p == 0.0
+
+
+def test_zero_validation_callback_filter_keeps_interpolations_resolvable():
+    from omegaconf import OmegaConf
+
+    from grass_mil.train import _filter_val_monitor_callbacks
+
+    cfg = OmegaConf.create(
+        {
+            "paths": {"output_dir": "/tmp/run"},
+            "callbacks": {
+                "model_checkpoint": {
+                    "_target_": "x",
+                    "dirpath": "${paths.output_dir}/checkpoints",
+                    "monitor": None,
+                },
+                "early_stopping": {"_target_": "y", "monitor": "val/loss"},
+            },
+        }
+    )
+    filtered, removed = _filter_val_monitor_callbacks(cfg.callbacks)
+    assert removed == ["early_stopping"]
+    assert filtered.model_checkpoint.dirpath == "/tmp/run/checkpoints"

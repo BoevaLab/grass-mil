@@ -264,6 +264,23 @@ Training artifacts (`paths.output_dir`):
 
 ### Step 1: Run SSL Pretraining (BGRL)
 
+The GRASS-MIL recipe ("A3" in the preprint) is one experiment preset:
+
+```bash
+grass-mil-train experiment=grass_mil_pretrain_a3 data=spatial_omics \
+  data.raw_manifest_path=... data.processed_dir=... data.sample_unit=full \
+  data.csv.categorical_label_columns=[cell_type] data.csv.molecular_columns=[SIZE] \
+  trainer=gpu
+```
+
+It composes `model=bgrl_a3`, `task=pretrain_bgrl_a3`, `callbacks=pretrain_checkpoint`
+and `data/sampler=ego_graph_pretrain` (see
+[`hyperparameter_reference.md`](hyperparameter_reference.md) section 3.4); every
+value is overridable, e.g. `task.total_steps=50000 model.encoder.num_layers=3
+data.sampler.runtime.depth=3 task.augmentation.feature_noise_columns=[]`.
+
+The generic pretraining task remains available:
+
 ```bash
 grass-mil-train task=pretrain_bgrl model=bgrl_module data=spatial_omics
 ```
@@ -277,7 +294,7 @@ The pretraining task also sets:
 - View generation, selected via the `augmentation` config group
   (`bgrl_paper` or `uniform`) — see the augmentation section of
   [`hyperparameter_reference.md`](hyperparameter_reference.md)
-- Momentum schedule (`momentum`, `momentum_min`, `warmup_steps`, `total_steps`)
+- Momentum schedule (`momentum`, `momentum_final`, `momentum_warmup_steps`, `total_steps`)
 
 ### Step 2: Choose A Checkpoint
 
@@ -316,13 +333,43 @@ Mapping behavior (`encoder_init_map`):
 
 - `auto_bgrl_or_identity`: remaps known BGRL encoder prefixes such as `online_encoder.*` and `ssl_model.online_encoder.*` to `encoder.*`
 - `identity`: no key remapping
+- `spacegm_bgrl`: imports encoders pretrained with the original SPACE-GM style BGRL code (`x_embedding`, `feat_embedding`, `gnns.{i}.gine.*`, `batch_norms.{i}`)
 
 Common failures:
 
 1. `FileNotFoundError` if `model.init_from_ckpt` path is invalid.
 2. Missing/unexpected key mismatch with `model.init_strict=true`.
 3. Shape mismatch when encoder dimensions differ between pretrain and fine-tune configs.
-4. Invalid `encoder_init_map` value (must be `identity` or `auto_bgrl_or_identity`).
+4. Invalid `encoder_init_map` value (must be `identity`, `auto_bgrl_or_identity` or `spacegm_bgrl`).
+
+## 2b) GRASS-MIL Regimes, Probe And Nested Cross-Validation
+
+The preprint's fine-tuning settings are `regime=` presets on top of
+`model=grass_mil task=finetune_mil` (one region = one bag, region-level
+selection); see [`nested_cv.md`](nested_cv.md) for the full protocol and
+[`hyperparameter_reference.md`](hyperparameter_reference.md) section 12a for the
+values.
+
+```bash
+# one run with explicit splits (ids = region ids of the processed cohort)
+grass-mil-train regime=mil data=... model.init_from_ckpt=runs/pretrain_a3/checkpoints/last.ckpt \
+  data.split.explicit.train=train.json data.split.explicit.val=val.json data.split.explicit.test=test.json
+
+# linear head pre-fitted by a logistic probe on the frozen encoder, then attention only
+grass-mil-probe regime=linear_probehead data=... model.init_from_ckpt=<bgrl>.ckpt \
+  data.split.explicit.train=train.json data.split.explicit.val=val.json probe.output_path=probe_head.pt
+grass-mil-train regime=linear_probehead data=... model.init_from_ckpt=<bgrl>.ckpt \
+  task.head_init_path=probe_head.pt data.split.explicit.train=train.json ...
+
+# the whole nested CV (fits the probes itself)
+grass-mil-nested-cv regime=linear_ftall_reg data=... model.init_from_ckpt=<bgrl>.ckpt \
+  nested_cv.folds_file=folds.json data.graph_labels.patient_column=PATIENT
+```
+
+Downstream of a trained model: `grass-mil-extract` (cells), `grass-mil-niches`,
+`grass-mil-metaclusters` ([`niche_discovery.md`](niche_discovery.md)),
+`grass-mil-scores` ([`evaluation_stats.md`](evaluation_stats.md)),
+`grass-mil-spatial-stats` ([`spatial_statistics.md`](spatial_statistics.md)).
 
 ## 3) Adjusting Model Settings (Aggregation, Backbone, Loss, MIL Options)
 

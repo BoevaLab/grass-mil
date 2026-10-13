@@ -15,7 +15,6 @@ from grass_mil.interpretability.core.agreement import (
     compute_niche_agreement,
 )
 from grass_mil.interpretability.tier2.autocorrelation import (
-    diff_morans_i_vs_reference,
     morans_i,
     run_morans_i,
 )
@@ -102,25 +101,6 @@ def test_run_morans_i_skips_groups_below_the_size_threshold() -> None:
         nodes, edges, feature_columns=["feature"], group_column="niche_label", n_perms=5
     )
     assert np.isnan(result.statistic.loc["small", "feature"])
-
-
-def test_diff_morans_i_reports_a_z_statistic_against_the_reference() -> None:
-    nodes, edges = _autocorrelation_tables()
-    nodes["niche_label"] = nodes["niche_label"].map({"a": 0, "b": -1})
-    result = run_morans_i(
-        nodes,
-        edges,
-        feature_columns=["feature"],
-        group_column="niche_label",
-        n_perms=50,
-        random_state=0,
-    )
-    diff = diff_morans_i_vs_reference(result, reference_group=-1)
-    assert list(diff.index) == [0]
-    assert diff.loc[0, "feature"] > 0
-
-    with pytest.raises(ValueError, match="not present"):
-        diff_morans_i_vs_reference(result, reference_group=99)
 
 
 def _poisson_points(n: int, seed: int, size: float = 100.0) -> np.ndarray:

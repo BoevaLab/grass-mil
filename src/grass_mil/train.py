@@ -47,6 +47,13 @@ def _filter_val_monitor_callbacks(
     if not callbacks_cfg or not isinstance(callbacks_cfg, DictConfig):
         return callbacks_cfg, []
 
+    # Resolve interpolations (``${paths.output_dir}`` and friends) first: the
+    # filtered copy below is a new root, so unresolved references into the
+    # full config would fail at instantiation.
+    try:
+        callbacks_cfg = OmegaConf.create(OmegaConf.to_container(callbacks_cfg, resolve=True))
+    except Exception:  # pragma: no cover - unresolvable outside a Hydra run
+        pass
     filtered = OmegaConf.create({})
     removed: List[str] = []
     for name, cb_conf in callbacks_cfg.items():

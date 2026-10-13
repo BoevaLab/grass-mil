@@ -1,7 +1,6 @@
 # Model Component Contracts
 
 This document defines the canonical contracts for model components, losses, and samplers.
-These contracts are mirrored in `.cursor/rules/model_component_contracts.mdc`.
 
 ## Goals
 

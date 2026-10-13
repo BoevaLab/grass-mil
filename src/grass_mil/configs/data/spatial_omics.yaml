@@ -41,7 +41,7 @@ split:
     train: null
     val: null
     test: null
-    id_kind: region # region | sample
+    id_kind: region # region | sample | patch (every tile its own unit)
 
 manifest:
   sample_id: sample_id

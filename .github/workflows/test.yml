@@ -57,7 +57,7 @@ jobs:
             -f "https://data.pyg.org/whl/torch-${TORCH_VERSION}+cpu.html"
 
       - name: Install the package
-        run: pip install ".[interpretability,io]" pytest
+        run: pip install ".[interpretability,io,stats,plots]" pytest
 
       - name: Show key package versions
         run: |
@@ -113,7 +113,7 @@ jobs:
 
       - name: Run tests and collect coverage
         run: |
-          pip install ".[interpretability,io]" pytest "pytest-cov[toml]"
+          pip install ".[interpretability,io,stats,plots]" pytest "pytest-cov[toml]"
           pytest --cov grass_mil
 
       - name: Upload coverage to Codecov

@@ -22,7 +22,11 @@ defaults:
 task_name: "nested_cv"
 
 nested_cv:
-  folds_file: ??? # JSON list of lists of region ids (patient-grouped outer folds)
+  folds_file: ??? # JSON list of lists of unit ids (patient-grouped outer folds)
+  # What one unit (bag, label, fold member) is: a region (one graph per region,
+  # data.sample_unit=full), a sample, or a patch (tiles as units; sets
+  # task.bag_key=patch_id and data.graph_labels.scope=patch).
+  id_kind: region
   label_file: ${data.graph_labels.label_file}
   id_column: ${data.graph_labels.id_column}
   label_column: null # null = task.target_columns[0] or data.graph_labels.tasks[0]

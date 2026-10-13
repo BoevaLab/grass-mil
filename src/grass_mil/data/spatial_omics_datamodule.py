@@ -269,6 +269,19 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         return self.test_dataloader()
 
 
+def unit_key(entry, id_kind: str) -> str:
+    """The id a processed entry is addressed by: region (default), sample or patch.
+
+    ``patch`` makes every tile its own unit, which is how a cohort of a few
+    large images is cut into many bags for cross-validation.
+    """
+    if id_kind == "patch":
+        return str(entry.patch_id)
+    if id_kind == "sample":
+        return str(entry.sample_id)
+    return str(entry.region_id if entry.region_id is not None else entry.sample_id)
+
+
 def _apply_explicit_split(
     dataset: SpatialOmicsGraphDataset, split: ExplicitSplit
 ) -> Dict[str, list]:
@@ -282,7 +295,7 @@ def _apply_explicit_split(
 
     by_key: Dict[str, Any] = {}
     for entry in dataset.entries:
-        key = str(entry.region_id) if split.id_kind == "region" else str(entry.sample_id)
+        key = str(unit_key(entry, split.id_kind))
         by_key.setdefault(key, []).append(entry)
     wanted = {name: [str(r) for r in getattr(split, name)] for name in ("train", "val", "test")}
     missing = sorted({r for ids in wanted.values() for r in ids} - set(by_key))

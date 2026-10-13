@@ -5,9 +5,12 @@ This reference covers repo-defined configuration keys and behavior for:
 - `configs/train.yaml`
 - `configs/eval.yaml`
 - `configs/loocv.yaml`
+- `configs/probe.yaml`, `configs/nested_cv.yaml`, `configs/extract.yaml`, `configs/scores.yaml`, `configs/niches.yaml`, `configs/metaclusters.yaml`, `configs/spatial_stats.yaml` (analysis CLIs, section 12b)
+- `configs/regime/*.yaml` (training regime presets, section 12a)
+- `configs/experiment/grass_mil_pretrain_a3.yaml`
 - `configs/data/spatial_omics.yaml`
 - `configs/task/*.yaml`
-- `configs/model/**/*.yaml`
+- `configs/model/**/*.yaml` (presets `grass_mil`, `bgrl_a3`, generic modules, `encoder/`, `attention/` groups)
 - `configs/augmentation/*.yaml`
 - `configs/data/sampler/*.yaml`
 - `configs/optim/*.yaml`
@@ -116,6 +119,19 @@ Notes:
   `data.split.loocv.holdout_id` or `loocv.fold_index`. If both are set,
   `loocv.fold_index` takes priority and a warning is emitted.
 
+### Explicit splits (`data.split.explicit.*`)
+
+| Key | Default | Type | Valid Values | Active When | Example Override |
+|---|---|---|---|---|---|
+| `data.split.explicit.train` | `null` | list/str | unit ids, or a `.json` / `.txt` file of ids | re-partition an existing precompute | `grass-mil-train data.split.explicit.train=train.json` |
+| `data.split.explicit.val` | `null` | list/str | as above (may equal `test` for refits) | | `data.split.explicit.val=[r1,r2]` |
+| `data.split.explicit.test` | `null` | list/str | as above | | `data.split.explicit.test=test.json` |
+| `data.split.explicit.id_kind` | `region` | str | `region`, `sample`, `patch` | explicit split set | `data.split.explicit.id_kind=patch` |
+
+Explicit lists override the persisted splits without re-processing the graphs
+(ids not listed are dropped); they need `feature_reducer.name=identity` or
+`fit_mode=global`. `grass-mil-nested-cv` and `grass-mil-probe` set them per fold.
+
 ## 2.4 Manifest Field Mapping
 
 | Key | Default | Type | Valid Values | Active When | Example Override |
@@ -179,20 +195,30 @@ Notes:
 
 ## 2.10 Sampler Keys
 
-| Key | Default | Type | Valid Values | Active When | Example Override |
+`data.sampler` is a config group (`data/sampler=shadow_custom` by default,
+`ego_graph_mil` for MIL fine-tuning, `ego_graph_pretrain` for BGRL). Single
+keys are overridden as `data.sampler.runtime.<key>=...`.
+
+| Key | Default (`shadow_custom`) | Type | Valid Values | Active When | Example Override |
 |---|---|---|---|---|---|
 | `data.sampler.name` | `shadow_custom` | str | `identity`, `shadow_native`, `shadow_custom` | dataloader build | `grass-mil-train data.sampler.name=identity` |
 | `data.sampler.kwargs` | `{}` | dict | strategy kwargs | strategy-specific | `grass-mil-train data.sampler.kwargs='{}'` |
 | `data.sampler.runtime.enabled` | `true` | bool | `true/false` | shadow strategies | `grass-mil-train data.sampler.runtime.enabled=false` |
-| `data.sampler.runtime.depth` | `2` | int | `>=1` | shadow runtime | `grass-mil-train data.sampler.runtime.depth=3` |
-| `data.sampler.runtime.num_neighbors` | `8` | int | `>=1` | shadow runtime | `grass-mil-train data.sampler.runtime.num_neighbors=16` |
-| `data.sampler.runtime.subgraph_batch_size` | `32` | int | `>=1` | runtime subgraph batching | `grass-mil-train data.sampler.runtime.subgraph_batch_size=64` |
+| `data.sampler.runtime.depth` | `2` (`4` in `ego_graph_*`) | int | `>=1` | ego-graph hops | `grass-mil-train data.sampler.runtime.depth=3` |
+| `data.sampler.runtime.num_neighbors` | `8` (`-1` in `ego_graph_*`) | int | `>=1`, or `-1` = every neighbour at every hop | shadow runtime | `grass-mil-train data.sampler.runtime.num_neighbors=-1` |
+| `data.sampler.runtime.subgraph_batch_size` | `32` | int | `>=1` | ego-graphs per chunk (upper bound when `unit_as_bag`) | `grass-mil-train data.sampler.runtime.subgraph_batch_size=64` |
 | `data.sampler.runtime.replace` | `false` | bool | `true/false` | root sampling | `grass-mil-train data.sampler.runtime.replace=true` |
 | `data.sampler.runtime.shuffle_subgraphs` | `true` | bool | `true/false` | training shuffle behavior | `grass-mil-train data.sampler.runtime.shuffle_subgraphs=false` |
-| `data.sampler.runtime.proportional_root_sampling` | `true` | bool | `true/false` | weighted root sampling | `grass-mil-train data.sampler.runtime.proportional_root_sampling=false` |
+| `data.sampler.runtime.proportional_root_sampling` | `true` (`false` in `ego_graph_*`) | bool | `true/false` | cell-type weighted roots | `grass-mil-train data.sampler.runtime.proportional_root_sampling=false` |
 | `data.sampler.runtime.property_name` | `cell_type` | str | categorical label present in `categorical_slices` | weighted root sampling | `grass-mil-train data.sampler.runtime.property_name=cell_type` |
 | `data.sampler.runtime.weight_mode` | `inverse` | str | `inverse`, `sqrt_inverse`, `proportional` | weighted root sampling | `grass-mil-train data.sampler.runtime.weight_mode=sqrt_inverse` |
 | `data.sampler.runtime.min_weight` | `1.0e-6` | float | `>0` | weighted root sampling | `grass-mil-train data.sampler.runtime.min_weight=1.0e-4` |
+| `data.sampler.runtime.subsample_fraction` | `1.0` | float | `(0, 1]` | fraction of candidate roots per unit per epoch | `grass-mil-train data.sampler.runtime.subsample_fraction=0.5` |
+| `data.sampler.runtime.subsample_count` | `null` (`256` in `ego_graph_mil`) | int/null | `>=1` or null | absolute roots per unit per epoch (uniform, without replacement; overrides the fraction) | `grass-mil-train data.sampler.runtime.subsample_count=512` |
+| `data.sampler.runtime.subsample_seed` | `null` | int/null | | seed of the root subsampling generator | `grass-mil-train data.sampler.runtime.subsample_seed=0` |
+| `data.sampler.runtime.fixed_per_unit_seed` | `null` | int/null | | identical root subset per unit on every pass (validation) | `grass-mil-train data.val_sampler.runtime.fixed_per_unit_seed=0` |
+| `data.sampler.runtime.unit_as_bag` | `false` (`true` in `ego_graph_mil`) | bool | `true/false` | one batch per unit holding all its selected roots (one bag, one softmax, one loss) | `grass-mil-train data.sampler.runtime.unit_as_bag=true` |
+| `data.sampler.runtime.merge_units` | `false` (`true` in `ego_graph_pretrain`) | bool | `true/false` | pool all units into one graph and draw roots from the union (BGRL) | `grass-mil-train data.sampler.runtime.merge_units=true` |
 | `data.sampler.runtime.interior_seeds.enabled` | `false` | bool | `true/false` | shadow runtime | `grass-mil-train data.sampler.runtime.interior_seeds.enabled=true` |
 | `data.sampler.runtime.interior_seeds.n_hops` | `null` | int/null | `>=1`, `null` uses `depth` | `interior_seeds.enabled=true` | `grass-mil-train data.sampler.runtime.interior_seeds.n_hops=3` |
 | `data.sampler.runtime.interior_seeds.seed_tolerance_multiplier` | `1.0` | float | `>=0` | `interior_seeds.enabled=true` | `grass-mil-train data.sampler.runtime.interior_seeds.seed_tolerance_multiplier=1.5` |
@@ -202,6 +228,8 @@ Notes:
 | `data.sampler.runtime.ego_radius.radius_per_hop` | `75.0` | float | `>0`, datamodule units | `ego_radius.enabled=true` | `grass-mil-train data.sampler.runtime.ego_radius.radius_per_hop=30.0` |
 | `data.sampler.runtime.ego_radius.radius_offset` | `55.0` | float | `>=0`, datamodule units | `ego_radius.enabled=true` | `grass-mil-train data.sampler.runtime.ego_radius.radius_offset=22.0` |
 | `data.sampler.runtime.ego_radius.keep_root_component` | `true` | bool | `true/false` | `ego_radius.enabled=true` | `grass-mil-train data.sampler.runtime.ego_radius.keep_root_component=false` |
+| `data.val_sampler` | `null` (fixed 1024-root subset in `regime=mil`) | dict/null | full sampler config | validation loader | see `configs/regime/mil.yaml` |
+| `data.test_sampler` | `null` | dict/null | full sampler config; `null` derives an all-roots, unweighted, no-bagging variant of `sampler` | test / predict loaders | `grass-mil-train data.test_sampler.runtime.subsample_count=1024` |
 
 Two notes on these, both of which cause silent misconfiguration rather than errors:
 
@@ -227,6 +255,7 @@ Two notes on these, both of which cause silent misconfiguration rather than erro
 | `data.graph_labels.id_column` | `id` | str | column in label file | graph labels enabled | `grass-mil-train data.graph_labels.id_column=region_id` |
 | `data.graph_labels.tasks` | `null` | list[str]/null | task columns or null for all | graph labels enabled | `grass-mil-train data.graph_labels.tasks="[outcome]"` |
 | `data.graph_labels.scope` | `region` | str | `region`, `patch`, `sample` | graph labels enabled | `grass-mil-train data.graph_labels.scope=sample` |
+| `data.graph_labels.patient_column` | `null` | str/null | column of the label file | graph labels enabled | `grass-mil-train data.graph_labels.patient_column=PATIENT` (attached as `data.patient_id`, recorded in the index; never a target) |
 | `data.transforms` | `[]` | list[dict] | importable transform specs | transform pipeline | `grass-mil-train data.transforms='[{name: grass_mil.data.components.transforms.CompositionVector, kwargs: {label_attr: label_cell_type}}]'` |
 
 ## 2.12 Sampler Preset Files (`configs/data/sampler/*.yaml`)
@@ -236,6 +265,8 @@ Two notes on these, both of which cause silent misconfiguration rather than erro
 | `configs/data/sampler/identity.yaml` | `name`, `kwargs` | `name=identity`, `kwargs={}` |
 | `configs/data/sampler/shadow_native.yaml` | `name`, `kwargs`, `runtime.*` | `name=shadow_native`, runtime defaults mirror `data.sampler.runtime.*` |
 | `configs/data/sampler/shadow_custom.yaml` | `name`, `kwargs`, `runtime.*` | `name=shadow_custom`, runtime defaults mirror `data.sampler.runtime.*` |
+| `configs/data/sampler/ego_graph_mil.yaml` | `name`, `kwargs`, `runtime.*` | GRASS-MIL fine-tuning: depth 4, unlimited neighbours, uniform roots, `subsample_count=256`, `unit_as_bag=true` |
+| `configs/data/sampler/ego_graph_pretrain.yaml` | `name`, `kwargs`, `runtime.*` | BGRL: depth 4, unlimited neighbours, 64 roots per step from the union of all units (`merge_units=true`) |
 
 ## 3) Task Config Group (`configs/task/*.yaml`)
 
@@ -258,18 +289,35 @@ Two notes on these, both of which cause silent misconfiguration rather than erro
 
 ## 3.2 `configs/task/finetune_mil.yaml`
 
-Includes all keys above plus MIL-specific controls:
+Includes the keys of 3.1 (with `aggregation=mil_attention`, `target_type=categorical`,
+`loss=categorical_ce`, and per-class widths `model.graph_head.output_dim=2`,
+`model.attention.n_classes=2`) plus the MIL controls below. The `regime=`
+presets (section 12a) set them to the preprint values.
 
 | Key | Default | Type | Valid Values | Active When | Example Override |
 |---|---|---|---|---|---|
-| `task.name` | `finetune_mil` | str | label | always | `grass-mil-train task.name=mil_exp` |
-| `task.aggregation` | `mil_attention` | str | `mil_attention` | supervised module | `grass-mil-train task.aggregation=mil_attention` |
-| `task.optimization.backbone_lr` | `null` | float/null | lr value or null | MIL optimizer param groups | `grass-mil-train task.optimization.backbone_lr=1e-3` |
-| `task.optimization.attention_lr` | `null` | float/null | lr value or null | MIL optimizer param groups | `grass-mil-train task.optimization.attention_lr=4e-3` |
-| `task.region_accumulation.enabled` | `false` | bool | `true/false` | MIL training only | `grass-mil-train task.region_accumulation.enabled=true` |
-| `task.region_accumulation.mode` | `manual_region_buffer` | str | currently manual mode in code | MIL accumulation metadata | `grass-mil-train task.region_accumulation.mode=manual_region_buffer` |
-| `task.region_accumulation.hyperbatch_size` | `8` | int | `>=1` when enabled | MIL accumulation | `grass-mil-train task.region_accumulation.hyperbatch_size=4` |
-| `task.region_accumulation.flush_on_epoch_end` | `true` | bool | `true/false` | MIL accumulation | `grass-mil-train task.region_accumulation.flush_on_epoch_end=true` |
+| `task.bag_key` | `region_id` | str | `region_id`, `patch_id`, `sample_id` | what one bag is | `grass-mil-train task.bag_key=patch_id` |
+| `task.class_weights` | `auto_train` | str/list/null | `auto_train` = inverse frequency on the training units (mean 1); a list; `null` | categorical loss | `grass-mil-train task.class_weights=[1.0,2.0]` |
+| `task.optimization.encoder_lr_scale` | `1.0` | float | `>=0`; `0` freezes the encoder (no gradients, eval mode) | optimizer groups | `grass-mil-train task.optimization.encoder_lr_scale=0.3` |
+| `task.optimization.head_lr_scale` | `1.0` | float | `>=0` | optimizer groups | `grass-mil-train task.optimization.head_lr_scale=0.01` |
+| `task.optimization.attention_lr_scale` | `2.0` | float | `>=0` | optimizer groups | `grass-mil-train task.optimization.attention_lr_scale=1.0` |
+| `task.optimization.head_weight_decay` | `null` | float/null | overrides `optim.weight_decay` for the head group | optimizer groups | `grass-mil-train task.optimization.head_weight_decay=1e-3` |
+| `task.optimization.backbone_lr` / `attention_lr` | `null` | float/null | legacy absolute pair (both or neither); ignored when scales are used | | |
+| `task.finetune_augmentation.drop_edge_p` | `0.0` | float | `[0,1]` | training batches only; edges dropped with both directions | `grass-mil-train task.finetune_augmentation.drop_edge_p=0.05` |
+| `task.finetune_augmentation.drop_feat_p` | `0.0` | float | `[0,1]` | elementwise feature drop, writes the unassigned cell-type token | `grass-mil-train task.finetune_augmentation.drop_feat_p=0.05` |
+| `task.finetune_augmentation.seed` | `0` | int | | augmentation generator | |
+| `task.head_init_path` | `null` | str/null | probe head file (`graph_head.net.0.*`), or `auto` (resolved per split by `grass-mil-nested-cv`) | linear head (`model.graph_head.num_layers=1`) | `grass-mil-train task.head_init_path=probe_head.pt` |
+| `task.freeze_head` | `false` | bool | | head excluded from the optimizer | `grass-mil-train task.freeze_head=true` |
+| `task.grad_clip_norm` | `1.0` | float/null | `>0` or null | gradient-norm clipping in the region flush | `grass-mil-train task.grad_clip_norm=null` |
+| `task.scheduler_interval` | `step` | str | `step`, `epoch` | with `scheduler=cosine_mil_step` (`T_max: auto`) the cosine spans every optimizer step of the run; skipped AMP steps do not advance it | `grass-mil-train task.scheduler_interval=epoch` |
+| `task.region_accumulation.enabled` | `true` | bool | `true/false` | MIL training | `grass-mil-train task.region_accumulation.enabled=false` |
+| `task.region_accumulation.hyperbatch_size` | `12` | int | `>=1` | regions per optimizer step | `grass-mil-train task.region_accumulation.hyperbatch_size=8` |
+| `task.region_accumulation.flush_on_epoch_end` | `true` | bool | | | |
+| `task.max_instances_per_bag` / `instance_sampling` | `0` / `all` | | as in 3.1 | | |
+
+Region-level metrics are logged per epoch (`val/loss_region`, `val/auroc`,
+`val/bal_acc`, `val/acc`, `val/pred_pos_frac`; the same under `test/`) and written
+to `metrics_per_epoch.jsonl`; `test_predictions.csv` holds one row per bag.
 
 ## 3.3 `configs/task/pretrain_bgrl.yaml`
 
@@ -297,6 +345,26 @@ Includes all keys above plus MIL-specific controls:
 | `task.drop_feat_p1` | `0.2` | float | `[0,1]` | view-1 feature dropout | `grass-mil-train task.drop_feat_p1=0.1` |
 | `task.drop_feat_p2` | `0.2` | float | `[0,1]` | view-2 feature dropout | `grass-mil-train task.drop_feat_p2=0.3` |
 
+`task.momentum_min` is the legacy name of `task.momentum_final`.
+
+## 3.4 `configs/task/pretrain_bgrl_a3.yaml` (GRASS-MIL pretraining)
+
+Selected by `experiment=grass_mil_pretrain_a3` (with `model=bgrl_a3`,
+`callbacks=pretrain_checkpoint`, `data/sampler=ego_graph_pretrain`).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `optim.lr` / `optim.weight_decay` | `5e-5` / `1e-5` | AdamW |
+| `task.lr_warmup.*` | enabled, `1000` steps, `start_factor=0.0` | linear warmup, then cosine |
+| `scheduler.T_max` | `auto` | `= total_steps - warmup` so the LR reaches `eta_min=1e-7` at the end |
+| `task.total_steps` | `200000` | optimizer steps (`trainer.max_steps` follows it) |
+| `task.momentum` / `task.momentum_final` | `0.99` / `1.0` | target-encoder EMA, cosine, applied after every optimizer step |
+| `task.momentum_warmup_steps` | `0` | no momentum warmup (`null` falls back to `task.warmup_steps`) |
+| `task.augmentation` | `mode=importance`, `mu=0.25`, `p_lambda=0.45`, `feature_noise_std=0.2`, `feature_noise_columns=[SIZE]` | symmetric views: degree-importance drop with the unassigned token + Gaussian noise on the named continuous feature(s); set `[]` without a size feature |
+| `model.encoder.dropout` | `0.1` (in `model=bgrl_a3`) | encoder dropout during pretraining only |
+| `callbacks.model_checkpoint.every_n_train_steps` | `5000` | all step checkpoints kept, plus `last.ckpt` |
+| `data.split.train_val_test_split` | `[1,0,0]` | every region used label-free |
+
 ## 4) Model Config Group (`configs/model/**/*.yaml`)
 
 ## 4.1 `configs/model/supervised_module.yaml`
@@ -320,16 +388,24 @@ Includes all keys above plus MIL-specific controls:
 | `model.encoder.use_edge_attr` | `false` | bool | `true/false` | `gcn`/`gine` meaningful | `grass-mil-train model.encoder.use_edge_attr=true` |
 | `model.encoder.edge_weight_index` | `0` | int | column index | `gcn` with edge attrs | `grass-mil-train model.encoder.edge_weight_index=1` |
 | `model.encoder.edge_attr_dim` | `null` | int/null | required for `gine` | `conv_type=gine` | `grass-mil-train model.encoder.edge_attr_dim=2` |
+| `model.encoder.edge_feature_index` | `null` | int/null | column of `edge_attr` fed to the convolution (`gine_length`: `0`) | `conv_type=gine` | `grass-mil-train model.encoder.edge_feature_index=0` |
+| `model.encoder.train_eps` | `true` | bool | learnable GIN/GINE epsilon | `gin`/`gine` | `grass-mil-train model.encoder.train_eps=false` |
+| `model.encoder.input_init` | `xavier` | str | `xavier`, `default` | input embedding + linear init | `grass-mil-train model.encoder.input_init=default` |
+| `model.encoder.categorical_embedding.label` | `cell_type` | str | categorical label name | summed cell-type embedding | |
+| `model.encoder.categorical_embedding.num_embeddings` / `column_index` | `null` | int/null | resolved from the processed dataset | | |
+| `model.encoder.categorical_embedding.reserve_unassigned` | `true` | bool | reserve a trailing row as the unassigned token | augmentations | |
+| `model.encoder.categorical_embedding.unassigned_label` / `unassigned_index` | `null` | str/int/null | reuse an existing category (e.g. `other`) as the unassigned token | | `grass-mil-train model.encoder.categorical_embedding.unassigned_label=other` |
 | `model.attention.attention_type` | `gated_projected` | str | `gated`, `gated_projected` | `task.aggregation=mil_attention` | `grass-mil-train model.attention.attention_type=gated` |
 | `model.attention.input_dim` | `128` | int | `>=1` | MIL attention | `grass-mil-train model.attention.input_dim=256` |
-| `model.attention.projection_dim` | `64` | int | `>=1` | projected attention | `grass-mil-train model.attention.projection_dim=128` |
-| `model.attention.hidden_dim` | `16` | int | `>=1` | MIL attention | `grass-mil-train model.attention.hidden_dim=32` |
-| `model.attention.dropout` | `false` | bool | `true/false` | MIL attention | `grass-mil-train model.attention.dropout=true` |
-| `model.attention.n_classes` | `1` | int | `>=1` | MIL attention output channels | `grass-mil-train model.attention.n_classes=1` |
+| `model.attention.projection_dim` | `32` | int | `>=1` | projected attention | `grass-mil-train model.attention.projection_dim=64` |
+| `model.attention.hidden_dim` | `8` | int | `>=1` | MIL attention (the "attention space" width) | `grass-mil-train model.attention.hidden_dim=16` |
+| `model.attention.dropout` | `true` | bool | `true/false` | dropout 0.25 in the attention net while training | `grass-mil-train model.attention.dropout=false` |
+| `model.attention.init` | `kaiming` | str | `kaiming`, `default` | attention linears init | `grass-mil-train model.attention.init=default` |
+| `model.attention.n_classes` | `1` (`2` with `task=finetune_mil`) | int | `>=1` | one attention channel per class | `grass-mil-train model.attention.n_classes=3` |
 | `model.graph_head.input_dim` | `128` | int | `>=1` | graph head | `grass-mil-train model.graph_head.input_dim=256` |
 | `model.graph_head.output_dim` | `1` | int | `>=1` | graph head | `grass-mil-train model.graph_head.output_dim=2` |
 | `model.graph_head.hidden_dim` | `128` | int | `>=1` | graph head | `grass-mil-train model.graph_head.hidden_dim=256` |
-| `model.graph_head.num_layers` | `2` | int | `>=1` | graph head | `grass-mil-train model.graph_head.num_layers=3` |
+| `model.graph_head.num_layers` | `2` | int | `>=1`; `1` = linear instance head (required by the probe regimes) | graph head | `grass-mil-train model.graph_head.num_layers=1` |
 | `model.graph_head.dropout` | `0.0` | float | `[0,1]` | graph head | `grass-mil-train model.graph_head.dropout=0.2` |
 | `model.ssl.method` | `bgrl` | str | `bgrl` | SSL factory | `grass-mil-train model.ssl.method=bgrl` |
 | `model.ssl.predictor.hidden_size` | `512` | int | `>=1` | SSL enabled | `grass-mil-train model.ssl.predictor.hidden_size=256` |
@@ -339,7 +415,7 @@ Includes all keys above plus MIL-specific controls:
 | `model.task` | `${task}` | DictConfig | task config object | always | `grass-mil-train task=finetune_mil` |
 | `model.init_from_ckpt` | `null` | str/null | checkpoint path | optional init | `grass-mil-train model.init_from_ckpt=/abs/pretrain.ckpt` |
 | `model.init_strict` | `false` | bool | `true/false` | checkpoint init | `grass-mil-train model.init_strict=true` |
-| `model.encoder_init_map` | `auto_bgrl_or_identity` | str | `identity`, `auto_bgrl_or_identity` | checkpoint init | `grass-mil-train model.encoder_init_map=identity` |
+| `model.encoder_init_map` | `auto_bgrl_or_identity` | str | `identity`, `auto_bgrl_or_identity`, `spacegm_bgrl` (legacy SPACE-GM BGRL checkpoints) | checkpoint init | `grass-mil-train model.encoder_init_map=spacegm_bgrl` |
 | `model.freeze_encoder` | `false` | bool | `true/false` | checkpoint transfer/finetuning | `grass-mil-train model.freeze_encoder=true` |
 
 ## 4.2 `configs/model/bgrl_module.yaml`
@@ -360,134 +436,67 @@ Same encoder block as supervised module plus SSL/pretrain init keys:
 | `model.init_strict` | `false` | bool | `true/false` | checkpoint init | `grass-mil-train model.init_strict=true` |
 | `model.encoder_init_map` | `auto_bgrl_or_identity` | str | `identity`, `auto_bgrl_or_identity` | checkpoint init | `grass-mil-train model.encoder_init_map=identity` |
 
-## 4.3 Component Preset Files
+## 4.3 Model Presets And Component Groups
 
-### `configs/model/components.yaml`
+### `configs/model/grass_mil.yaml` (GRASS-MIL supervised model)
 
-| Key | Default | Type | Valid Values | Active When | Example Override |
-|---|---|---|---|---|---|
-| `model.flags.use_ssl` | `false` | bool | `true/false` | component notebook/testing | `grass-mil-train model.flags.use_ssl=true` |
-| `model.attention.attention_type` | `gated_projected` | str | `gated`, `gated_projected` | `task.aggregation=mil_attention` | `grass-mil-train model.attention.attention_type=gated` |
-| `model.encoder.*` | same fields as section 4.1 | mixed | see section 4.1 | component testing | `grass-mil-train model.encoder.conv_type=gcn` |
-| `model.attention.*` | defaults per file | mixed | see attention files below | component testing | `grass-mil-train model.attention.hidden_dim=32` |
-| `model.ssl.method` | `bgrl` | str | `bgrl` | component testing | `grass-mil-train model.ssl.method=bgrl` |
-| `model.ssl.predictor.hidden_size` | `512` | int | `>=1` | component testing | `grass-mil-train model.ssl.predictor.hidden_size=256` |
-| `model.graph_head.*` | see section 4.1 | mixed | MLP head args | component testing | `grass-mil-train model.graph_head.num_layers=3` |
+`defaults: [encoder: gine_length, attention: gated_projected]`, MLP instance head
+(`graph_head.num_layers=2`, hidden = `encoder.out_dim`), bag logit pooled in logit
+space (`L_c = sum_i A[i,c] f_c(h_i)`). Use `model=grass_mil task=finetune_mil` or a
+`regime=` preset. `model.graph_head.num_layers=1` gives the linear head of the
+probe regimes.
+
+### `configs/model/bgrl_a3.yaml` (GRASS-MIL pretraining model)
+
+`defaults: [encoder: gine_length]`, `encoder.dropout=0.1`, predictor hidden 512.
+
+### `configs/model/supervised_module.yaml`, `configs/model/bgrl_module.yaml`
+
+Generic modules: `defaults: [encoder: gin, attention: gated_projected]`. Switch
+the encoder with `model/encoder=gine_length` and the attention with
+`model/attention=gated`.
 
 Attention is **not** toggled by a model flag. `SupervisedModule` derives it from
 the task: `use_attention = (task.aggregation == "mil_attention")`. Use
-`task=finetune_mil` to enable it and `task=finetune_mean` to disable it.
-
-The component sub-configs (`model.encoder`, `model.attention`,
-`model.graph_head`, `model.ssl.predictor`) are plain option dicts consumed by
-`build_supervised_components`, not Hydra `_target_` instantiations. Selecting a
-different attention implementation is therefore
-`model.attention.attention_type=gated`, not a `_target_` override.
+`task=finetune_mil` to enable it and `task=finetune_mean` to disable it. The
+component sub-configs (`model.encoder`, `model.attention`, `model.graph_head`,
+`model.ssl.predictor`) are plain option dicts consumed by
+`build_supervised_components`, not `_target_` instantiations: select another
+attention implementation with `model.attention.attention_type=gated`.
 
 `task=finetune_mil` sets the per-class widths itself
-(`model.graph_head.output_dim=2`, `model.attention.n_classes=2`). This works
-because `task` is merged after `model` in the root defaults list; see the
-comment in `configs/train.yaml`.
+(`model.graph_head.output_dim=2`, `model.attention.n_classes=2`); `task` is merged
+after `model` in the root defaults list (see `configs/train.yaml`).
 
-### Encoder preset files (`configs/model/encoder/*.yaml`)
+### Encoder group (`configs/model/encoder/*.yaml`)
 
-Covered files:
+Files: `gin`, `gcn`, `gat`, `graphsage`, `gine`, `gine_length`. All expose the
+keys of section 4.1; per-file defaults differ in `conv_type`, `norm`,
+`use_edge_attr`, `edge_attr_dim`:
 
-- `configs/model/encoder/gin.yaml`
-- `configs/model/encoder/gcn.yaml`
-- `configs/model/encoder/gat.yaml`
-- `configs/model/encoder/graphsage.yaml`
-- `configs/model/encoder/gine.yaml`
-- `configs/model/encoder/gine_length.yaml`
-
-All six files expose the same base keys:
-
-- `_target_`, `input_dim`, `hidden_dim`, `out_dim`, `num_layers`, `dropout`,
-  `conv_type`, `norm`, `jk`, `act`, `pooling`, `gat_heads`, `use_edge_attr`,
-  `edge_weight_index`, `edge_attr_dim`
-
-Per-file defaults differ mainly in `conv_type`, `norm`, `use_edge_attr`, and
-`edge_attr_dim`:
-
-- `gin.yaml`: `conv_type=gin`, `norm=batchnorm`, `use_edge_attr=false`, `edge_attr_dim=null`
-- `gcn.yaml`: `conv_type=gcn`, `norm=batchnorm`, `use_edge_attr=true`, `edge_attr_dim=null`
-- `gat.yaml`: `conv_type=gat`, `norm=batchnorm`, `use_edge_attr=false`, `edge_attr_dim=null`
-- `graphsage.yaml`: `conv_type=graphsage`, `norm=batchnorm`, `use_edge_attr=false`, `edge_attr_dim=null`
+- `gin.yaml`: `conv_type=gin`, `norm=batchnorm`, `use_edge_attr=false`
+- `gcn.yaml`: `conv_type=gcn`, `norm=batchnorm`, `use_edge_attr=true`
+- `gat.yaml`: `conv_type=gat`, `norm=batchnorm`
+- `graphsage.yaml`: `conv_type=graphsage`, `norm=batchnorm`
 - `gine.yaml`: `conv_type=gine`, `norm=batchnorm`, `use_edge_attr=true`, `edge_attr_dim=2`
-- `gine_length.yaml`: `conv_type=gine`, `norm=layernorm`, `use_edge_attr=true`, `edge_attr_dim=1`
+- `gine_length.yaml` (GRASS-MIL): `conv_type=gine`, 4 x 256, `norm=layernorm`,
+  `pooling=max`, `edge_attr_dim=1`, `edge_feature_index=0` (the bounded log
+  edge length), `train_eps=true`, `input_init=xavier`, `categorical_embedding`
+  with a reserved unassigned row. Supports cell-type-only cohorts (`input_dim=0`).
 
-`gine_length.yaml` is the production encoder and the only preset that sets two
-further keys:
-
-- `edge_feature_index: 0` — narrows `edge_attr` to the scalar edge-length
-  column, so the convolution conditions on distance alone. There is no notion of
-  edge type.
-- `categorical_embedding: {label: cell_type, num_embeddings: null, column_index: null}`
-  — adds the cell-type embedding, summed with the projected continuous features
-  (`h⁰ = E[t] + Wₓx`). The two `null`s are resolved at build time from the
-  processed dataset's label map and categorical slices; set them explicitly to
-  override.
-
-Because the embedding can carry the whole node representation, this preset is
-the one that supports cell-type-only cohorts (`input_dim=0`).
-
-### Attention preset files (`configs/model/attention/*.yaml`)
-
-Covered files:
-
-- `configs/model/attention/gated.yaml`
-- `configs/model/attention/gated_projected.yaml`
+### Attention group (`configs/model/attention/*.yaml`)
 
 | File | Keys | Defaults |
 |---|---|---|
-| `gated.yaml` | `_target_`, `input_dim`, `hidden_dim`, `dropout`, `n_classes` | `AttnNetGated`, `128`, `64`, `false`, `1` |
-| `gated_projected.yaml` | `_target_`, `input_dim`, `projection_dim`, `hidden_dim`, `dropout`, `n_classes` | `AttnNetGatedProjected`, `128`, `64`, `16`, `false`, `1` |
+| `gated.yaml` | `attention_type`, `input_dim`, `hidden_dim`, `dropout`, `n_classes`, `init` | `gated`, `${model.encoder.out_dim}`, `8`, `true`, `1`, `kaiming` |
+| `gated_projected.yaml` | `attention_type`, `input_dim`, `projection_dim`, `hidden_dim`, `dropout`, `n_classes`, `init` | `gated_projected`, `${model.encoder.out_dim}`, `32`, `8`, `true`, `1`, `kaiming` |
 
-### Head preset files (`configs/model/heads/*.yaml`)
+### Losses
 
-Covered files:
-
-- `configs/model/heads/graph.yaml`
-
-`graph.yaml` exposes:
-
-- `_target_`, `input_dim`, `output_dim`, `hidden_dim`, `num_layers`, `dropout`
-
-Defaults:
-
-- `input_dim=128`, `output_dim=1`, `hidden_dim=128`, `num_layers=2`, `dropout=0.0`
-
-There is no node head preset. `NodePredictionHead` existed only to serve the
-instance-pull auxiliary loss, which is not part of the published objective and
-has been removed along with it; region cross-entropy is the sole objective.
-
-### Loss preset files (`configs/model/loss/*.yaml`)
-
-Covered files:
-
-- `configs/model/loss/categorical_bce.yaml`
-- `configs/model/loss/categorical_ce.yaml`
-- `configs/model/loss/regression_mse.yaml`
-- `configs/model/loss/regression_huber.yaml`
-- `configs/model/loss/survival_coxsgd.yaml`
-
-| File | Keys | Defaults |
-|---|---|---|
-| `categorical_bce.yaml` | `_target_`, `pos_weight` | `WeightedBCEWithLogitsLoss`, `null` |
-| `categorical_ce.yaml` | `_target_`, `class_weight` | `WeightedCrossEntropyLoss`, `null` |
-| `regression_mse.yaml` | `_target_` | `WeightedMSELoss` |
-| `regression_huber.yaml` | `_target_`, `delta` | `WeightedHuberLoss`, `1.0` |
-| `survival_coxsgd.yaml` | `_target_`, `top_n`, `regularizer_weight` | `CoxSGDLoss`, `5`, `0.05` |
-
-### SSL preset file (`configs/model/ssl/bgrl.yaml`)
-
-Keys:
-
-- `method` (`bgrl`)
-- `predictor._target_`
-- `predictor.input_size`
-- `predictor.output_size`
-- `predictor.hidden_size`
+`task.loss` selects the loss: `categorical_bce` (`pos_weight`), `categorical_ce`
+(`class_weight`, filled by `task.class_weights=auto_train`), `regression_mse`,
+`regression_huber` (`delta`), `survival_coxsgd` (`top_n`, `regularizer_weight`).
+Extra loss kwargs go under `model.loss.*`.
 
 ### Augmentation preset files (`configs/augmentation/*.yaml`)
 
@@ -564,6 +573,8 @@ normalised log-degree — so hubs are preserved and low-degree nodes are masked.
 | `configs/scheduler/cosine_step.yaml` | `_target_` | `torch.optim.lr_scheduler.CosineAnnealingLR` | str | `grass-mil-train scheduler._target_=...` |
 | `configs/scheduler/cosine_step.yaml` | `T_max` | `10000` | int | `grass-mil-train scheduler.T_max=20000` |
 | `configs/scheduler/cosine_step.yaml` | `eta_min` | `1.0e-7` | float | `grass-mil-train scheduler.eta_min=1.0e-8` |
+| `configs/scheduler/cosine_mil_step.yaml` | `T_max` | `auto` (`= max_epochs * ceil(n_train_units / hyperbatch)`, per optimizer step) | str/int | `grass-mil-train scheduler.T_max=5000` |
+| `configs/scheduler/cosine_mil_step.yaml` | `eta_min` | `1.0e-7` | float | `grass-mil-train scheduler.eta_min=0` |
 
 ## 6) Trainer Config Group (`configs/trainer/*.yaml`)
 
@@ -657,6 +668,14 @@ Covered files:
 | `model_summary.max_depth` | `1` | int | integer depth | `callbacks=model_summary` | `grass-mil-train callbacks.model_summary.max_depth=2` |
 | `rich_progress_bar._target_` | `lightning.pytorch.callbacks.RichProgressBar` | str | import path | `callbacks=rich_progress_bar` | `grass-mil-train callbacks.rich_progress_bar._target_=...` |
 | `configs/callbacks/none.yaml` | empty file | n/a | no fields | `callbacks=none` | `grass-mil-train callbacks=none` |
+
+## 7.5 Selection presets
+
+| File | Content |
+|---|---|
+| `configs/callbacks/mil_selection.yaml` | checkpoint on `val/auroc` (max, top 1 + last), early stopping on `val/loss_region` (patience 8, after `trainer.min_epochs`) |
+| `configs/callbacks/refit.yaml` | fixed-length refit: no early stopping, no metric selection, `last.ckpt` only |
+| `configs/callbacks/pretrain_checkpoint.yaml` | checkpoint every `every_n_train_steps=5000`, all kept |
 
 ## 8) Logger Config Group (`configs/logger/*.yaml`)
 
@@ -821,6 +840,37 @@ Covered files:
 | `extras.ignore_warnings` | `False` | bool | `true/false` | `extras` enabled | `grass-mil-train extras.ignore_warnings=true` |
 | `extras.enforce_tags` | `True` | bool | `true/false` | `extras` enabled | `grass-mil-train extras.enforce_tags=false` |
 | `extras.print_config` | `True` | bool | `true/false` | `extras` enabled | `grass-mil-train extras.print_config=false` |
+
+## 12a) Regime Presets (`configs/regime/*.yaml`)
+
+`regime=<name>` composes `model=grass_mil`, `task=finetune_mil`,
+`scheduler=cosine_mil_step`, `callbacks=mil_selection`, `data/sampler=ego_graph_mil`
+and sets the keys below; each is an ordinary override afterwards.
+
+| Regime | `optim.lr` / `weight_decay` | `encoder_lr_scale` | head | `head_lr_scale` / `head_weight_decay` | `attention_lr_scale` | roots per region | `encoder.dropout` | drop edge / feat | epochs (min) |
+|---|---|---|---|---|---|---|---|---|---|
+| `mil` | 1e-4 / 1e-3 | 1.0 | MLP (2 layers) | 1.0 / null | 2.0 | 256 | 0.0 | 0 / 0 | 25 (10) |
+| `mil_frozen` | 1e-4 / 1e-3 | 0.0 | MLP | 1.0 / null | 2.0 | 512 | 0.0 | 0 / 0 | 25 (10) |
+| `linear_probehead` | 1e-4 / 1e-3 | 0.0 | linear, probe pre-fit, frozen | 0.0 / null | 2.0 | 512 | 0.0 | 0 / 0 | 25 (10) |
+| `linear_ftall` | 1e-4 / 1e-3 | 1.0 | linear, probe pre-fit | 0.01 / 1e-3 | 2.0 | 256 | 0.0 | 0 / 0 | 25 (10) |
+| `linear_ftall_reg` | 1e-4 / 1e-2 | 0.3 | linear, probe pre-fit | 0.01 / 1e-3 | 2.0 | 256 | 0.2 | 0.05 / 0.05 | 25 (10) |
+
+Shared: `task.region_accumulation.hyperbatch_size=12`, `task.grad_clip_norm=1.0`,
+`trainer.precision=16-mixed`, `data.val_sampler` = fixed 1024-root subset per
+region (`fixed_per_unit_seed=0`), `data.test_sampler` = all roots.
+
+## 12b) Analysis CLIs
+
+| CLI | Config | Main keys |
+|---|---|---|
+| `grass-mil-probe` | `configs/probe.yaml` | `probe.roots_per_unit=96`, `probe.seed=0`, `probe.batch_size=256`, `probe.C=1.0`, `probe.class_weight=balanced`, `probe.max_iter=3000`, `probe.eval_splits=[val]`, `probe.output_path`; splits from `data.split.explicit` |
+| `grass-mil-nested-cv` | `configs/nested_cv.yaml` | `nested_cv.folds_file`, `nested_cv.id_kind=region|sample|patch`, `nested_cv.{label_file,id_column,label_column,patient_column}` (default from `data.graph_labels`), `nested_cv.inner_k=3`, `inner_seed=0`, `selection_metric=val/auroc`, `epoch_reduce=median`, `min_refit_epochs=1`, `outer_folds`, `resume`, `nested_cv.probe.*` (as the probe keys, `enabled=auto`, `cache_dir`), `patient_aggregation=mean` |
+| `grass-mil-extract` | `configs/extract.yaml` | `extract.nested_cv_summary` or `+extract.models.<name>=<ckpt>` (+ `+extract.held_out.<name>=[...]`), `extract.unit_id=auto|region|sample|patch`, `extract.regions`, `extract.batch_size=512`, `extract.autocast`, `extract.device`, `extract.resume`, `extract.output_dir` |
+| `grass-mil-scores` | `configs/scores.yaml` | `input`, `label_column`, `scores`, `fold_column`, `patient_column`, `patient_level`, `standardise=z|rank|none`, `strata`, `n_boot=2000`, `seed=0`, `operating_rules`, `prevalences` |
+| `grass-mil-niches` | `configs/niches.yaml` | `cells_dir`, `regions=held_out|all|list|file`, `labels.*`, `space=gnn|attention`, `attention_ckpt`, `reduction.{method,n_components}`, `clustering.{method,n_clusters,params.*}`, `sample_size`, `l2_normalise`, `assign_k`, `seed`, `present_threshold`, `n_boot`, `figures`, `umap.*`, `positive_class`, `positive_name` |
+| `grass-mil-metaclusters` | `configs/metaclusters.yaml` | `cells_dir`, `models`, `stage=all|cluster|match|transfer|basis`, `labels.*`, the clustering keys of `niches.yaml`, `match.{distance,threshold,scan.{min,max,n},min_folds}`, `transfer.{min_cells,present_threshold}`, `basis.{enabled,space_model,k,sample_size,n_init,seed}` |
+| `grass-mil-spatial-stats` | `configs/spatial_stats.yaml` | `cells_dir`, `regions`, `labels.*`, `analyses`, `group_map`, `reference`, `partners`, `infiltrating`, `nhood.{n_perms,backend}`, `cn.{window_k,n_cn,sample_size}`, `crossk.radii`, `seed`, `min_per_group` |
+| `grass-mil-predict` | `configs/inference/predict.yaml` | `aggregation.mode=mean|max|none|attention_weighted|mean_probability`, `aggregation.bag_scope=patch|region|sample|patient`, `aggregation.patient_map.{label_file,id_column,patient_column}` |
 
 ## 13) Repo-Enforced Behavioral Constraints (From Code)
 

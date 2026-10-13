@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from grass_mil.inference.embeddings import embeddings_to_dataframe, node_embeddings_to_dataframe
+from grass_mil.inference.io import embeddings_to_dataframe, node_embeddings_to_dataframe
 from grass_mil.inference.schemas import EmbeddingPayload
 
 

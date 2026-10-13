@@ -249,3 +249,22 @@ def test_nested_cv_smoke(cohort, tmp_path, regime):
     # resume: a second call reuses every finished run
     summary2 = run_nested_cv(cfg)
     assert summary2["auc_folds"] == summary["auc_folds"]
+
+
+def test_explicit_split_patch_id_kind_and_unit_key():
+    from grass_mil.data.components.datasets import ProcessedIndexEntry
+    from grass_mil.data.components.splits import ExplicitSplit
+    from grass_mil.data.spatial_omics_datamodule import unit_key
+
+    e = ProcessedIndexEntry(path="x", sample_id="s1", region_id="r1", patch_id="s1_t3")
+    assert (
+        unit_key(e, "region") == "r1"
+        and unit_key(e, "patch") == "s1_t3"
+        and unit_key(e, "sample") == "s1"
+    )
+    split = ExplicitSplit.from_dict(
+        {"train": ["s1_t3"], "val": None, "test": None, "id_kind": "patch"}
+    )
+    assert split.id_kind == "patch"
+    with pytest.raises(ValueError):
+        ExplicitSplit.from_dict({"train": ["a"], "id_kind": "tile"})

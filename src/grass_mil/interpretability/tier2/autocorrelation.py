@@ -21,12 +21,12 @@ and arguably cleaner object, but it is not numerically the same statistic.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Sequence
+from typing import Dict, Sequence
 
 import numpy as np
 import pandas as pd
 
-__all__ = ["MoranResult", "morans_i", "run_morans_i", "diff_morans_i_vs_reference"]
+__all__ = ["MoranResult", "morans_i", "run_morans_i"]
 
 
 @dataclass(frozen=True)
@@ -211,35 +211,3 @@ def run_morans_i(
         qvalue=q_frame,
         n_nodes=pd.Series(counts).reindex(stat_frame.index),
     )
-
-
-def diff_morans_i_vs_reference(
-    result: MoranResult,
-    *,
-    reference_group: object = -1,
-) -> pd.DataFrame:
-    """Differential autocorrelation against a reference group.
-
-    ``z = (I_k - I_ref) / sqrt(var_k + var_ref)``, using the permutation-null
-    variances. The reference is typically the Background niche.
-    """
-    if reference_group not in result.statistic.index:
-        raise ValueError(
-            f"reference_group {reference_group!r} is not present; available: "
-            f"{list(result.statistic.index)}."
-        )
-    ref_stat = result.statistic.loc[reference_group]
-    ref_var = result.variance.loc[reference_group]
-
-    rows: List[pd.Series] = []
-    index: List[object] = []
-    for group in result.statistic.index:
-        if group == reference_group:
-            continue
-        delta = result.statistic.loc[group] - ref_stat
-        pooled = np.sqrt(result.variance.loc[group].astype(float) + ref_var.astype(float))
-        rows.append(delta / pooled.replace(0.0, np.nan))
-        index.append(group)
-    if not rows:
-        return pd.DataFrame(columns=result.statistic.columns)
-    return pd.DataFrame(rows, index=index)
