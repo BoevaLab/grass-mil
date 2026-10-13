@@ -52,6 +52,7 @@ grass-mil-extract = "grass_mil.extract:main"
 grass-mil-scores = "grass_mil.evaluation.cli:main"
 grass-mil-niches = "grass_mil.interpretability.niches_cli:main"
 grass-mil-metaclusters = "grass_mil.interpretability.metaclusters_cli:main"
+grass-mil-spatial-stats = "grass_mil.spatial_stats.cli:main"
 grass-mil-predict = "grass_mil.inference.predict:main"
 grass-mil-report = "grass_mil.interpretability.report_cli:main"
 
