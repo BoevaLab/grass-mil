@@ -92,5 +92,7 @@ def test_sampler_strategy_resolution():
 
 
 def test_default_data_sampler_config():
-    data_cfg = OmegaConf.load(CONFIGS_DIR / "data" / "spatial_omics.yaml")
-    assert data_cfg.sampler.name == "shadow_custom"
+    cfg = _compose([])
+    assert cfg.data.sampler.name == "shadow_custom"
+    cfg_mil = _compose(["data/sampler=ego_graph_mil"])
+    assert cfg_mil.data.sampler.runtime.unit_as_bag is True

@@ -60,6 +60,7 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         tiling: Dict[str, Any],
         sampler: Optional[Dict[str, Any]] = None,
         val_sampler: Optional[Dict[str, Any]] = None,
+        test_sampler: Optional[Dict[str, Any]] = None,
         manifest: Optional[Dict[str, Any]] = None,
         graph_labels: Optional[Dict[str, Any]] = None,
         transforms: Optional[list[Dict[str, Any]]] = None,
@@ -92,8 +93,17 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         self.val_sampler_config = (
             SamplerConfig.from_dict(val_sampler) if val_sampler is not None else None
         )
+        # Test/predict loader. `null` derives it from the training sampler with
+        # every root kept once (no subsampling, no proportional weighting, no
+        # unit-as-bag), so a held-out region is scored on all of its cells.
+        self.test_sampler_config = (
+            SamplerConfig.from_dict(test_sampler)
+            if test_sampler is not None
+            else _all_roots_sampler_config(self.sampler_config)
+        )
         self.sampler_strategy: Optional[BaseSamplerStrategy] = None
         self.val_sampler_strategy: Optional[BaseSamplerStrategy] = None
+        self.test_sampler_strategy: Optional[BaseSamplerStrategy] = None
         self.manifest_config = ManifestConfig.from_dict(manifest)
         self.graph_label_config = GraphLabelConfig.from_dict(graph_labels)
         self.transforms = instantiate_transforms(transforms)
@@ -198,6 +208,13 @@ class SpatialOmicsDataModule(L.LightningDataModule):
             self.val_sampler_strategy = get_sampler_strategy(self.val_sampler_config)
         return self.val_sampler_strategy
 
+    def _ensure_test_sampler_strategy(self) -> BaseSamplerStrategy:
+        if self.test_sampler_config is None:
+            return self._ensure_sampler_strategy()
+        if self.test_sampler_strategy is None:
+            self.test_sampler_strategy = get_sampler_strategy(self.test_sampler_config)
+        return self.test_sampler_strategy
+
     def train_dataloader(self) -> Any:
         sampler = self._ensure_sampler_strategy()
         return sampler.build_dataset_loader(
@@ -219,7 +236,7 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         )
 
     def test_dataloader(self) -> Any:
-        sampler = self._ensure_sampler_strategy()
+        sampler = self._ensure_test_sampler_strategy()
         return sampler.build_dataset_loader(
             dataset=self.dataset_test,
             batch_size=self.hparams.batch_size,
@@ -238,6 +255,26 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         precompute whose entries carry the split you want.
         """
         return self.test_dataloader()
+
+
+def _all_roots_sampler_config(train_cfg: SamplerConfig) -> Optional[SamplerConfig]:
+    """Evaluation variant of a sampler config: every root once, uniformly, no bagging."""
+    if train_cfg is None or train_cfg.name == "identity":
+        return None
+    runtime = dict(train_cfg.runtime or {})
+    runtime.update(
+        {
+            "subsample_fraction": 1.0,
+            "subsample_count": None,
+            "subsample_seed": None,
+            "fixed_per_unit_seed": None,
+            "proportional_root_sampling": False,
+            "unit_as_bag": False,
+            "merge_units": False,
+            "shuffle_subgraphs": False,
+        }
+    )
+    return SamplerConfig(name=train_cfg.name, kwargs=dict(train_cfg.kwargs or {}), runtime=runtime)
 
 
 def _subset_dataset_from_entries(

@@ -1,0 +1,21 @@
+# @package _global_
+# Preprint "ftALL, lr x0.3 + regularisation" (the STAS model of record):
+# encoder lr x0.3, weight decay 1e-2, encoder dropout 0.2, edge/feature drop 0.05.
+defaults:
+  - linear_ftall
+
+regime_name: linear_ftall_reg
+
+optim:
+  weight_decay: 1.0e-2
+
+task:
+  optimization:
+    encoder_lr_scale: 0.3
+  finetune_augmentation:
+    drop_edge_p: 0.05
+    drop_feat_p: 0.05
+
+model:
+  encoder:
+    dropout: 0.2

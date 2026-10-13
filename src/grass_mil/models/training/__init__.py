@@ -9,12 +9,14 @@ from .bagging import (
 )
 from .augmentations import (
     build_augmentation,
+    build_finetune_augmentation,
     degree_importance,
     drop_edges,
     drop_features,
     drop_importance,
     feature_noise,
 )
+from .class_weights import collect_unit_labels, inverse_frequency_class_weights
 from .builders import (
     build_supervised_components,
     infer_categorical_binding,
@@ -33,9 +35,11 @@ from .loss_utils import (
     compute_supervised_loss,
 )
 from .optimization import (
+    build_param_groups,
     instantiate_optimizer,
     instantiate_scheduler,
     instantiate_scheduler_with_warmup,
+    resolve_t_max_auto,
 )
 from .ssl_runtime import CosineWarmup
 
@@ -49,6 +53,11 @@ __all__ = [
     "select_target_columns",
     "build_supervised_components",
     "build_augmentation",
+    "build_finetune_augmentation",
+    "build_param_groups",
+    "collect_unit_labels",
+    "inverse_frequency_class_weights",
+    "resolve_t_max_auto",
     "degree_importance",
     "drop_edges",
     "drop_features",

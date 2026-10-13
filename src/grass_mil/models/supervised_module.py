@@ -5,6 +5,8 @@ from typing import Any, Dict, List, Optional
 import lightning as L
 import torch
 import torch.distributed as dist
+from omegaconf import DictConfig, OmegaConf
+
 from grass_mil.batching import extract_subgraphs
 from grass_mil.inference.aggregation import aggregate_group_logits
 from grass_mil.inference.metrics import compute_task_metrics_from_tensors
@@ -13,7 +15,10 @@ from grass_mil.inference.schemas import BatchPredictionPayload
 from .training import (
     aggregate_bag_logits_attention,
     aggregate_bag_logits_mean,
+    build_finetune_augmentation,
+    build_param_groups,
     build_supervised_components,
+    collect_unit_labels,
     compute_binary_accuracy,
     compute_categorical_accuracy,
     compute_supervised_loss,
@@ -22,7 +27,9 @@ from .training import (
     group_instance_indices_by_bag,
     instantiate_optimizer,
     instantiate_scheduler_with_warmup,
+    inverse_frequency_class_weights,
     load_state_dict_with_optional_mapping,
+    resolve_t_max_auto,
     validate_task_config,
 )
 
@@ -101,6 +108,23 @@ class SupervisedModule(L.LightningModule):
             self.region_accum_hyperbatch_size = 0
             self.region_accum_flush_on_epoch_end = False
 
+        # Regime knobs (all optional; see configs/regime/*.yaml for the presets).
+        self.optimization_cfg = dict(self.task_cfg.get("optimization", {}) or {})
+        self.class_weights_cfg = self.task_cfg.get("class_weights")
+        self.finetune_aug_cfg = self.task_cfg.get("finetune_augmentation")
+        self.head_init_path = self.task_cfg.get("head_init_path")
+        self.freeze_head = bool(self.task_cfg.get("freeze_head", False))
+        grad_clip = self.task_cfg.get("grad_clip_norm")
+        self.grad_clip_norm = None if grad_clip in (None, "", "none") else float(grad_clip)
+        self.scheduler_interval = str(self.task_cfg.get("scheduler_interval", "epoch"))
+        if self.scheduler_interval not in {"epoch", "step"}:
+            raise ValueError("task.scheduler_interval must be 'epoch' or 'step'.")
+        self._finetune_augment = None
+        self._encoder_frozen = False
+        self._eval_stage = "val"
+        self.test_predictions: Optional[Dict[str, Any]] = None
+        self._skipped_optimizer_steps = 0
+
         self._region_loss_buffer: list[torch.Tensor] = []
         self._manual_optimizer_steps = 0
         # In inference, callers can disable instance-level payload emission to reduce
@@ -159,16 +183,104 @@ class SupervisedModule(L.LightningModule):
             init_strict=self.init_strict,
             encoder_init_map=self.encoder_init_map,
         )
-        if self.freeze_encoder:
+        encoder_scale = float(self.optimization_cfg.get("encoder_lr_scale", 1.0) or 0.0)
+        if self.freeze_encoder or encoder_scale <= 0.0:
+            # A zero learning-rate scale is the preprint's "frozen encoder": no
+            # gradients, no optimizer group, and the encoder stays in eval mode
+            # (dropout/batchnorm off) throughout training.
             for p in self.encoder.parameters():
                 p.requires_grad = False
+            self._encoder_frozen = True
+            self.encoder.eval()
+
+        if self.head_init_path:
+            self._load_head_init(str(self.head_init_path))
+        if self.freeze_head:
+            for p in self.graph_head.parameters():
+                p.requires_grad = False
+
+        self._configure_class_weights(stage)
+        self._configure_finetune_augmentation()
         self._built = True
+
+    def _load_head_init(self, path: str) -> None:
+        """Initialise the graph head from a probe-head file (``graph_head.net.*`` keys)."""
+        state = torch.load(path, map_location="cpu", weights_only=False)
+        if isinstance(state, dict) and "state_dict" in state:
+            state = state["state_dict"]
+        head_state = {
+            k.split("graph_head.", 1)[1]: v
+            for k, v in state.items()
+            if isinstance(k, str) and k.startswith("graph_head.") and isinstance(v, torch.Tensor)
+        }
+        if not head_state:
+            raise ValueError(f"No 'graph_head.*' tensors found in head_init_path={path!r}.")
+        missing, unexpected = self.graph_head.load_state_dict(head_state, strict=False)
+        if unexpected:
+            raise ValueError(f"head_init_path carries keys the head does not have: {unexpected}")
+        if missing:
+            raise ValueError(
+                f"head_init_path does not cover the whole head (missing {missing}); a probe "
+                "pre-fit targets a linear head (model.graph_head.num_layers=1)."
+            )
+
+    def _configure_class_weights(self, stage: Optional[str]) -> None:
+        cfg = self.class_weights_cfg
+        if cfg is None or stage not in (None, "fit"):
+            return
+        if not hasattr(self.loss_fn, "class_weight"):
+            return
+        if isinstance(cfg, str):
+            if cfg.lower() != "auto_train":
+                raise ValueError("task.class_weights must be 'auto_train', a list, or null.")
+            labels = self._training_unit_labels()
+            if labels is None:
+                return
+            num_classes = int(self.hparams.graph_head.get("output_dim", 1))
+            if num_classes <= 1:
+                return
+            weights = inverse_frequency_class_weights(labels, num_classes)
+        else:
+            weights = torch.as_tensor([float(v) for v in cfg], dtype=torch.float32)
+        self.loss_fn.class_weight = weights
+        self._class_weights = weights
+
+    def _training_unit_labels(self) -> Optional[list[int]]:
+        try:
+            trainer = self.trainer
+        except RuntimeError:
+            return None
+        if trainer is None or trainer.datamodule is None:
+            return None
+        dataset = getattr(trainer.datamodule, "dataset_train", None)
+        if dataset is None:
+            return None
+        labels = collect_unit_labels(dataset, target_columns=self.task_cfg.get("target_columns"))
+        return labels or None
+
+    def _configure_finetune_augmentation(self) -> None:
+        if not self.finetune_aug_cfg:
+            return
+        input_proj = getattr(self.encoder, "input_proj", None)
+        self._finetune_augment = build_finetune_augmentation(
+            self.finetune_aug_cfg,
+            unassigned_index=getattr(input_proj, "unassigned_index", None),
+            categorical_column=getattr(input_proj, "_column_index", None),
+        )
+
+    def train(self, mode: bool = True):
+        super().train(mode)
+        if mode and self._encoder_frozen and self.encoder is not None:
+            self.encoder.eval()
+        return self
 
     # ------------------------------------------------------------------
     # Forward helpers
     # ------------------------------------------------------------------
 
     def _forward_instances(self, batch):
+        if self.training and self._finetune_augment is not None:
+            batch = self._finetune_augment(batch)
         node_emb, graph_emb = self.encoder(
             batch.x,
             batch.edge_index,
@@ -768,7 +880,13 @@ class SupervisedModule(L.LightningModule):
         return mean_region_loss_value
 
     def validation_step(self, batch, batch_idx):
-        out = self._shared_step(batch, "val")
+        return self._eval_step(batch, "val")
+
+    def _eval_step(self, batch, stage: str):
+        """Shared val/test step: buffer instance-level outputs for region-level
+        aggregation at epoch end, so a region split over several sub-batches is
+        scored exactly once with one attention softmax over all of its cells."""
+        out = self._shared_step(batch, stage)
         metadata = self._build_predict_group_metadata(
             batch,
             patch_logits=out["patch_logits"],
@@ -793,7 +911,15 @@ class SupervisedModule(L.LightningModule):
         return out
 
     def test_step(self, batch, batch_idx):
-        return self._shared_step(batch, "test")
+        return self._eval_step(batch, "test")
+
+    def on_test_epoch_start(self) -> None:
+        self._eval_stage = "test"
+        self._reset_val_epoch_buffers()
+
+    def on_test_epoch_end(self) -> None:
+        self._finish_eval_epoch("test")
+        self._eval_stage = "val"
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         out = self._forward_bags(batch, allow_missing_targets=True)
@@ -878,16 +1004,30 @@ class SupervisedModule(L.LightningModule):
 
             flush_loss = torch.stack(chunk, dim=0).mean()
             self.manual_backward(flush_loss)
+            if self.grad_clip_norm is not None:
+                self.clip_gradients(
+                    optimizer,
+                    gradient_clip_val=float(self.grad_clip_norm),
+                    gradient_clip_algorithm="norm",
+                )
+            scaler = self._amp_scaler()
+            scale_before = float(scaler.get_scale()) if scaler is not None else None
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
-
-            scheduler = self.lr_schedulers()
-            if scheduler is not None:
-                if isinstance(scheduler, (list, tuple)):
-                    for sch in scheduler:
-                        sch.step()
-                else:
-                    scheduler.step()
+            # Under mixed precision a step with inf/nan gradients is skipped and the
+            # loss scale is reduced; the preprint only advances the schedule on
+            # steps that actually updated the weights.
+            stepped = scaler is None or float(scaler.get_scale()) >= scale_before
+            if stepped:
+                scheduler = self.lr_schedulers()
+                if scheduler is not None:
+                    if isinstance(scheduler, (list, tuple)):
+                        for sch in scheduler:
+                            sch.step()
+                    else:
+                        scheduler.step()
+            else:
+                self._skipped_optimizer_steps += 1
             self._manual_optimizer_steps += 1
             self.log(
                 "train/manual_optimizer_steps",
@@ -904,6 +1044,14 @@ class SupervisedModule(L.LightningModule):
 
         return flush_losses
 
+    def _amp_scaler(self):
+        """The GradScaler of the active mixed-precision plugin, if any."""
+        try:
+            plugin = self.trainer.precision_plugin
+        except RuntimeError:
+            return None
+        return getattr(plugin, "scaler", None)
+
     def on_train_start(self) -> None:
         if self.region_accum_enabled:
             self._region_loss_buffer.clear()
@@ -912,6 +1060,9 @@ class SupervisedModule(L.LightningModule):
         self._reset_val_epoch_buffers()
 
     def on_validation_epoch_end(self) -> None:
+        self._finish_eval_epoch("val")
+
+    def _finish_eval_epoch(self, stage: str) -> None:
         payload = self._build_validation_epoch_payload()
         if payload is None or payload.bag_targets is None:
             self._reset_val_epoch_buffers()
@@ -933,45 +1084,99 @@ class SupervisedModule(L.LightningModule):
             targets=aggregated.bag_targets,
             threshold=0.5,
         )
+        region_metrics = self._region_level_metrics(
+            target_type, aggregated.bag_logits, aggregated.bag_targets
+        )
+
+        def _log(name: str, value: float, prog_bar: bool = False) -> None:
+            self.log(
+                f"{stage}/{name}",
+                torch.tensor(float(value), device=self.device),
+                on_step=False,
+                on_epoch=True,
+                prog_bar=prog_bar,
+            )
+
         if target_type in {"binary", "categorical"}:
-            self.log(
-                "val/acc",
-                torch.tensor(float(metrics["accuracy"]), device=self.device),
-                on_step=False,
-                on_epoch=True,
-                prog_bar=True,
-            )
+            _log("acc", metrics["accuracy"], prog_bar=True)
+            for name, value in region_metrics.items():
+                _log(name, value, prog_bar=name == "auroc")
         elif target_type == "regression":
-            self.log(
-                "val/mae",
-                torch.tensor(float(metrics["mae"]), device=self.device),
-                on_step=False,
-                on_epoch=True,
-                prog_bar=True,
-            )
-            self.log(
-                "val/rmse",
-                torch.tensor(float(metrics["rmse"]), device=self.device),
-                on_step=False,
-                on_epoch=True,
-                prog_bar=True,
-            )
-            self.log(
-                "val/r2",
-                torch.tensor(float(metrics["r2"]), device=self.device),
-                on_step=False,
-                on_epoch=True,
-                prog_bar=False,
-            )
+            _log("mae", metrics["mae"], prog_bar=True)
+            _log("rmse", metrics["rmse"], prog_bar=True)
+            _log("r2", metrics["r2"])
         elif target_type == "survival":
-            self.log(
-                "val/c_index",
-                torch.tensor(float(metrics["c_index"]), device=self.device),
-                on_step=False,
-                on_epoch=True,
-                prog_bar=True,
-            )
+            _log("c_index", metrics["c_index"], prog_bar=True)
+
+        if stage == "test":
+            self.test_predictions = {
+                "bag_ids": list(aggregated.bag_ids),
+                "logits": aggregated.bag_logits.detach().cpu(),
+                "targets": aggregated.bag_targets.detach().cpu(),
+                "region_ids": list(getattr(aggregated, "row_region_ids", None) or []),
+                "sample_ids": list(getattr(aggregated, "row_sample_ids", None) or []),
+                "target_type": target_type,
+            }
         self._reset_val_epoch_buffers()
+
+    @staticmethod
+    def _region_level_metrics(
+        target_type: str, logits: torch.Tensor, targets: torch.Tensor
+    ) -> Dict[str, float]:
+        """Unweighted region loss, AUROC and balanced accuracy on aggregated region logits.
+
+        These are the quantities the preprint selects and early-stops on: the loss
+        of the region-level prediction (not of training sub-batches) and the
+        AUROC of the positive-class probability.
+        """
+        import numpy as np
+        from sklearn.metrics import balanced_accuracy_score, roc_auc_score
+
+        out: Dict[str, float] = {}
+        logits = logits.detach().float().cpu()
+        y = targets.detach().cpu()
+        if target_type == "categorical":
+            y_int = y.long().view(-1)
+            out["loss_region"] = float(torch.nn.functional.cross_entropy(logits, y_int))
+            probs = torch.softmax(logits, dim=1).numpy()
+            yi = y_int.numpy()
+            n_classes = probs.shape[1]
+            try:
+                if n_classes == 2:
+                    out["auroc"] = float(roc_auc_score(yi, probs[:, 1]))
+                else:
+                    out["auroc"] = float(
+                        roc_auc_score(yi, probs, multi_class="ovr", average="macro")
+                    )
+            except ValueError:
+                out["auroc"] = float("nan")
+            pred = probs.argmax(axis=1)
+            out["bal_acc"] = (
+                float(balanced_accuracy_score(yi, pred))
+                if len(np.unique(yi)) > 1
+                else float("nan")
+            )
+            out["pred_pos_frac"] = float((pred == 1).mean()) if n_classes == 2 else float("nan")
+        elif target_type == "binary":
+            yb = y.float().view(-1)
+            lg = logits.view(-1)
+            out["loss_region"] = float(
+                torch.nn.functional.binary_cross_entropy_with_logits(lg, yb)
+            )
+            prob = torch.sigmoid(lg).numpy()
+            yi = yb.numpy().astype(int)
+            try:
+                out["auroc"] = float(roc_auc_score(yi, prob))
+            except ValueError:
+                out["auroc"] = float("nan")
+            pred = (prob >= 0.5).astype(int)
+            out["bal_acc"] = (
+                float(balanced_accuracy_score(yi, pred))
+                if len(np.unique(yi)) > 1
+                else float("nan")
+            )
+            out["pred_pos_frac"] = float(pred.mean())
+        return out
 
     def on_train_epoch_end(self) -> None:
         if not self.region_accum_enabled:
@@ -999,44 +1204,13 @@ class SupervisedModule(L.LightningModule):
                 "(for example '+optim=adamw') or set model.optim explicitly."
             )
 
-        optimization_cfg = dict(self.task_cfg.get("optimization", {}))
-        backbone_lr = optimization_cfg.get("backbone_lr")
-        attention_lr = optimization_cfg.get("attention_lr")
-
-        params = [p for p in self.parameters() if p.requires_grad]
-
-        if self.use_attention and backbone_lr is not None and attention_lr is not None:
-            seen: set[int] = set()
-
-            def _collect_params(module) -> list[torch.nn.Parameter]:
-                out: list[torch.nn.Parameter] = []
-                if module is None:
-                    return out
-                for param in module.parameters():
-                    if not param.requires_grad:
-                        continue
-                    pid = id(param)
-                    if pid in seen:
-                        continue
-                    seen.add(pid)
-                    out.append(param)
-                return out
-
-            backbone_params = _collect_params(self.encoder) + _collect_params(self.graph_head)
-            attention_params = _collect_params(self.attention)
-            param_groups: list[dict] = []
-            if backbone_params:
-                param_groups.append({"params": backbone_params, "lr": float(backbone_lr)})
-            if attention_params:
-                param_groups.append({"params": attention_params, "lr": float(attention_lr)})
-            if param_groups:
-                params = param_groups
-
+        params = self._build_optimizer_params()
         optimizer = instantiate_optimizer(self.optim_cfg, params)
         scheduler = instantiate_scheduler_with_warmup(
             self.scheduler_cfg,
             optimizer,
             warmup_cfg=self.task_cfg.get("lr_warmup"),
+            t_max_auto=self._resolve_t_max_auto(),
         )
         if scheduler is None:
             return optimizer
@@ -1044,10 +1218,118 @@ class SupervisedModule(L.LightningModule):
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "interval": "epoch",
+                "interval": self.scheduler_interval,
                 "frequency": 1,
             },
         }
+
+    def _build_optimizer_params(self):
+        """Parameters or parameter groups for the optimizer.
+
+        ``task.optimization`` accepts either the per-component multipliers
+        ``encoder_lr_scale`` / ``head_lr_scale`` / ``attention_lr_scale`` (with
+        ``head_weight_decay``), or the absolute pair ``backbone_lr`` +
+        ``attention_lr``. Setting only one of the absolute pair is an error rather
+        than a silent no-op.
+        """
+        opt = self.optimization_cfg
+        scale_keys = {
+            "encoder_lr_scale",
+            "head_lr_scale",
+            "attention_lr_scale",
+            "head_weight_decay",
+        }
+        has_scales = any(opt.get(k) is not None for k in scale_keys)
+        backbone_lr = opt.get("backbone_lr")
+        attention_lr = opt.get("attention_lr")
+        if (backbone_lr is None) != (attention_lr is None):
+            raise ValueError(
+                "task.optimization.backbone_lr and attention_lr must be set together "
+                "(or use encoder_lr_scale / head_lr_scale / attention_lr_scale)."
+            )
+        if has_scales and backbone_lr is not None:
+            raise ValueError(
+                "task.optimization mixes absolute (backbone_lr/attention_lr) and scaled "
+                "learning rates; use one scheme."
+            )
+
+        base_cfg = (
+            OmegaConf.to_container(self.optim_cfg, resolve=True)
+            if isinstance(self.optim_cfg, DictConfig)
+            else dict(self.optim_cfg)
+        )
+        base_lr = float(base_cfg.get("lr", 1e-3))
+        base_wd = float(base_cfg.get("weight_decay", 0.0) or 0.0)
+
+        if has_scales or self._encoder_frozen or self.freeze_head:
+            groups = build_param_groups(
+                base_lr=base_lr,
+                base_weight_decay=base_wd,
+                encoder=self.encoder,
+                head=self.graph_head,
+                attention=self.attention if self.use_attention else None,
+                encoder_lr_scale=0.0
+                if self._encoder_frozen
+                else float(opt.get("encoder_lr_scale", 1.0) or 0.0),
+                head_lr_scale=float(opt.get("head_lr_scale", 1.0) or 0.0),
+                attention_lr_scale=float(opt.get("attention_lr_scale", 1.0) or 0.0),
+                head_weight_decay=opt.get("head_weight_decay"),
+                freeze_head=self.freeze_head,
+            )
+            return groups
+
+        params = [p for p in self.parameters() if p.requires_grad]
+        if self.use_attention and backbone_lr is not None:
+            # Absolute scheme: one backbone group (encoder + head) and one attention group.
+            seen: set[int] = set()
+
+            def _collect(module) -> list[torch.nn.Parameter]:
+                out: list[torch.nn.Parameter] = []
+                for p in module.parameters():
+                    if p.requires_grad and id(p) not in seen:
+                        seen.add(id(p))
+                        out.append(p)
+                return out
+
+            backbone = _collect(self.encoder) + _collect(self.graph_head)
+            attention = _collect(self.attention)
+            groups: list[dict] = []
+            if backbone:
+                groups.append({"params": backbone, "lr": float(backbone_lr)})
+            if attention:
+                groups.append({"params": attention, "lr": float(attention_lr)})
+            return groups or params
+        return params
+
+    def _resolve_t_max_auto(self) -> Optional[int]:
+        """Optimizer steps for ``scheduler.T_max: auto``."""
+        try:
+            trainer = self.trainer
+        except RuntimeError:
+            return None
+        if trainer is None:
+            return None
+        max_epochs = int(trainer.max_epochs or 1)
+        if self.region_accum_enabled:
+            n_units = None
+            dm = getattr(trainer, "datamodule", None)
+            ds = getattr(dm, "dataset_train", None) if dm is not None else None
+            if ds is not None:
+                try:
+                    n_units = len(ds)
+                except TypeError:
+                    n_units = None
+            if n_units is None:
+                return None
+            return resolve_t_max_auto(
+                num_train_units=int(n_units),
+                max_epochs=max_epochs,
+                hyperbatch_size=self.region_accum_hyperbatch_size,
+            )
+        try:
+            return int(trainer.estimated_stepping_batches)
+        except Exception:
+            return None
 
     def _reset_val_epoch_buffers(self) -> None:
         self._val_bag_ids: list[str] = []

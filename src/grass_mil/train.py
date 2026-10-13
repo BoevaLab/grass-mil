@@ -82,6 +82,11 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
                 f"{removed}"
             )
     callbacks: List[Callback] = instantiate_callbacks(callbacks_cfg)
+    output_dir = cfg.get("paths", {}).get("output_dir") if cfg.get("paths") else None
+    if output_dir and not _requires_zero_validation(cfg):
+        from grass_mil.callbacks import EpochMetricsWriter
+
+        callbacks.append(EpochMetricsWriter(str(output_dir)))
 
     log.info("Instantiating loggers...")
     logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
@@ -127,6 +132,12 @@ def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
             )
         trainer.test(model=model, datamodule=datamodule, ckpt_path=ckpt_path)
         log.info(f"Best ckpt path: {ckpt_path}")
+        if output_dir:
+            from grass_mil.callbacks import write_test_predictions
+
+            written = write_test_predictions(model, str(output_dir))
+            if written is not None:
+                log.info(f"Test predictions written to {written}")
 
     test_metrics = trainer.callback_metrics
 

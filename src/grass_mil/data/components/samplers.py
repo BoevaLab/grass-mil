@@ -68,12 +68,40 @@ class RuntimeShadowConfig:
     min_weight: float = 1e-6
     subsample_fraction: float = 1.0
     subsample_seed: Optional[int] = None
+    # Absolute number of root cells drawn per unit per epoch (uniformly, without
+    # replacement). Overrides `subsample_fraction` when set; `null` keeps every
+    # candidate root. The preprint trains on 256 (fine-tuning) / 512 (frozen
+    # encoder) roots per region per step and validates on a fixed 1024.
+    subsample_count: Optional[int] = None
+    # Seed that makes the per-unit root subset identical on every pass (the
+    # generator is re-seeded from `seed` and the unit index). Use for validation
+    # so epoch-to-epoch metric differences reflect the model, not the sample.
+    fixed_per_unit_seed: Optional[int] = None
+    # One batch per unit holding all of its selected roots, so the MIL bag, the
+    # attention softmax and the loss all cover the whole region at once.
+    # `subgraph_batch_size` is then only an upper bound (chunks are concatenated).
+    unit_as_bag: bool = False
+    # Pretraining: sample roots from the union of all units rather than one unit
+    # at a time (the preprint's BGRL draws its 64-root batches this way).
+    merge_units: bool = False
     interior_seeds: InteriorSeedConfig = field(default_factory=InteriorSeedConfig)
     ego_radius: EgoRadiusConfig = field(default_factory=EgoRadiusConfig)
 
     @classmethod
     def from_dict(cls, cfg: Optional[Dict[str, Any]]) -> "RuntimeShadowConfig":
         cfg = cfg or {}
+        num_neighbors = int(cfg.get("num_neighbors", 8))
+        if num_neighbors < 0:
+            # -1 = unlimited: every neighbour is kept at every hop (full k-hop ego-graph).
+            num_neighbors = UNLIMITED_NEIGHBORS
+        subsample_count = cfg.get("subsample_count")
+        if subsample_count is not None:
+            subsample_count = int(subsample_count)
+            if subsample_count <= 0:
+                raise ValueError("runtime.subsample_count must be a positive integer or null.")
+        fixed_per_unit_seed = cfg.get("fixed_per_unit_seed")
+        if fixed_per_unit_seed is not None:
+            fixed_per_unit_seed = int(fixed_per_unit_seed)
         weight_mode = str(cfg.get("weight_mode", "inverse")).strip().lower()
         allowed_weight_modes = {"inverse", "sqrt_inverse", "proportional"}
         if weight_mode not in allowed_weight_modes:
@@ -100,7 +128,7 @@ class RuntimeShadowConfig:
         return cls(
             enabled=bool(cfg.get("enabled", False)),
             depth=int(cfg.get("depth", 2)),
-            num_neighbors=int(cfg.get("num_neighbors", 8)),
+            num_neighbors=num_neighbors,
             subgraph_batch_size=int(cfg.get("subgraph_batch_size", 32)),
             replace=bool(cfg.get("replace", False)),
             shuffle_subgraphs=bool(cfg.get("shuffle_subgraphs", True)),
@@ -113,9 +141,16 @@ class RuntimeShadowConfig:
             min_weight=min_weight,
             subsample_fraction=subsample_fraction,
             subsample_seed=subsample_seed,
+            subsample_count=subsample_count,
+            fixed_per_unit_seed=fixed_per_unit_seed,
+            unit_as_bag=bool(cfg.get("unit_as_bag", False)),
+            merge_units=bool(cfg.get("merge_units", False)),
             interior_seeds=InteriorSeedConfig.from_dict(cfg.get("interior_seeds")),
             ego_radius=EgoRadiusConfig.from_dict(cfg.get("ego_radius")),
         )
+
+
+UNLIMITED_NEIGHBORS = 10**8
 
 
 def _build_weighted_node_idx(
@@ -275,19 +310,39 @@ def _subsample_count(num_candidates: int, subsample_fraction: float) -> int:
     return min(n_keep, num_candidates)
 
 
+def _resolve_num_selected_roots(
+    num_candidates: int, *, subsample_fraction: float, subsample_count: Optional[int]
+) -> int:
+    if subsample_count is not None:
+        return min(int(subsample_count), int(num_candidates))
+    return _subsample_count(num_candidates, subsample_fraction)
+
+
 def _subsample_root_candidates(
     candidates: torch.Tensor,
     *,
     subsample_fraction: float,
     generator: Optional[torch.Generator],
+    subsample_count: Optional[int] = None,
 ) -> torch.Tensor:
     n_candidates = int(candidates.numel())
-    n_keep = _subsample_count(n_candidates, subsample_fraction)
+    n_keep = _resolve_num_selected_roots(
+        n_candidates, subsample_fraction=subsample_fraction, subsample_count=subsample_count
+    )
     if n_keep >= n_candidates:
         return candidates
     perm = torch.randperm(n_candidates, generator=generator)
     selected = perm[:n_keep].sort().values
     return candidates.index_select(0, selected)
+
+
+def _per_unit_generator(seed: Optional[int], unit_index: int) -> Optional[torch.Generator]:
+    """Generator that yields the same root subset for a unit on every pass."""
+    if seed is None:
+        return None
+    gen = torch.Generator()
+    gen.manual_seed(int(seed) * 1000003 + int(unit_index))
+    return gen
 
 
 class BaseSamplerStrategy:
@@ -365,10 +420,17 @@ class _RuntimeUnitShadowDatasetLoader:
                 if computed_node_idx is not None:
                     effective_node_idx = computed_node_idx
             num_candidate_roots = _resolve_num_roots(unit_data, effective_node_idx)
-            num_roots = _subsample_count(
-                num_candidate_roots, float(self.runtime.subsample_fraction)
+            num_roots = _resolve_num_selected_roots(
+                num_candidate_roots,
+                subsample_fraction=float(self.runtime.subsample_fraction),
+                subsample_count=self.runtime.subsample_count,
             )
-            total_batches += int((num_roots + subgraph_batch_size - 1) // subgraph_batch_size)
+            if self.runtime.unit_as_bag:
+                total_batches += 1 if num_roots > 0 else 0
+            else:
+                total_batches += int(
+                    (num_roots + subgraph_batch_size - 1) // subgraph_batch_size
+                )
         return total_batches
 
     def __iter__(self):
@@ -408,11 +470,18 @@ class _RuntimeUnitShadowDatasetLoader:
             effective_root_candidates = _resolve_root_candidates(
                 unit_data, effective_node_idx
             )
+            unit_generator = _per_unit_generator(self.runtime.fixed_per_unit_seed, idx)
             effective_root_candidates = _subsample_root_candidates(
                 effective_root_candidates,
                 subsample_fraction=float(self.runtime.subsample_fraction),
-                generator=subsample_generator,
+                generator=unit_generator if unit_generator is not None else subsample_generator,
+                subsample_count=self.runtime.subsample_count,
             )
+            if effective_root_candidates.numel() == 0:
+                continue
+            unit_batch_size = subgraph_batch_size
+            if self.runtime.unit_as_bag:
+                unit_batch_size = int(effective_root_candidates.numel())
             unit_loader_kwargs: Dict[str, Any] = {
                 "num_workers": self.num_workers,
                 "pin_memory": self.pin_memory,
@@ -426,7 +495,7 @@ class _RuntimeUnitShadowDatasetLoader:
                 data=unit_data,
                 depth=int(self.runtime.depth),
                 num_neighbors=int(self.runtime.num_neighbors),
-                batch_size=subgraph_batch_size,
+                batch_size=unit_batch_size,
                 node_idx=effective_root_candidates,
                 replace=bool(self.runtime.replace),
                 shuffle=bool(self.runtime.shuffle_subgraphs and self.shuffle),

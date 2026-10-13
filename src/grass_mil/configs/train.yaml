@@ -23,6 +23,9 @@ defaults:
   # experiment configs allow for version control of specific hyperparameters
   # e.g. best hyperparameters for given model and datamodule
   - experiment: null
+  # Training regime presets (configs/regime/*.yaml): mil, mil_frozen,
+  # linear_probehead, linear_ftall, linear_ftall_reg. Select with `regime=mil`.
+  - regime: null
 
   # config for hyperparameter optimization
   - hparams_search: null

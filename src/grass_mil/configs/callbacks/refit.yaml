@@ -1,0 +1,18 @@
+# Refit on all development folds for a fixed number of epochs: no early
+# stopping, no metric-based selection; the final-epoch weights are the model.
+defaults:
+  - model_checkpoint
+  - model_summary
+  - rich_progress_bar
+  - _self_
+
+model_checkpoint:
+  dirpath: ${paths.output_dir}/checkpoints
+  filename: "last_epoch"
+  monitor: null
+  save_last: True
+  save_top_k: 0
+  auto_insert_metric_name: False
+
+model_summary:
+  max_depth: -1

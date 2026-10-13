@@ -1,3 +1,7 @@
+defaults:
+  - sampler: shadow_custom
+  - _self_
+
 _target_: grass_mil.data.spatial_omics_datamodule.SpatialOmicsDataModule
 
 data_dir: ${paths.data_dir}
@@ -74,36 +78,12 @@ feature_reducer:
   fit_mode: train_only # train_only | global
   kwargs: {}
 
-sampler:
-  name: shadow_custom
-  kwargs: {}
-  runtime:
-    enabled: true
-    depth: 2
-    num_neighbors: 8
-    subgraph_batch_size: 32
-    replace: false
-    shuffle_subgraphs: true
-    proportional_root_sampling: true
-    property_name: cell_type
-    weight_mode: inverse
-    min_weight: 1.0e-6
-    # See configs/data/sampler/shadow_custom.yaml for the full documentation.
-    interior_seeds:
-      enabled: false
-      n_hops: null
-      seed_tolerance_multiplier: 1.0
-      keep_largest_component: true
-      cache_dir: null
-    ego_radius:
-      enabled: false
-      radius_per_hop: 75.0
-      radius_offset: 55.0
-      keep_root_component: true
-
-# Optional validation-only sampler override.
-# When null, validation reuses `sampler`.
+# `sampler` comes from the data/sampler group (shadow_custom by default;
+# `data/sampler=ego_graph_mil` is the preprint MIL setting). Override single
+# keys as `data.sampler.runtime.<key>=...`.
 val_sampler: null
+# Test/predict loader; null derives an all-roots, unweighted variant of `sampler`.
+test_sampler: null
 
 tiling:
   tile_size_um: 200.0

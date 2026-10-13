@@ -1,0 +1,36 @@
+# Ego-graph bags for MIL fine-tuning (preprint defaults).
+# Training: `subsample_count` random roots per region per epoch (uniform, not
+# cell-type weighted), one batch per region (`unit_as_bag`), full k-hop
+# ego-graphs (depth 4, unlimited neighbours, no radius cap).
+# Validation: a fixed 1024-root subset per region (`val_sampler`, below).
+# Test/predict: every root once (derived automatically from this config).
+name: shadow_custom
+kwargs: {}
+runtime:
+  enabled: true
+  depth: 4
+  num_neighbors: -1          # -1 = all neighbours at every hop
+  subgraph_batch_size: 64    # upper bound per chunk; ignored when unit_as_bag
+  replace: false
+  shuffle_subgraphs: true
+  proportional_root_sampling: false
+  property_name: cell_type
+  weight_mode: inverse
+  min_weight: 1.0e-6
+  subsample_fraction: 1.0
+  subsample_count: 256
+  subsample_seed: null
+  fixed_per_unit_seed: null
+  unit_as_bag: true
+  merge_units: false
+  interior_seeds:
+    enabled: false
+    n_hops: null
+    seed_tolerance_multiplier: 1.0
+    keep_largest_component: true
+    cache_dir: null
+  ego_radius:
+    enabled: false
+    radius_per_hop: 75.0
+    radius_offset: 55.0
+    keep_root_component: true

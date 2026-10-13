@@ -164,7 +164,9 @@ def drop_edges(
     if edge_index.numel() == 0:
         return out
 
-    draws = torch.rand((edge_index.size(1),), generator=generator, device=edge_index.device)
+    # Draw on the generator's device (CPU) and move the mask: a CPU generator
+    # cannot drive a CUDA draw, and fine-tuning batches live on the GPU.
+    draws = torch.rand((edge_index.size(1),), generator=generator).to(edge_index.device)
     keep = draws >= float(p)
     if force_undirected:
         keep = _mutual_edge_mask(edge_index, keep)
@@ -176,16 +178,99 @@ def drop_edges(
     return out
 
 
-def drop_features(data, *, p: float, generator: Optional[torch.Generator] = None):
-    """Zero whole feature columns with probability ``p``."""
-    if p <= 0.0 or data.x is None or data.x.numel() == 0:
+def drop_features(
+    data,
+    *,
+    p: float,
+    generator: Optional[torch.Generator] = None,
+    mode: str = "column",
+    categorical_column: Optional[int] = None,
+    unassigned_index: Optional[int] = None,
+):
+    """Feature dropout.
+
+    ``mode="column"`` zeroes whole feature columns with probability ``p`` (the
+    BGRL view generator). ``mode="elementwise"`` is the fine-tuning transform of
+    the preprint: every entry of ``x`` is zeroed independently with probability
+    ``p``, and a node whose draw falls below ``p`` has its categorical code
+    (column ``categorical_column`` of ``categorical_codes``) rewritten to
+    ``unassigned_index`` so the cell type is dropped as well.
+    """
+    if p <= 0.0:
         return data
+    if mode not in {"column", "elementwise"}:
+        raise ValueError(f"drop_features mode must be 'column' or 'elementwise', got {mode!r}.")
+    if mode == "column":
+        if data.x is None or data.x.numel() == 0:
+            return data
+        out = _clone(data)
+        x = out.x.clone()
+        draws = torch.rand((x.size(1),), generator=generator).to(x.device)
+        x[:, draws < float(p)] = 0
+        out.x = x
+        return out
+
     out = _clone(data)
-    x = out.x.clone()
-    draws = torch.rand((x.size(1),), generator=generator, device=x.device)
-    x[:, draws < float(p)] = 0
-    out.x = x
+    num_nodes = int(getattr(out, "num_nodes", 0) or (out.x.size(0) if out.x is not None else 0))
+    if out.x is not None and out.x.numel() > 0:
+        x = out.x.clone()
+        draws = torch.rand(x.shape, generator=generator).to(x.device)
+        x[draws < float(p)] = 0
+        out.x = x
+    codes = getattr(out, "categorical_codes", None)
+    if (
+        unassigned_index is not None
+        and isinstance(codes, torch.Tensor)
+        and codes.numel() > 0
+        and num_nodes > 0
+    ):
+        col = 0 if categorical_column is None else int(categorical_column)
+        if col < codes.size(1):
+            node_draws = torch.rand((codes.size(0),), generator=generator).to(codes.device)
+            codes = codes.clone()
+            codes[node_draws < float(p), col] = int(unassigned_index)
+            out.categorical_codes = codes
     return out
+
+
+def build_finetune_augmentation(
+    cfg: Optional[Mapping[str, Any]],
+    *,
+    unassigned_index: Optional[int] = None,
+    categorical_column: Optional[int] = None,
+    seed: Optional[int] = None,
+) -> Optional[Callable[[Any], Any]]:
+    """Training-time augmentation for supervised fine-tuning.
+
+    ``cfg`` keys: ``drop_edge_p`` (undirected edge drop, both directions kept
+    together) and ``drop_feat_p`` (element-wise feature drop that also writes the
+    unassigned cell-type token). Returns ``None`` when both are zero, so the
+    default fine-tuning path is untouched.
+    """
+    cfg = dict(cfg or {})
+    drop_edge_p = float(cfg.get("drop_edge_p", 0.0) or 0.0)
+    drop_feat_p = float(cfg.get("drop_feat_p", 0.0) or 0.0)
+    if drop_edge_p <= 0.0 and drop_feat_p <= 0.0:
+        return None
+    generator = torch.Generator()
+    generator.manual_seed(int(cfg.get("seed", seed if seed is not None else 0)))
+
+    def _augment(data):
+        out = data
+        if drop_edge_p > 0.0:
+            out = drop_edges(out, p=drop_edge_p, force_undirected=True, generator=generator)
+        if drop_feat_p > 0.0:
+            out = drop_features(
+                out,
+                p=drop_feat_p,
+                generator=generator,
+                mode="elementwise",
+                categorical_column=categorical_column,
+                unassigned_index=unassigned_index,
+            )
+        return out
+
+    return _augment
 
 
 def feature_noise(
