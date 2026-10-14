@@ -10,6 +10,7 @@ regions carry a planted niche: cell type ``D`` forms a compact cluster next to
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Sequence
@@ -160,7 +161,7 @@ def cohort_overrides(cohort: SyntheticCohort, output_dir: str | Path) -> List[st
         "~callbacks.rich_progress_bar",
         "extras.print_config=false",
         "extras.enforce_tags=false",
-        "seed=0",
+        f"seed={os.environ.get('GRASS_MIL_TEST_SEED', '0')}",
     ]
 
 
