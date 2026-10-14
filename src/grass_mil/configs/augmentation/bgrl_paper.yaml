@@ -1,0 +1,17 @@
+# Degree-importance-weighted node/edge dropping plus Gaussian noise on the
+# continuous cell-size feature. This is the production BGRL view generator.
+#
+# Node importance is the mean-max normalised log-degree, so a node is dropped
+# with probability min((1 - importance) * mu, p_lambda): high-degree nodes are
+# preserved, low-degree ones are masked. Dropped nodes have their features
+# zeroed and their cell type set to the reserved "unassigned" code, which
+# requires model.encoder.categorical_embedding.reserve_unassigned=true.
+mode: importance
+mu: 0.25
+p_lambda: 0.45
+
+# Noise is applied only to the named continuous columns. Resolve by NAME:
+# a hardcoded index points at cell size in one cohort and at something else in
+# another, which silently feeds the encoder pure noise.
+feature_noise_std: 0.2
+feature_noise_columns: ["SIZE"]

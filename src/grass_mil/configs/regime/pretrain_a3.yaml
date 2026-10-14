@@ -1,0 +1,22 @@
+# @package _global_
+# GRASS-MIL encoder pretraining (preprint "A3"): BGRL on the ego-graphs of
+# every region, label-free. Composes with a cohort file:
+#   grass-mil-train experiment=my_cohort regime=pretrain_a3 paths.output_dir=runs/pretrain_a3 trainer=gpu
+# Every value is overridable, e.g. task.total_steps=50000 model.encoder.num_layers=3
+# data.sampler.runtime.depth=3 task.augmentation.feature_noise_columns=[].
+defaults:
+  - override /model: bgrl_a3
+  - override /task: pretrain_bgrl_a3
+  - override /callbacks: pretrain_checkpoint
+  - override /data/sampler: ego_graph_pretrain
+
+regime_name: pretrain_a3
+task_name: pretrain_a3
+tags: ["grass_mil", "pretrain", "a3"]
+test: false
+
+data:
+  split:
+    train_val_test_split: [1.0, 0.0, 0.0]
+    split_by: region
+  val_sampler: null

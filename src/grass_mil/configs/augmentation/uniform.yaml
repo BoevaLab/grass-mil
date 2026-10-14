@@ -1,0 +1,6 @@
+# Uniform edge dropping and feature masking, independent of graph structure.
+# Cohorts with no continuous node features (cell type only) cannot use the
+# Gaussian-noise step, so this is the applicable preset there.
+mode: uniform
+drop_edge_p: 0.1
+drop_feat_p: 0.1

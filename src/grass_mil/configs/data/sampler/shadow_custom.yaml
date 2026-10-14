@@ -1,0 +1,33 @@
+name: shadow_custom
+kwargs: {}
+runtime:
+  enabled: true
+  depth: 2
+  num_neighbors: 8
+  subgraph_batch_size: 32
+  replace: false
+  shuffle_subgraphs: true
+  proportional_root_sampling: true
+  property_name: cell_type
+  weight_mode: inverse
+  min_weight: 1.0e-6
+  # Restrict ego-graph seeds to the tissue interior. Ego-graphs rooted at the
+  # section edge are truncated by the boundary rather than by biology, so they
+  # are not comparable to interior ones. Excludes only the n_hops graph-hop rim
+  # around the convex hull; internal holes are not treated as boundary.
+  interior_seeds:
+    enabled: false
+    # null uses `depth`, so the rim matches the ego-graph radius.
+    n_hops: null
+    seed_tolerance_multiplier: 1.0
+    keep_largest_component: true
+    # Directory for the on-disk index cache; null disables caching.
+    cache_dir: null
+  # Cap the ego-graph's physical extent: r_k = radius_per_hop * depth + offset.
+  # Distances are in datamodule coordinate units (um after coord_scale_um), NOT
+  # pixels -- convert the cohort's pixel values before setting these.
+  ego_radius:
+    enabled: false
+    radius_per_hop: 75.0
+    radius_offset: 55.0
+    keep_root_component: true

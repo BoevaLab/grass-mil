@@ -1,0 +1,10 @@
+# Projected gated attention (GRASS-MIL default): Linear + LeakyReLU projection,
+# tanh/sigmoid gate, one attention channel per class. `n_classes` must equal
+# graph_head.output_dim; the task preset sets both together.
+attention_type: gated_projected
+input_dim: ${model.encoder.out_dim}
+projection_dim: 32
+hidden_dim: 8
+dropout: true
+n_classes: 1
+init: kaiming

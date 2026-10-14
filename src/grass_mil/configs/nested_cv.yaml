@@ -1,0 +1,55 @@
+# @package _global_
+# grass-mil-nested-cv: the preprint's nested, patient-grouped cross-validation.
+#
+#   grass-mil-nested-cv regime=linear_ftall_reg data=... \
+#       model.init_from_ckpt=/path/to/bgrl.ckpt \
+#       nested_cv.folds_file=folds.json \
+#       data.graph_labels.label_file=labels.csv data.graph_labels.id_column=REGION_ID \
+#       data.graph_labels.tasks=[STAS] data.graph_labels.patient_column=PATIENT
+#
+# For every outer fold: the remaining folds form the development set, which is
+# split into `inner_k` stratified, patient-grouped inner folds; each inner run
+# trains with the selected regime and records the epoch with the best
+# `selection_metric`; the median of those epochs is the refit length; the model
+# is refitted on the whole development set for that many epochs (no early
+# stopping, last weights) and scored once on the held-out fold, on all cells.
+# The linear_* regimes fit their probe head on each training split first
+# (cached under `probe.cache_dir`, so a second regime reuses them).
+defaults:
+  - train
+  - _self_
+
+task_name: "nested_cv"
+
+nested_cv:
+  folds_file: ??? # JSON list of lists of unit ids (patient-grouped outer folds)
+  # What one unit (bag, label, fold member) is: a region (one graph per region,
+  # data.sample_unit=full), a sample, or a patch (tiles as units; sets
+  # task.bag_key=patch_id and data.graph_labels.scope=patch).
+  id_kind: region
+  label_file: ${data.graph_labels.label_file}
+  id_column: ${data.graph_labels.id_column}
+  label_column: null # null = task.target_columns[0] or data.graph_labels.tasks[0]
+  patient_column: ${data.graph_labels.patient_column}
+  outer_folds: null # e.g. [2] to run one outer fold; null = all
+  inner_k: 3
+  inner_seed: 0
+  selection_metric: val/auroc
+  selection_mode: max # max | min
+  epoch_reduce: median # median | mean | max  (over the inner folds' best epochs)
+  min_refit_epochs: 1
+  resume: true # skip inner runs / outer folds whose results already exist
+  probe:
+    # auto = fit a probe wherever the regime asks for one (task.head_init_path
+    # left unset, as in the linear_* regimes); true = always; false = never.
+    enabled: auto
+    cache_dir: ${paths.output_dir}/probes
+    roots_per_unit: 96
+    seed: 0
+    batch_size: 256
+    C: 1.0
+    class_weight: balanced
+    max_iter: 3000
+    device: auto
+  patient_aggregation: mean # mean of the region probabilities per patient
+  summary_filename: nested_cv_summary.json

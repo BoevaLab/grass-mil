@@ -1,0 +1,6 @@
+# Cosine annealing per optimizer step over the whole run (preprint): with
+# task.scheduler_interval=step, `T_max: auto` resolves to
+# max_epochs * ceil(n_train_regions / hyperbatch_size).
+_target_: torch.optim.lr_scheduler.CosineAnnealingLR
+T_max: auto
+eta_min: 1.0e-7

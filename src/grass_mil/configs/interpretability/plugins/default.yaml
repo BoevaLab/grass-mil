@@ -1,0 +1,72 @@
+enabled:
+  - niche_profiles
+params:
+  niche_profiles:
+    variance_estimator: unbiased
+  margin_attribution:
+    # Per-class attention columns, emitted when the head has one attention
+    # channel per class. Falls back to the single `attention` column.
+    attention_prefix: attention_c
+    logit_prefix: logit_
+    # Head output bias per class, subtracted so the margin reflects the
+    # instance-driven part of the decision rather than the head's prior.
+    # Point logit_bias_checkpoint at the trained checkpoint and it is read from
+    # there; logit_bias only exists to override that by hand.
+    logit_bias_checkpoint: null
+    head_prefix: graph_head
+    logit_bias: null
+    n_bootstrap: 200
+    random_state: 0
+    # Classes to summarise. null summarises the positive class for binary
+    # heads (the class-0 margin is its exact negation) and every class for
+    # multi-class heads, each with a one-vs-rest margin.
+    focus_classes: null
+  niche_agreement:
+    active_name: active
+    # Columns holding partitions from other representation spaces, e.g. joined
+    # from a previous run's niche_labels.csv.
+    label_columns: []
+    metrics: [ari, ami, nmi]
+  tissue_graph:
+    sample_column: sample_id
+    sample_value: null
+    id_column: instance_id
+    x_column: center_x
+    y_column: center_y
+    show_edges: true
+    node_size: 5.0
+    edge_width: 0.5
+    edge_opacity: 0.25
+    reverse_y: true
+  # --- cell-level analyses (need interpretability.cells.enabled at predict) ---
+  cell_type_enrichment_per_niche:
+    cell_type_column: cell_type
+    niche_column: niche_label
+    # n_perms=0 uses the analytical null; >0 gives permutation z-scores.
+    n_perms: 0
+    enrichment_mode: zscore
+    min_cells: 10
+    skip_background: false
+    differential_vs_background: true
+    reference_niche: -1
+  cell_type_moran_per_niche:
+    cell_type_column: cell_type
+    niche_column: niche_label
+    n_perms: 100
+    min_nodes: 3
+  niche_label_moran:
+    niche_column: niche_label
+    n_perms: 100
+  cell_filtration_curves:
+    cell_type_column: cell_type
+    niche_column: niche_label
+    threshold_start: 0.0
+    threshold_stop: 55.0
+    threshold_count: 500
+  cell_type_ripley_per_niche:
+    cell_type_column: cell_type
+    niche_column: niche_label
+    x_column: x
+    y_column: y
+    n_radii: 50
+    min_count: 5

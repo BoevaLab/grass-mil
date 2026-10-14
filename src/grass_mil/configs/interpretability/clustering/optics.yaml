@@ -1,0 +1,13 @@
+enabled: true
+method: optics
+params:
+  min_samples: 5
+  max_eps: .inf
+  metric: minkowski
+  p: 2
+  cluster_method: xi
+  xi: 0.05
+  min_cluster_size: null
+  algorithm: auto
+  leaf_size: 30
+  n_jobs: null

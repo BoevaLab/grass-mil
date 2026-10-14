@@ -1,0 +1,74 @@
+# @package _global_
+
+task:
+  name: finetune_mil
+  aggregation: mil_attention
+  # One bag per region: with `data.sampler.runtime.unit_as_bag: true` every
+  # batch holds all sampled ego-graphs of one region, so the attention softmax
+  # and the loss cover the whole region.
+  bag_key: region_id
+  bag_fallback_key: sample_id
+  max_instances_per_bag: 0
+  instance_sampling: all
+  # The MIL head is per-class: the bag logit for class c is
+  # sum_i A[i,c] * l[i,c], which requires one logit and one attention channel
+  # per class. A single-logit BCE head cannot express the attribution identity,
+  # so this preset is categorical with C=2 for binary tasks.
+  target_type: categorical
+  target_columns: null
+  loss: categorical_ce
+
+  # Class weights for the region cross-entropy: `auto_train` = inverse frequency
+  # on the TRAINING regions (mean 1, preprint); a list of floats; or null.
+  class_weights: auto_train
+
+  # Per-component learning-rate multipliers on optim.lr. A scale of 0 freezes the
+  # component (no gradients, encoder kept in eval mode). `head_weight_decay`
+  # overrides optim.weight_decay for the head group (null = same as optimizer).
+  optimization:
+    encoder_lr_scale: 1.0
+    head_lr_scale: 1.0
+    attention_lr_scale: 2.0
+    head_weight_decay: null
+    # Legacy absolute pair (set both or neither); ignored when scales are used.
+    backbone_lr: null
+    attention_lr: null
+
+  # Training-time augmentation of each ego-graph batch (preprint regularised
+  # regime: 0.05 / 0.05). Edge drop keeps both directions together; feature drop
+  # is element-wise and also writes the unassigned cell-type token.
+  finetune_augmentation:
+    drop_edge_p: 0.0
+    drop_feat_p: 0.0
+    seed: 0
+
+  # Linear-head pre-fit (grass-mil-probe output) and head freezing, used by the
+  # linear_* regimes. Requires model.graph_head.num_layers=1.
+  head_init_path: null
+  freeze_head: false
+
+  # Gradient-norm clipping applied inside the region-accumulation flush.
+  grad_clip_norm: 1.0
+  # Scheduler stepping: `step` (per optimizer step, with scheduler=cosine_mil_step
+  # and T_max: auto this anneals over the whole run) or `epoch`.
+  scheduler_interval: step
+
+  lr_warmup:
+    enabled: false
+    warmup_steps: 0
+    start_factor: 0.1
+  # Hyperbatch has one meaning only:
+  # number of regions accumulated before one optimizer/scheduler step.
+  region_accumulation:
+    enabled: true
+    mode: manual_region_buffer
+    hyperbatch_size: 12
+    flush_on_epoch_end: true
+
+# Per-class attention and matching head width. Override both together when
+# moving to a task with more than two classes.
+model:
+  graph_head:
+    output_dim: 2
+  attention:
+    n_classes: 2

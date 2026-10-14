@@ -1,0 +1,4 @@
+_target_: torch.optim.lr_scheduler.CosineAnnealingLR
+# Step-wise scheduler intended for BGRL pretraining.
+T_max: 10000
+eta_min: 1.0e-7

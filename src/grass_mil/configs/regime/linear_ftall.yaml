@@ -1,0 +1,28 @@
+# @package _global_
+# Preprint "ftALL": encoder fine-tuned end to end (lr x1.0), linear head
+# initialised from the probe pre-fit and trained slowly (lr x0.01, wd 1e-3),
+# attention at lr x2.0.
+defaults:
+  - mil
+
+regime_name: linear_ftall
+
+task:
+  # "auto" = fitted per split by grass-mil-nested-cv; for a single grass-mil-train
+  # run pass the output of grass-mil-probe (task.head_init_path=/path/probe_head.pt).
+  head_init_path: auto
+  freeze_head: false
+  optimization:
+    encoder_lr_scale: 1.0
+    head_lr_scale: 0.01
+    attention_lr_scale: 2.0
+    head_weight_decay: 1.0e-3
+
+model:
+  graph_head:
+    num_layers: 1
+
+data:
+  sampler:
+    runtime:
+      subsample_count: 256

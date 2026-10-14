@@ -1,0 +1,7 @@
+# Plain gated attention (Ilse et al. 2018), one attention channel per class.
+attention_type: gated
+input_dim: ${model.encoder.out_dim}
+hidden_dim: 64
+dropout: false
+n_classes: 1
+init: kaiming

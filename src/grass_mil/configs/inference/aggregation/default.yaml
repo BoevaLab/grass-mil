@@ -1,0 +1,15 @@
+enabled: true
+# mean | max | none | attention_weighted | mean_probability
+mode: mean
+# patch | region | sample | patient
+# `patient` pools the regions of a patient: with mode=mean_probability the
+# patient score is the mean of its regions' probabilities (preprint default);
+# with mode=attention_weighted all cells of all regions form one merged bag.
+bag_scope: region
+subsample_fraction: 1.0 # in (0, 1]; when <1.0, predict path applies pre-forward root subsampling for efficiency
+subsample_seed: null # optional seed for deterministic subsampling
+# Region -> patient mapping used by bag_scope=patient (a label CSV).
+patient_map:
+  label_file: null
+  id_column: REGION_ID
+  patient_column: PATIENT

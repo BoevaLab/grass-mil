@@ -1,0 +1,8 @@
+enabled: true
+method: umap
+params:
+  n_components: 2
+  random_state: null
+  n_neighbors: 50
+  min_dist: 0.1
+  metric: euclidean

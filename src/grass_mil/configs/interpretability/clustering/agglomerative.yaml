@@ -1,0 +1,6 @@
+enabled: true
+method: agglomerative
+params:
+  n_clusters: 8
+  linkage: ward
+  metric: euclidean

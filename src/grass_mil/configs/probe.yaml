@@ -1,0 +1,29 @@
+# @package _global_
+# grass-mil-probe: fit the linear probe head on a frozen encoder.
+#
+#   grass-mil-probe regime=linear_probehead data=... \
+#       model.init_from_ckpt=/path/to/bgrl.ckpt \
+#       data.split.explicit.train=train_ids.json data.split.explicit.val=val_ids.json
+#
+# The encoder is taken from `model` (with `init_from_ckpt`) and never trained;
+# the ego-graph settings come from `data.sampler.runtime` (depth, neighbours,
+# radius cap). The result is written as `graph_head.net.0.{weight,bias}` and is
+# consumed through `task.head_init_path` by the linear_* regimes.
+defaults:
+  - train
+  - _self_
+
+task_name: "probe"
+train: false
+test: false
+
+probe:
+  roots_per_unit: 96 # ego-graphs per region used to fit the probe (null = all roots)
+  seed: 0 # fixed per-region root subset
+  batch_size: 256 # ego-graphs per forward pass
+  C: 1.0 # inverse L2 strength of the logistic regression
+  class_weight: balanced # balanced | null
+  max_iter: 3000
+  eval_splits: [val] # splits scored after the fit (instance and region-mean AUROC)
+  output_path: ${paths.output_dir}/probe_head.pt
+  device: auto # auto | cpu | cuda

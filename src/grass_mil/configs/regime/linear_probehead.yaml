@@ -1,0 +1,27 @@
+# @package _global_
+# Preprint "probehead": frozen encoder, LINEAR head pre-fitted by grass-mil-probe
+# (task.head_init_path) and frozen, so the attention is the only trainable part.
+# Its uniform-attention starting point is exactly the mean-pooled probe.
+defaults:
+  - mil
+
+regime_name: linear_probehead
+
+task:
+  # "auto" = fitted per split by grass-mil-nested-cv; for a single grass-mil-train
+  # run pass the output of grass-mil-probe (task.head_init_path=/path/probe_head.pt).
+  head_init_path: auto
+  freeze_head: true
+  optimization:
+    encoder_lr_scale: 0.0
+    head_lr_scale: 0.0
+    attention_lr_scale: 2.0
+
+model:
+  graph_head:
+    num_layers: 1
+
+data:
+  sampler:
+    runtime:
+      subsample_count: 512

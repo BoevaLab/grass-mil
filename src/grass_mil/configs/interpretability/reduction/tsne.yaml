@@ -1,0 +1,8 @@
+enabled: true
+method: tsne
+params:
+  n_components: 2
+  random_state: 42
+  perplexity: 30.0
+  learning_rate: auto
+  init: pca

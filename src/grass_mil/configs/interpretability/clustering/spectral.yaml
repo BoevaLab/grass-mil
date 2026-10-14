@@ -1,0 +1,8 @@
+enabled: true
+method: spectral
+params:
+  n_clusters: 8
+  random_state: 42
+  affinity: nearest_neighbors
+  n_neighbors: 10
+  assign_labels: kmeans

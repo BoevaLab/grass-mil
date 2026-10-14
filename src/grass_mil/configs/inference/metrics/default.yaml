@@ -1,0 +1,5 @@
+enabled: true
+per_group: true
+
+categorical:
+  threshold: 0.5

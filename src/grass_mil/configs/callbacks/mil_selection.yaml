@@ -1,0 +1,27 @@
+# Model selection for MIL fine-tuning (preprint): keep the epoch with the best
+# region-level validation AUROC, stop early on the region-level validation loss
+# (patience 8 after a minimum of 10 epochs, set via trainer.min_epochs).
+defaults:
+  - model_checkpoint
+  - early_stopping
+  - model_summary
+  - rich_progress_bar
+  - _self_
+
+model_checkpoint:
+  dirpath: ${paths.output_dir}/checkpoints
+  filename: "epoch_{epoch:03d}"
+  monitor: "val/auroc"
+  mode: "max"
+  save_last: True
+  save_top_k: 1
+  auto_insert_metric_name: False
+
+early_stopping:
+  monitor: "val/loss_region"
+  patience: 8
+  mode: "min"
+  strict: False
+
+model_summary:
+  max_depth: -1
