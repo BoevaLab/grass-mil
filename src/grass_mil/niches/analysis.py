@@ -288,7 +288,8 @@ def _report(result: NicheAnalysis, *, title: str, positive_name: str) -> str:
         if len(top):
             lines += ["", "## Clustered cell types within niches (Moran's I, q < 0.05)", ""]
             lines += [
-                f"- {r.niche}: {r.cell_type} I = {r.morans_i:.2f} ± {r.sem:.2f} ({r.n_units} units)"
+                f"- {r.niche}: {r.cell_type} I = {r.morans_i:.2f}"
+                + (f" ± {r.sem:.2f} ({r.n_units} units)" if r.n_units > 1 else " (1 unit)")
                 for r in top.itertuples()
             ]
     if result.survival is not None:

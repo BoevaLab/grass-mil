@@ -1,12 +1,25 @@
 # Configuration
 
 Every command is a [Hydra](https://hydra.cc) application whose configuration
-ships with the package (`src/grass_mil/configs`). Any key can be set on the
-command line (`key=value`, lists as `[a,b]`), and `--cfg job` prints the
-composed configuration without running anything:
+ships with the package (`src/grass_mil/configs`); your cohort file adds to it.
+
+## Command-line basics
+
+| Syntax | Effect |
+|---|---|
+| `key=value` | change a setting, e.g. `trainer.max_epochs=40`; lists as `[a,b]` |
+| `group=option` | choose an option of a group, e.g. `regime=attention_only`, `trainer=gpu`, `task=survival` |
+| `--config-dir configs` | also read configs from your `configs/` folder, which holds `experiment/my_cohort.yaml` |
+| `hydra.run.dir=runs/<step>` | the folder the command writes to (default `logs/<task>/runs/<date>_<time>`, where `<task>` is `pretrain`, `train`, `nested_cv`, `extract`, `predict`, `niches`, `metaclusters` or `spatial_stats`) |
+| `+key=value` | add a key the configuration does not have yet, e.g. `+clustering.min_cluster_size=50` for `grass-mil-metaclusters` |
+| `~key` | remove a key, e.g. `~callbacks.rich_progress_bar` |
+| `--cfg job` | print the composed settings and exit without running |
+| `--help` | list the groups and their options |
+
+Relative paths are resolved against the folder the command is run from.
 
 ```bash
-grass-mil-train experiment=my_cohort regime=finetune_reg --cfg job
+grass-mil-train --config-dir configs experiment=my_cohort regime=finetune_reg --cfg job
 ```
 
 ## Groups
@@ -38,7 +51,7 @@ procedure, and command-line keys override both.
 | `ckpt_path` | `null` | resume an interrupted run (prediction: the model to score) |
 | `print_config` | `false` | log the composed configuration |
 | `paths.data_dir`, `paths.log_dir` | `./data`, `./logs` | relative to the working directory |
-| `paths.output_dir` | per run | `logs/<task_name>/runs/<date>` |
+| `paths.output_dir` | per run | `hydra.run.dir` (default `logs/<task>/runs/<date>_<time>`) |
 
 ## `data`
 

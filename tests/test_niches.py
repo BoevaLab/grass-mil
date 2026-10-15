@@ -40,6 +40,12 @@ def test_niches_are_numbered_by_margin_with_background_zero():
     assert np.array_equal(model.predict(x[:5]), niches[:5])
 
 
+def test_finding_no_niche_is_reported(caplog):
+    x = np.random.default_rng(0).normal(size=(100, 3))
+    _, niches = fit_niches(x, np.zeros(100), np.repeat(["u"], 100), ClusteringConfig())
+    assert (niches == 0).all() and "No niches among 100 cells" in caplog.text
+
+
 def test_cox_and_logrank_detect_a_strong_effect():
     rng = np.random.default_rng(0)
     x = rng.normal(size=300)

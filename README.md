@@ -51,35 +51,90 @@ units), `sce` (SingleCellExperiment inputs; also needs R with Bioconductor),
 ## Quick start
 
 The [vignettes](vignettes/) run the whole workflow on a public MIBI-TOF dataset
-on a CPU in a few minutes:
+in a few minutes (about ten on a CPU):
 
 ```bash
 pip install squidpy jupyter
 jupyter lab vignettes/
 ```
 
-## Workflow
+## Your first cohort
 
-Describe the cohort once (copy
-[`configs/experiment/example_cohort.yaml`](src/grass_mil/configs/experiment/example_cohort.yaml)
-to `my_cohort.yaml` and fill in paths and column names; see
-[data preparation](docs/data_preparation.md)), then:
+Work in a project folder of your own and run every command from it:
 
-| Step | Command | Output |
-|---|---|---|
-| 1. Pretrain the encoder, label-free (builds the cell graphs on first use) | `grass-mil-train experiment=my_cohort regime=pretrain` | `checkpoints/last.ckpt` |
-| 2. Evaluate by nested cross-validation | `grass-mil-nested-cv experiment=my_cohort model.init_from_ckpt=<step 1>` | per-fold metrics (mean ± s.d.), out-of-fold unit and patient predictions, one model per fold |
-| 3. Score every cell with the fold models | `grass-mil-extract experiment=my_cohort extract.nested_cv_summary=<step 2>/nested_cv_summary.json` | per-cell embeddings, attention and logits |
-| 4. Discover and describe niches | `grass-mil-niches cells_dir=<step 3>/cells/fold0` | niche table, spatial descriptors, figures, report |
-| Optional: replication across folds | `grass-mil-metaclusters cells_dir=<step 3>/cells` | metaclusters of niches found by several models |
-| Optional: model-free statistics | `grass-mil-spatial-stats cells_dir=<step 3>/cells/fold0` | classical spatial statistics compared between classes |
-| Score new data | `grass-mil-predict experiment=new_cohort ckpt_path=<checkpoint>` | unit and patient predictions |
+```text
+my_project/
+  data/                          cell tables, manifest.csv, labels.csv, folds.json
+  configs/experiment/my_cohort.yaml
+  runs/                          one output folder per step
+```
 
-A single model on all labelled data (`grass-mil-train experiment=my_cohort
-model.init_from_ckpt=<step 1>`) uses a random patient-grouped split for
-validation and testing. Add `trainer=gpu` to train on a GPU.
+**1. Prepare the data**: one cell table per region (CSV, h5ad or
+SingleCellExperiment), a manifest listing them, a label file and the
+cross-validation folds. [Data preparation](docs/data_preparation.md) describes
+the formats and has short scripts for the manifest and the folds.
+
+**2. Describe the cohort**: copy the template into `configs/experiment/` and
+fill in the column names (the data are looked up in `./data`):
+
+```bash
+mkdir -p configs/experiment
+python -c "import grass_mil.configs as c, pathlib, shutil; shutil.copy(pathlib.Path(c.__file__).parent / 'experiment/example_cohort.yaml', 'configs/experiment/my_cohort.yaml')"
+```
+
+Every command that reads the cohort gets `--config-dir configs
+experiment=my_cohort`, and `hydra.run.dir` names the folder a step writes to.
+
+**3. Run the steps** (`trainer=gpu` uses a GPU; drop it to run on the CPU):
+
+```bash
+# Pretrain the encoder on every region, without labels; the first command
+# also builds the cell graphs (200 000 steps, about an hour on a GPU).
+grass-mil-train --config-dir configs experiment=my_cohort regime=pretrain trainer=gpu \
+  hydra.run.dir=runs/pretrain
+
+# Evaluate by nested cross-validation (one model per outer fold).
+grass-mil-nested-cv --config-dir configs experiment=my_cohort trainer=gpu \
+  model.init_from_ckpt=runs/pretrain/checkpoints/last.ckpt hydra.run.dir=runs/nested_cv
+
+# Score every cell with the fold models.
+grass-mil-extract --config-dir configs experiment=my_cohort \
+  extract.nested_cv_summary=runs/nested_cv/nested_cv_summary.json hydra.run.dir=runs/extract
+
+# Niches of fold model 0, on the regions it did not train on.
+grass-mil-niches cells_dir=runs/extract/cells/fold0 hydra.run.dir=runs/niches_fold0
+```
+
+| Folder | What to look at |
+|---|---|
+| `runs/pretrain` | `checkpoints/last.ckpt`, the pretrained encoder |
+| `runs/nested_cv` | `nested_cv_summary.json`: the metric of every outer fold and their mean ± s.d., the number to report; `oof_predictions.csv`: every region scored by the model that held it out |
+| `runs/extract/cells/fold<i>` | per-cell outputs of the model of outer fold `i` |
+| `runs/niches_fold0` | `report.md`, `niches.csv`, `descriptors/`, `figures/` |
+
+Each command ends by printing where it wrote. With a few dozen regions, see
+[small cohorts](docs/training_and_evaluation.md#small-cohorts) first.
+
+**Optional steps**, with the same conventions:
+
+```bash
+# Niches that recur across the fold models
+grass-mil-metaclusters cells_dir=runs/extract/cells hydra.run.dir=runs/metaclusters
+# Classical spatial statistics compared between classes, without a model
+grass-mil-spatial-stats cells_dir=runs/extract/cells/fold0 hydra.run.dir=runs/spatial_stats
+# Score a new cohort (its own cohort file) with one trained model
+grass-mil-predict --config-dir configs experiment=new_cohort \
+  ckpt_path=runs/nested_cv/outer_0/refit/checkpoints/last.ckpt hydra.run.dir=runs/predict
+```
+
+A single model on all labelled regions (`grass-mil-train --config-dir configs
+experiment=my_cohort model.init_from_ckpt=runs/pretrain/checkpoints/last.ckpt`)
+uses a random patient-grouped split for validation and testing.
 
 ## Changing the defaults
+
+Any setting can be changed on the command line (`key=value`); the examples
+leave out `--config-dir configs` and `hydra.run.dir`.
 
 ```bash
 # another fine-tuning regime: slower encoder with regularisation
@@ -108,9 +163,9 @@ grass-mil-niches cells_dir=... clustering.space=embedding clustering.pca_compone
 ## Documentation
 
 - [Data preparation](docs/data_preparation.md): cell tables, manifest, units, labels, folds, graphs
-- [Training and evaluation](docs/training_and_evaluation.md): the model, pretraining, regimes, tasks, nested cross-validation, prediction
+- [Training and evaluation](docs/training_and_evaluation.md): the model, pretraining, regimes, tasks, nested cross-validation, small cohorts, prediction
 - [Niche analysis](docs/niche_analysis.md): per-cell outputs, niches, descriptors, survival, replication, model-free statistics
-- [Configuration](docs/configuration.md): groups, precedence and every key
+- [Configuration](docs/configuration.md): command-line basics, groups and every key
 
 ## Citation
 

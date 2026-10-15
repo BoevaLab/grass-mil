@@ -13,6 +13,7 @@ the Background.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
@@ -21,6 +22,8 @@ import numpy as np
 from grass_mil.utils import checked
 
 __all__ = ["ClusteringConfig", "NicheModel", "fit_niches", "niche_name", "BACKGROUND"]
+
+log = logging.getLogger(__name__)
 
 BACKGROUND = 0
 
@@ -150,4 +153,10 @@ def fit_niches(
     score = per_unit.groupby(level=0).mean()
     order = sorted((c for c in score.index if c >= 0), key=lambda c: -float(score[c]))
     model.mapping = {-1: BACKGROUND, **{int(c): rank + 1 for rank, c in enumerate(order)}}
+    if not order:
+        log.warning(
+            f"No niches among {n} cells: every cell is Background. With few cells, lower "
+            f"clustering.min_cluster_size (now {cfg.min_cluster_size}) or set "
+            "clustering.selection=leaf."
+        )
     return model, np.vectorize(model.mapping.get)(labels).astype(int)

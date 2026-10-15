@@ -118,6 +118,12 @@ class BGRLModule(L.LightningModule):
         if self.hparams.init_from_ckpt:
             load_encoder_weights(self.encoder, self.hparams.init_from_ckpt)
             self.target_encoder.load_state_dict(self.encoder.state_dict())
+        if self.pretrain.warmup_steps >= self.pretrain.total_steps:
+            rank_zero_warn(
+                f"pretrain.warmup_steps={self.pretrain.warmup_steps} is not below "
+                f"pretrain.total_steps={self.pretrain.total_steps}: the learning rate never "
+                "leaves its warmup. Lower pretrain.warmup_steps for short runs."
+            )
         if (
             self.trainer.max_steps not in (-1, None)
             and self.trainer.max_steps != self.pretrain.total_steps

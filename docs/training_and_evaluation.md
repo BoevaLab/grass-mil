@@ -23,19 +23,22 @@ niche analysis uses.
 ## Pretraining
 
 ```bash
-grass-mil-train experiment=my_cohort regime=pretrain trainer=gpu
+grass-mil-train --config-dir configs experiment=my_cohort regime=pretrain trainer=gpu \
+  hydra.run.dir=runs/pretrain
 ```
 
-BGRL on the ego-graphs of every unit, label-free: two augmented views
+The encoder first learns from the tissue alone, without labels, by BGRL (a
+self-supervised method: two randomly perturbed copies of the same neighbourhood
+should get similar embeddings). In detail: two augmented views
 (importance-weighted node and edge dropping, Gaussian noise on
 `pretrain.augmentation.noise_features`), an online encoder with a predictor and
 an exponential-moving-average target encoder. Edges are dropped per direction
 and kept only when both directions survive, so an edge with drop probability
 `p` per direction disappears with probability `1 - (1 - p)^2`. Pretraining sees
 every unit, including the ones cross-validation later holds out; it uses no
-label. The run writes
-`checkpoints/last.ckpt` and a checkpoint every 5000 steps
-(`pretrain.total_steps`, default 200 000).
+label. The run writes `checkpoints/last.ckpt` and a checkpoint every 5000
+steps (`pretrain.total_steps`, default 200 000, about an hour on a recent GPU;
+lower `pretrain.warmup_steps` with it for short runs).
 
 ## Fine-tuning regimes
 
@@ -49,19 +52,21 @@ A regime is the training procedure; select it with `regime=<name>`.
 | `mlp_head` | fine-tuned | two-layer MLP, random | everything |
 | `mlp_head_frozen` | frozen | two-layer MLP, random | head and attention (512 roots per unit) |
 
-The probe: before training, the frozen encoder embeds
+The probe gives the instance head a sensible start: before training, the
+frozen encoder embeds
 `finetune.probe.roots_per_unit` cells of every training unit, each ego-graph
 inherits its unit's label, and a standardised, L2-penalised logistic regression
 (ridge for regression, a Cox model for survival; inverse penalty
 `finetune.probe.C`) is folded into the linear head. The model then starts from
 an attention-weighted average of the probe's per-cell logits. The probe is
 fitted on standardised embeddings, so an encoder whose embeddings barely vary
-(too little pretraining) gives large head weights; the log reports their norm,
-and a smaller `finetune.probe.C` keeps them small.
+(too little pretraining) gives large head weights. The log reports their norm:
+a few units is typical, and above 20 the command warns, because fine-tuning the
+encoder then tends to diverge (see [small cohorts](#small-cohorts)).
 
-Every regime trains one bag per step of the dataloader and takes an optimizer
-step every `finetune.hyperbatch_size` units (12; the last step of an epoch takes
-the remaining units), with gradient-norm clipping (`finetune.grad_clip_norm`),
+Every regime trains one bag (one unit) per step of the dataloader and takes an
+optimizer step every `finetune.hyperbatch_size` units (the "hyperbatch", 12;
+the last step of an epoch takes the remaining units), with gradient-norm clipping (`finetune.grad_clip_norm`),
 a cosine learning-rate schedule over the whole run and AdamW (`optim.lr` 1e-4).
 Class labels must be the integers `0..num_classes-1`. Validation units are scored on a fixed set of
 `data.val_roots_per_unit` cells; the checkpoint with the best validation metric
@@ -69,7 +74,8 @@ is kept and training stops early after `task.selection.patience` epochs without
 improvement (after `trainer.min_epochs`).
 
 ```bash
-grass-mil-train experiment=my_cohort model.init_from_ckpt=<pretrain>/checkpoints/last.ckpt
+grass-mil-train --config-dir configs experiment=my_cohort \
+  model.init_from_ckpt=runs/pretrain/checkpoints/last.ckpt hydra.run.dir=runs/train
 ```
 
 A single run splits the units at random (`data.split.ratios`, grouped by
@@ -87,7 +93,8 @@ and writes `test_predictions.csv` for the test units.
 ## Nested cross-validation
 
 ```bash
-grass-mil-nested-cv experiment=my_cohort model.init_from_ckpt=<pretrain>/checkpoints/last.ckpt
+grass-mil-nested-cv --config-dir configs experiment=my_cohort \
+  model.init_from_ckpt=runs/pretrain/checkpoints/last.ckpt hydra.run.dir=runs/nested_cv
 ```
 
 The folds file must keep every patient (or, without a patient column, every
@@ -109,13 +116,39 @@ fold:
 | `oof_patient_predictions.csv` | the mean of each patient's unit scores (when every unit of a patient has the same label) |
 | `outer_<i>/refit/checkpoints/last.ckpt` | the model of outer fold `i` |
 
+**The result to report** is the mean ± s.d. of the task's metric over the outer
+folds (`mean` and `sd` in `nested_cv_summary.json`: AUROC for classification,
+RMSE for regression, the concordance index for survival). The pooled metrics
+rank units scored by different fold models, whose scores need not be on the
+same scale, so they can be lower than every fold's own value.
+
 Runs that finished are reused when the command is repeated
 (`nested_cv.resume`); `nested_cv.outer_folds=[2]` runs a single fold.
+
+## Small cohorts
+
+The defaults suit cohorts of hundreds of units. With a few dozen:
+
+* **Freeze the encoder**: `regime=attention_only`. Fine-tuning a million
+  encoder weights on a few dozen units is unstable (validation loss jumps after
+  the first epoch and predictions saturate at 0 or 1); a frozen encoder with a
+  trained attention gives stable, calibrated predictions.
+* **Penalise the probe more**: `finetune.probe.C=0.01`, and fewer units per
+  step, `finetune.hyperbatch_size=4`.
+* **Select epochs on the loss**: `task.selection.metric=val/loss
+  task.selection.mode=min`. On a handful of validation units the AUROC often
+  ties at 1.0 from the first epoch, and ties pick the earliest epoch.
+* **Pretrain long enough**: too short a pretraining leaves embeddings that
+  barely vary (the probe's weight norm warns about it); the vignettes use 3,000
+  steps on 44 tiles.
+* **Use fewer folds** than the smaller class has patients, and see the
+  [niche analysis](niche_analysis.md#small-cohorts) for clustering settings.
 
 ## Prediction
 
 ```bash
-grass-mil-predict experiment=new_cohort ckpt_path=<run>/checkpoints/last.ckpt
+grass-mil-predict --config-dir configs experiment=new_cohort \
+  ckpt_path=runs/nested_cv/outer_0/refit/checkpoints/last.ckpt hydra.run.dir=runs/predict
 ```
 
 The model and its ego-graph settings are rebuilt from the checkpoint; `data`

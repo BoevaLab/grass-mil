@@ -1,19 +1,22 @@
 # @package _global_
-# Template describing one cohort. Copy it to my_cohort.yaml, fill in paths and
-# column names, and pass experiment=my_cohort to every command:
+# Template describing one cohort. Copy it to configs/experiment/my_cohort.yaml in
+# your project folder, fill in the column names, and pass it to every command
+# that reads the cohort (keep the first line above):
 #
-#   grass-mil-train      experiment=my_cohort regime=pretrain
-#   grass-mil-nested-cv  experiment=my_cohort model.init_from_ckpt=<pretrain>/checkpoints/last.ckpt
-#   grass-mil-extract    experiment=my_cohort extract.nested_cv_summary=<nested_cv>/nested_cv_summary.json
+#   grass-mil-train      --config-dir configs experiment=my_cohort regime=pretrain
+#   grass-mil-nested-cv  --config-dir configs experiment=my_cohort model.init_from_ckpt=<pretrain>/checkpoints/last.ckpt
+#   grass-mil-extract    --config-dir configs experiment=my_cohort extract.nested_cv_summary=<nested_cv>/nested_cv_summary.json
 
 paths:
-  data_dir: /path/to/my_cohort
+  # Folder holding the files below: ./data of the folder you run commands from,
+  # or an absolute path.
+  data_dir: ${paths.root_dir}/data
 
 data:
   manifest_path: ${paths.data_dir}/manifest.csv # sample_id,input_path[,region_id]
-  processed_dir: ${paths.data_dir}/processed
-  unit: region
-  coord_scale_um: 1.0
+  processed_dir: ${paths.data_dir}/processed # the cell graphs, built on first use
+  unit: region # region | tile | polygon
+  coord_scale_um: 1.0 # multiplies the coordinates; distances below are in the result
   input:
     coord_columns: [x, y]
     cell_id_column: cell_id

@@ -94,10 +94,19 @@ def _run(
     return result
 
 
-def _check_outer_folds(folds: list[list[str]], groups: dict[str, str]) -> None:
+def _check_outer_folds(
+    folds: list[list[str]], groups: dict[str, str], classes: dict[str, int] | None
+) -> None:
     """Every fold holds labelled units, and every unit and patient sits in one fold only."""
     if any(not f for f in folds):
         raise ValueError("An outer fold holds no labelled unit.")
+    for i, fold in enumerate(folds if classes is not None else []):
+        present = sorted({classes[u] for u in fold})
+        if len(present) < 2:
+            log.warning(
+                f"Outer fold {i} holds only class {present[0]}: its AUROC is undefined and the "
+                "fold is left out of the mean. Stratify the folds by class."
+            )
     fold_of_unit: dict[str, int] = {}
     fold_of_group: dict[str, int] = {}
     for i, fold in enumerate(folds):
@@ -135,9 +144,10 @@ def run_nested_cv(cfg: DictConfig) -> dict[str, Any]:
         sorted(e.unit_id for e in labelled.select(ids).entries)
         for ids in load_folds(str(ncfg.folds_file))
     ]
-    _check_outer_folds(folds, groups)
+    _check_outer_folds(folds, groups, classes)
     selected = list(ncfg.outer_folds) if ncfg.outer_folds is not None else range(len(folds))
-    metric = str(cfg.task.selection.metric).split("/", 1)[-1]
+    # The reported metric of the task, whichever validation metric selects the epochs.
+    metric = {"classification": "auroc", "regression": "rmse", "survival": "c_index"}[kind]
 
     results, oof = [], []
     for i in selected:
@@ -213,7 +223,8 @@ def run_nested_cv(cfg: DictConfig) -> dict[str, Any]:
             summary["patient"] = frame_metrics(patients, kind)
     (out_dir / "nested_cv_summary.json").write_text(json.dumps(summary, indent=1, default=float))
     log.info(
-        f"{metric}: {summary['mean']:.4f} ± {summary['sd']:.4f} over {len(finite)} outer folds"
+        f"{metric}: {summary['mean']:.4f} ± {summary['sd']:.4f} over {len(finite)} outer folds; "
+        f"summary: {out_dir / 'nested_cv_summary.json'}"
     )
     return summary
 

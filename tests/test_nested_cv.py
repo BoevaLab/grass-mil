@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 import torch
 
-from grass_mil.nested_cv import best_epoch, run_nested_cv
+from grass_mil.nested_cv import _check_outer_folds, best_epoch, run_nested_cv
 from tests.helpers.cohort import cohort_overrides, compose_cfg
 
 
@@ -64,6 +64,30 @@ def test_outer_folds_must_keep_every_patient_in_one_fold(cohort, tmp_path):
     )
     with pytest.raises(ValueError, match="outer folds 0 and 1"):
         run_nested_cv(cfg)
+
+
+def test_a_single_class_outer_fold_is_reported(caplog):
+    folds, groups = [["a", "b"], ["c", "d"]], {u: u for u in "abcd"}
+    _check_outer_folds(folds, groups, {"a": 0, "b": 0, "c": 0, "d": 1})
+    assert "Outer fold 0 holds only class 0" in caplog.text
+
+
+def test_the_summary_reports_the_task_metric_whatever_selects_epochs(cohort, pretrained, tmp_path):
+    cfg = compose_cfg(
+        "nested_cv",
+        cohort_overrides(cohort)
+        + [
+            f"model.init_from_ckpt={pretrained}",
+            f"nested_cv.folds_file={cohort.folds}",
+            "nested_cv.inner_k=2",
+            "nested_cv.outer_folds=[0]",
+            "trainer.max_epochs=1",
+            "task.selection.metric=val/loss",
+            "task.selection.mode=min",
+        ],
+        tmp_path,
+    )
+    assert run_nested_cv(cfg)["metric"] == "auroc"
 
 
 @pytest.mark.slow

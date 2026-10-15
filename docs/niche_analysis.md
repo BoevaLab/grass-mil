@@ -8,7 +8,8 @@ on it, and how its cells are arranged.
 ## 1. Per-cell outputs
 
 ```bash
-grass-mil-extract experiment=my_cohort extract.nested_cv_summary=<nested_cv>/nested_cv_summary.json
+grass-mil-extract --config-dir configs experiment=my_cohort \
+  extract.nested_cv_summary=runs/nested_cv/nested_cv_summary.json hydra.run.dir=runs/extract
 ```
 
 Every model of the cross-validation (`fold0`, `fold1`, ...) scores every cell of
@@ -16,13 +17,17 @@ every unit. For each cell the cache stores the encoder embedding, the attention
 head's low-dimensional pre-tanh activation (the *attention space*), the
 instance logits and the attention scores, with the cell's type, position and
 id. The units each model held out are recorded. Explicit checkpoints can be
-added with `+extract.models.<name>=<checkpoint>`.
+added with `+extract.models.<name>=<checkpoint>`. The caches are written to
+`runs/extract/cells/fold<i>`.
 
 ## 2. Niches of one model
 
 ```bash
-grass-mil-niches cells_dir=<extract>/cells/fold0
+grass-mil-niches cells_dir=runs/extract/cells/fold0 hydra.run.dir=runs/niches_fold0
 ```
+
+The analysis reads only the cell cache, so it needs no cohort file. Start with
+`report.md`, which summarises the niche table and the main descriptors.
 
 **Cells.** By default the units the model did not see during training
 (`units=held_out`; or `all`, or a list).
@@ -41,6 +46,24 @@ a sample of at most `clustering.sample_size` cells, and assignment of the rest
 by their 15 nearest neighbours. Cells HDBSCAN leaves unassigned form the
 **Background**. Niches are numbered by their margin: `Niche 1` is the most
 positive.
+
+### Reading the niche table
+
+Compare the margins of the niches with each other
+and with the Background, not with zero: the margin is measured from the head's
+bias, so a model can give every niche a margin of the same sign. The niche
+with the largest margin is the one the model relies on most for the positive
+class; whether it is also enriched in positive units is its `association`
+(compare with the base rate in the report). A niche with a high margin and a
+high association is a candidate driver of the phenotype.
+
+### Small cohorts
+
+HDBSCAN keeps only clusters of at least
+`clustering.min_cluster_size` cells (300). With a few thousand held-out cells
+it can find none: the command then warns and every cell is Background. Lower
+`clustering.min_cluster_size` (for example to 30-50) and set
+`clustering.selection=leaf`, which keeps the finest stable clusters.
 
 ### Outputs
 
@@ -105,8 +128,12 @@ then descriptive.
 ## 3. Replication across models (optional)
 
 ```bash
-grass-mil-metaclusters cells_dir=<extract>/cells
+grass-mil-metaclusters cells_dir=runs/extract/cells hydra.run.dir=runs/metaclusters
 ```
+
+Its clustering settings start empty (the defaults of `grass-mil-niches`), so
+they are added with a `+`: `+clustering.min_cluster_size=50
++clustering.selection=leaf`.
 
 Each model of the cross-validation has its own embedding, so its niches are
 discovered separately. This step asks which niches recur:
@@ -127,7 +154,8 @@ discovered separately. This step asks which niches recur:
 ## 4. Model-free spatial statistics (optional)
 
 ```bash
-grass-mil-spatial-stats cells_dir=<extract>/cells/fold0 reference=[tumor]
+grass-mil-spatial-stats cells_dir=runs/extract/cells/fold0 reference=[tumor] \
+  hydra.run.dir=runs/spatial_stats
 ```
 
 Classical statistics of every unit compared between positive and other

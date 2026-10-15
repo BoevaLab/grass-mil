@@ -206,10 +206,19 @@ class SupervisedModule(L.LightningModule):
         with torch.no_grad():
             self.head.net[0].weight.copy_(weight)
             self.head.net[0].bias.copy_(bias)
+        norm = float(weight.norm())
         log.info(
             f"Probe head fitted on {len(embeddings)} ego-graphs of "
-            f"{len(datamodule.dataset_train)} units (weight norm {float(weight.norm()):.3g})."
+            f"{len(datamodule.dataset_train)} units (weight norm {norm:.3g})."
         )
+        if norm > 20 and self.finetune.lr_scales["encoder"] > 0:
+            log.warning(
+                f"The probe head's weights are large (norm {norm:.3g}; a well-pretrained encoder "
+                "on a cohort of hundreds of units gives a few units), so small changes of the "
+                "encoder move the logits a lot and fine-tuning may diverge. On a small cohort "
+                "use regime=attention_only (frozen encoder); otherwise pretrain longer or lower "
+                "finetune.probe.C (e.g. 0.01)."
+            )
 
     def _apply_freezing(self) -> None:
         scales = self.finetune.lr_scales

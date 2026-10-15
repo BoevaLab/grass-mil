@@ -122,6 +122,7 @@ def run_metaclusters(cfg: DictConfig) -> dict:
         result["groups"].to_csv(bdir / "groups.csv", index=False)
         result["pairs"].to_csv(bdir / "attribution_pairs.csv", index=False)
     (out / "summary.json").write_text(json.dumps(summary, indent=1, default=str))
+    log.info(f"Metaclusters written to {out}")
     return summary
 
 

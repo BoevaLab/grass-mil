@@ -1,7 +1,7 @@
 # Data preparation
 
-GRASS-MIL needs three files describing a cohort, plus the per-region cell
-tables:
+GRASS-MIL needs the cell tables of a cohort and three small files describing
+it:
 
 | File | Content |
 |---|---|
@@ -9,9 +9,21 @@ tables:
 | labels (CSV) | one row per labelled region (or tile, or sample): targets and patient |
 | folds (JSON) | outer cross-validation folds, for `grass-mil-nested-cv` |
 
-Describe them once in a cohort file (copy
-[`configs/experiment/example_cohort.yaml`](../src/grass_mil/configs/experiment/example_cohort.yaml))
-and pass `experiment=my_cohort` to every command.
+The words used throughout:
+
+* **sample**: one cell table (a file), for example one slide or one image;
+* **region**: a part of a sample with its own row in the manifest, for example
+  one core of a tissue microarray or one region of interest; by default a
+  region is its whole sample;
+* **unit**: what one prediction is made for, one bag of the model, one label
+  and one member of a fold: a region, or a tile or polygon of it (`data.unit`);
+* **patient**: units of one patient are kept together in every split and fold.
+
+The paths and column names go in a cohort file, `configs/experiment/my_cohort.yaml`
+in your project folder (start from
+[the template](../src/grass_mil/configs/experiment/example_cohort.yaml); the
+README shows how to copy it), and every command that reads the cohort gets
+`--config-dir configs experiment=my_cohort`.
 
 ## Cell tables
 
@@ -51,6 +63,19 @@ S02,cells/S02.h5ad,
 * `polygons_path` (optional) points to GeoJSON or WKT polygons of the region:
   cells outside them are dropped, or with `data.unit=polygon` every polygon
   becomes its own unit.
+
+With one CSV per region in `data/cells/`, this writes the manifest:
+
+```python
+import pathlib
+
+import pandas as pd
+
+tables = sorted(pathlib.Path("data/cells").glob("*.csv"))
+pd.DataFrame(
+    {"sample_id": [t.stem for t in tables], "input_path": [f"cells/{t.name}" for t in tables]}
+).to_csv("data/manifest.csv", index=False)
+```
 
 ## Units
 
@@ -95,7 +120,29 @@ patient in two folds):
 [["S01_roi1", "S01_roi2", "S07"], ["S02", "S05_roi1"], ["S03", "S04"]]
 ```
 
-Keep the file with the data so that every model is evaluated on the same folds.
+This writes five folds that keep every patient in one fold and balance the
+classes over patients (for survival, stratify on the event column):
+
+```python
+import json
+
+import pandas as pd
+from sklearn.model_selection import StratifiedKFold
+
+labels = pd.read_csv("data/labels.csv")  # region_id, label, patient_id
+patients = labels.groupby("patient_id")["label"].first()  # one label per patient
+splits = StratifiedKFold(n_splits=5, shuffle=True, random_state=0).split(patients.index, patients)
+folds = [
+    labels.loc[labels["patient_id"].isin(patients.index[test]), "region_id"].tolist()
+    for _, test in splits
+]
+json.dump(folds, open("data/folds.json", "w"))
+```
+
+Every fold should hold every class (the command warns otherwise: a fold's AUROC
+is undefined with a single class), so use fewer folds than the smaller class
+has patients. Keep the file with the data so that every model is evaluated on
+the same folds.
 
 ## Cell graphs
 

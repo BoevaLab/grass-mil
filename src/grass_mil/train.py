@@ -72,6 +72,11 @@ def train(cfg: DictConfig) -> tuple[dict[str, float], dict[str, Any]]:
         )
         frame.to_csv(output_dir / "test_predictions.csv", index=False)
         log.info(f"Test predictions written to {output_dir / 'test_predictions.csv'}")
+    checkpoint = trainer.checkpoint_callback
+    if checkpoint is not None and checkpoint.last_model_path:
+        selected = checkpoint.best_model_path if checkpoint.monitor else ""
+        log.info(f"Checkpoint: {selected or checkpoint.last_model_path}")
+    log.info(f"Outputs written to {output_dir}")
     return metrics, {"cfg": cfg, "datamodule": datamodule, "model": model, "trainer": trainer}
 
 
