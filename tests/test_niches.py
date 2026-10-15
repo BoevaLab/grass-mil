@@ -31,7 +31,10 @@ def test_niches_are_numbered_by_margin_with_background_zero():
     rng = np.random.default_rng(0)
     x = np.concatenate([rng.normal(c, 0.05, size=(100, 2)) for c in ((0, 1), (1, 0), (-1, 0))])
     margin = np.repeat([0.0, 2.0, -2.0], 100)
-    model, niches = fit_niches(x, margin, ClusteringConfig(min_cluster_size=20, sample_size=200))
+    units = np.repeat(["u1", "u2"], 150)
+    model, niches = fit_niches(
+        x, margin, units, ClusteringConfig(min_cluster_size=20, sample_size=200)
+    )
     assert model.n_niches == 3
     assert np.mean(niches[100:200] == 1) > 0.9 and np.mean(niches[200:] == 3) > 0.9
     assert np.array_equal(model.predict(x[:5]), niches[:5])

@@ -1,68 +1,18 @@
-# Conda environment for local development.
-#
-# This is an alternative to `pip install -e ".[interpretability,report,io]"`.
-# It exists because conda resolves the compiled stack (PyTorch, PyG, scipy)
-# across all packages simultaneously, and installs precompiled binaries without
-# requiring system compilers.
-#
-# Keep the versions here consistent with `pyproject.toml` (`requires-python` and
-# `dependencies`). CI does not use this file: it installs with pip and pins the
-# stack inline in `.github/workflows/test.yml`.
-
+# Conda alternative to the pip install in the README; conda resolves the
+# compiled stack (PyTorch, PyG, torch-sparse) together.
 name: grass-mil
 
 channels:
   - pyg
   - pytorch
   - conda-forge
-  - defaults
 
-# Major versions are pinned so all users share the same majors, while minor and
-# patch versions stay free.
 dependencies:
-  # Must satisfy pyproject's `requires-python = ">=3.11"`.
   - python=3.12
-  - pytorch=2.*
-  - lightning=2.*
-  - torchmetrics=1.*
-  - hydra-core=1.*
-  - rich=13.*
-  - numpy
-  - pandas
-  - scipy
-  - scikit-learn
-  - joblib
-  - lightning-utilities
-  - shapely
-  - anndata
-  # PyG and its compiled extensions resolve far more reliably from conda than
-  # from pip; torch-sparse in particular has no macOS-arm64 wheel.
+  - pytorch=2.4
   - pyg=2.*
-  - pytorch-scatter
   - pytorch-sparse
-
-  # --------- interpretability --------- #
-  - plotly
-  - jinja2
-
-  # --------- dev --------- #
-  - pre-commit=4.*
-  - pytest=9.*
-
-  # --------- loggers --------- #
-  # - wandb
-  # - neptune-client
-  # - mlflow
-  # - comet-ml
-  # - aim>=3.16.2 # no lower than 3.16.2, see https://github.com/aimhubio/aim/issues/2550
-
-  - pip>=23
+  - pytorch-scatter
+  - pip
   - pip:
-      - hydra-colorlog
-      - rootutils
-      - umap-learn
-      - matplotlib
-      - statsmodels
-      # optional: required only for SingleCellExperiment/rds loading, and also
-      # needs an R runtime with Bioconductor
-      # - rpy2
+      - -e .[io,test]

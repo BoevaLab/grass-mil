@@ -6,8 +6,9 @@ the cosine geometry), then HDBSCAN (or k-means). The remaining cells are
 assigned by a k-nearest-neighbour vote on the same coordinates. Cells HDBSCAN
 leaves unassigned form the ``Background``.
 
-Niches are numbered by their attention-weighted margin, ``Niche 1`` being the
-most positive; ``0`` is the Background.
+Niches are numbered by their attention-weighted margin (the mean over units of
+the niche's mean cell margin), ``Niche 1`` being the most positive; ``0`` is
+the Background.
 """
 
 from __future__ import annotations
@@ -100,12 +101,15 @@ class NicheModel:
 
 
 def fit_niches(
-    x: np.ndarray, margin: np.ndarray, cfg: ClusteringConfig
+    x: np.ndarray, margin: np.ndarray, unit_of_cell: np.ndarray, cfg: ClusteringConfig
 ) -> tuple[NicheModel, np.ndarray]:
     """Fit the clustering on ``x`` and return the model and every cell's niche id.
 
-    ``margin`` (per cell) orders the niches.
+    Niches are ordered by their margin: the mean over units of the niche's mean
+    cell ``margin`` in the unit (the statistic the niche table reports).
     """
+    import pandas as pd
+
     from sklearn.cluster import HDBSCAN, KMeans
     from sklearn.decomposition import PCA
     from sklearn.neighbors import KNeighborsClassifier
@@ -140,8 +144,9 @@ def fit_niches(
     model = NicheModel(cfg, pca, assigner, {}, sample)
     labels = assigner.predict(model.coordinates(x))
     labels[sample] = raw
-    # Number the clusters by mean margin, most positive first; -1 is Background.
-    clusters = [c for c in np.unique(labels) if c >= 0]
-    order = sorted(clusters, key=lambda c: -float(np.mean(margin[labels == c])))
+    # Number the clusters by margin, most positive first; -1 is Background.
+    per_unit = pd.Series(margin).groupby([labels, unit_of_cell]).mean()
+    score = per_unit.groupby(level=0).mean()
+    order = sorted((c for c in score.index if c >= 0), key=lambda c: -float(score[c]))
     model.mapping = {-1: BACKGROUND, **{int(c): rank + 1 for rank, c in enumerate(order)}}
     return model, np.vectorize(model.mapping.get)(labels).astype(int)

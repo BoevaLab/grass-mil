@@ -44,8 +44,16 @@ def run_spatial_stats(cfg: DictConfig) -> Path:
     partners = [j for j in range(g) if j not in reference]
     rng = np.random.default_rng(int(cfg.seed))
     positive = cells.positive(int(cfg.positive_class))
-    patient_of = {u: cells.patients.get(u, u) for u in cells.units}
-    y = pd.Series({patient_of[u]: int(positive[u]) for u in cells.units})
+    if cfg.compare_by not in ("patient", "unit"):
+        raise ValueError("compare_by must be 'patient' or 'unit'.")
+    if cfg.compare_by == "patient":
+        patient_of = {u: cells.patients.get(u, u) for u in cells.units}
+    else:
+        patient_of = {u: u for u in cells.units}
+    # A patient is positive when any of its units is.
+    y = pd.Series(dtype=int)
+    for u in cells.units:
+        y[patient_of[u]] = max(int(positive[u]), int(y.get(patient_of[u], 0)))
 
     per_unit: dict[str, dict[str, dict[str, float]]] = {a: {} for a in cfg.analyses}
     windows = []

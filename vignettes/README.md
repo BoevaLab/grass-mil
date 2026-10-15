@@ -1,48 +1,33 @@
 # Vignettes
 
-Worked examples that run `grass-mil` end to end on a public dataset, so you can
-see the whole path from a published AnnData object to a spatial-niche report
-before pointing the framework at your own cohort.
+The whole GRASS-MIL workflow on a public dataset, run on a laptop.
 
-| Vignette | What it covers |
+| Vignette | Content |
 |---|---|
-| [`01_anndata_to_spatial_graphs.ipynb`](01_anndata_to_spatial_graphs.ipynb) | Turning a `squidpy` dataset into the manifest + per-sample files `grass-mil` expects, building the cellular graphs, and inspecting them |
-| [`02_pretraining_and_niches.ipynb`](02_pretraining_and_niches.ipynb) | GRASS-MIL pretraining (BGRL, `regime=pretrain_a3`), fine-tuning with `regime=mil`, exporting per-instance embeddings, and discovering spatial niches with the interpretability report |
-| [`03_nested_cv_niches_and_metaclusters.ipynb`](03_nested_cv_niches_and_metaclusters.ipynb) | The preprint's analysis chain on the same tiles: nested cross-validation, cell extraction, niche attribution, cross-fold metaclusters, evaluation statistics and classical spatial statistics |
+| [`01_anndata_to_cell_graphs.ipynb`](01_anndata_to_cell_graphs.ipynb) | cell tables, manifest, units (100 µm tiles), cell graphs, labels and folds |
+| [`02_pretraining_training_and_niches.ipynb`](02_pretraining_training_and_niches.ipynb) | label-free pretraining, fine-tuning with the default regime, per-cell outputs, niche discovery and description |
+| [`03_cross_validation_and_replication.ipynb`](03_cross_validation_and_replication.ipynb) | nested cross-validation, niches of a fold model on its held-out tiles, replication of niches across fold models, model-free spatial statistics |
 
-Run them in order: the second reads the graphs the first builds, the third
-reuses the pretrained encoder of the second.
+Run them in order: each one uses the outputs of the previous one. Vignette 2
+pretrains for 3,000 steps (a few minutes on a GPU, about ten on a CPU); the
+rest takes a few minutes.
 
-## Dataset
+## Data and phenotype
 
-All three use `squidpy.datasets.mibitof()` — MIBI-TOF imaging of colorectal
-carcinoma: 3 images, ~3,300 cells, 36 protein markers, 8 annotated cell types
-(Hartmann et al.). It is a natural fit because `grass-mil` is built for
-cell-resolved spatial proteomics: every cell has coordinates, a type, and a
-marker profile. It downloads in a few seconds and everything here runs on CPU in
-a few minutes.
-
-## Scope, honestly
-
-Three images from two donors is enough to demonstrate the mechanics, and enough
-for unsupervised niche discovery. It is **not** enough for supervised
-evaluation: a correct sample-level split leaves one image per fold, and the only
-genuine bag-level variable — donor identity — ends up single-class in training.
-
-The vignettes therefore treat the supervised step as plumbing (it exists because
-prediction needs a supervised checkpoint) and put the weight on the parts that
-stand on their own: graph construction, self-supervised pretraining, and niche
-discovery. Vignette 2 says so at the top rather than burying it.
+`squidpy.datasets.mibitof()`: MIBI-TOF images of colorectal carcinoma, 3
+images, about 3,300 cells, 8 annotated cell types (Hartmann et al.). Only the
+cell types enter the model. The images are cut into 100 µm tiles, and each tile
+is labelled by a phenotype derived from the data, CD8 T-cell infiltration (a
+CD8 fraction at or above the median), so the predictions and niches can be
+checked against what is known to drive them. Three images make small folds:
+the numbers illustrate the procedure, not the performance of the method.
 
 ## Setup
 
 ```bash
-pip install "grass-mil[interpretability,io]" squidpy matplotlib jupyter
+pip install -e ".[io]" squidpy jupyter
 jupyter lab vignettes/
 ```
 
-`squidpy` is used only to fetch the public dataset; it is not a runtime
-dependency of `grass-mil`.
-
-The notebooks write to `vignettes/vignette_work/`, which is git-ignored. Delete
-it to start clean.
+The notebooks write to `vignettes/vignette_work/` (ignored by git); delete it
+to start again.

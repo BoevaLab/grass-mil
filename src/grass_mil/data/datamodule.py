@@ -33,7 +33,11 @@ class InputSpec:
     edge_dim: int
 
     def as_dict(self) -> dict[str, Any]:
-        return {"feature_dim": self.feature_dim, "cell_types": list(self.cell_types), "edge_dim": self.edge_dim}
+        return {
+            "feature_dim": self.feature_dim,
+            "cell_types": list(self.cell_types),
+            "edge_dim": self.edge_dim,
+        }
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> InputSpec:
@@ -173,24 +177,34 @@ class SpatialOmicsDataModule(L.LightningDataModule):
 
     def _group_of(self, entry: UnitEntry) -> str:
         labels = self.read_labels()
-        label_id = labels.resolve(entry.unit_id, entry.region_id, entry.sample_id) if labels else None
+        label_id = (
+            labels.resolve(entry.unit_id, entry.region_id, entry.sample_id) if labels else None
+        )
         if labels is not None and label_id is not None and self.labels_cfg.get("patient_column"):
             return labels.patient(label_id)
         return entry.region_id
 
     def _random_assignment(self, units: Sequence[UnitEntry]) -> dict[str, str]:
         groups = {u.unit_id: self._group_of(u) for u in units}
-        # Stratify by the first target when it holds a few integer classes.
+        # Stratify by class when every group's units share one integer class.
         strata = None
         labels = self.read_labels()
         if labels is not None:
-            values = {}
+            classes: dict[str, set[float]] = {}
             for u in units:
                 label_id = labels.resolve(u.unit_id, u.region_id, u.sample_id)
                 if label_id is not None:
-                    values[groups[u.unit_id]] = float(labels.targets.loc[label_id].iloc[0])
+                    value = float(labels.targets.loc[label_id].iloc[0])
+                    classes.setdefault(groups[u.unit_id], set()).add(value)
+            single = all(len(v) == 1 for v in classes.values())
+            values = {g: next(iter(v)) for g, v in classes.items()} if single else {}
             discrete = all(float(v).is_integer() for v in values.values())
-            if discrete and len(values) == len(set(groups.values())) and len(set(values.values())) <= 10:
+            if (
+                values
+                and discrete
+                and len(values) == len(set(groups.values()))
+                and len(set(values.values())) <= 10
+            ):
                 strata = {g: str(v) for g, v in values.items()}
         ratios = self.split_cfg.get("ratios", (0.8, 0.1, 0.1))
         return random_split(groups, ratios, int(self.split_cfg.get("seed", 0)), strata)
@@ -198,7 +212,10 @@ class SpatialOmicsDataModule(L.LightningDataModule):
     def _members(self, units: Sequence[UnitEntry]) -> dict[str, list[UnitEntry]]:
         if not self._explicit():
             assignment = self._random_assignment(units)
-            return {s: [u for u in units if assignment[u.unit_id] == s] for s in ("train", "val", "test")}
+            return {
+                s: [u for u in units if assignment[u.unit_id] == s]
+                for s in ("train", "val", "test")
+            }
         out: dict[str, list[UnitEntry]] = {}
         for split in ("train", "val", "test"):
             ids = read_ids(self.split_cfg.get(split)) or []
@@ -240,7 +257,11 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         dataset = dataset if dataset is not None else self.all_units()
         rows = []
         for entry in dataset.entries:
-            row = {"unit_id": entry.unit_id, "region_id": entry.region_id, "sample_id": entry.sample_id}
+            row = {
+                "unit_id": entry.unit_id,
+                "region_id": entry.region_id,
+                "sample_id": entry.sample_id,
+            }
             label_id = dataset.label_id(entry)
             if label_id is not None and self.labels_cfg.get("patient_column"):
                 row["patient_id"] = dataset.labels.patient(label_id)
@@ -282,7 +303,10 @@ class SpatialOmicsDataModule(L.LightningDataModule):
     def train_dataloader(self) -> EgoGraphLoader:
         mode = "merged" if self.sampler_cfg.merge_units else "bags"
         return self.loader(
-            self.dataset_train, mode=mode, roots_per_unit=self.sampler_cfg.roots_per_unit, shuffle=True
+            self.dataset_train,
+            mode=mode,
+            roots_per_unit=self.sampler_cfg.roots_per_unit,
+            shuffle=True,
         )
 
     def val_dataloader(self) -> EgoGraphLoader:

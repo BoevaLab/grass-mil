@@ -15,6 +15,9 @@ cells_dir: ???
 output_dir: ${paths.output_dir}
 units: all # all | held_out | list / file of unit ids
 positive_class: 1
+# Compare patients (the mean over their units; a patient is positive when any of
+# its units is) or individual units.
+compare_by: patient # patient | unit
 analyses: [enrichment, neighbourhoods, contacts, cross_l]
 # Optional fine -> coarse cell-type grouping ({fine: group}); identity by default.
 group_map: {}
@@ -25,5 +28,5 @@ neighbourhoods:
   n: 10 # neighbourhood clusters
   sample_size: 200000
 radii: [20.0, 50.0, 100.0] # cross-L radii, coordinate units
-min_patients: 10 # per class, for a test
+min_patients: 10 # per class (patients or units), for a test
 seed: 0

@@ -74,7 +74,7 @@ def cluster_folds(
     for name, cache in caches.items():
         cells = load_cells(cache, sorted(cache.held_out))
         margin = _margins(cells, positive_class)
-        model, niches = fit_niches(cells.space[cfg.space], margin, cfg)
+        model, niches = fit_niches(cells.space[cfg.space], margin, cells.unit_of_cell, cfg)
         positive = cells.positive(positive_class)
         table = niche_table(
             niches,

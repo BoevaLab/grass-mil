@@ -72,7 +72,9 @@ def analyse_niches(
         cells.unit_of_cell,
         positive_class=positive_class,
     )
-    model, niches = fit_niches(cells.space[clustering.space], margin, clustering)
+    model, niches = fit_niches(
+        cells.space[clustering.space], margin, cells.unit_of_cell, clustering
+    )
     positive = cells.positive(positive_class)
     table = niche_table(
         niches,
