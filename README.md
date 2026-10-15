@@ -23,8 +23,7 @@ length. A GINE graph network encodes the *k*-hop ego-graph around every cell
 prediction, the ego-graphs of a region are the instances of one bag: an
 instance head gives per-class logits, a projected gated attention gives
 per-class weights, and the bag logit is `L_c = sum_i A[i,c] * l[i,c]`, so every
-cell's contribution `A[i,c] (l[i,c] - r_c)` relative to the model's average
-cell `r` is exact rather than approximated.
+cell's contribution `A[i,c] (l[i,c] - b_c)` is exact rather than approximated.
 By default the pretrained encoder is fine-tuned end to end with a linear
 instance head initialised by a probe on its frozen embeddings. Evaluation is a
 nested, patient-grouped cross-validation. Interpretation clusters the held-out

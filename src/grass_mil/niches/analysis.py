@@ -68,7 +68,7 @@ def analyse_niches(
     margin = cell_margins(
         cells.instance_logits,
         cells.attention_logits,
-        cells.reference_logits,
+        cells.head_bias,
         cells.unit_of_cell,
         positive_class=positive_class,
     )

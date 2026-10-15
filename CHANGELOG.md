@@ -28,8 +28,7 @@ graphs and checkpoints of 1.0.0 need to be rebuilt.
   step; numeric sample ids; stale processed graphs are detected.
 - **Statistics**: the Cox loss handles tied times (Breslow) and survival heads
   start from a Cox probe; outer folds must keep patients together; refits keep
-  the inner runs' learning-rate schedule; margins are relative to the model's
-  average cell rather than the head bias, and their intervals resample patients;
+  the inner runs' learning-rate schedule; margin intervals resample patients;
   per-niche cross-L is relative to random labelling and Moran's I is tested
   with exact randomisation moments; prediction checks that the cohort was
   preprocessed like the training data.

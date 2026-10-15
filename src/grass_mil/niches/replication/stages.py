@@ -61,7 +61,7 @@ def _margins(cells: Cells, positive_class: int) -> np.ndarray:
     return cell_margins(
         cells.instance_logits,
         cells.attention_logits,
-        cells.reference_logits,
+        cells.head_bias,
         cells.unit_of_cell,
         positive_class=positive_class,
     )

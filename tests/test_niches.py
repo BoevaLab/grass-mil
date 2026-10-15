@@ -13,21 +13,18 @@ from grass_mil.niches.survival import cox_univariate, logrank
 from tests.helpers.cohort import compose_cfg
 
 
-def test_margins_sum_to_the_bag_margin_over_the_reference():
+def test_margins_sum_to_the_bag_margin():
     rng = np.random.default_rng(0)
     logits, scores = rng.normal(size=(30, 2)), rng.normal(size=(30, 2))
-    reference = logits.mean(0)
+    bias = np.array([0.2, -0.1])
     units = np.array(["a"] * 10 + ["b"] * 20)
-    margin = cell_margins(logits, scores, reference, units)
+    margin = cell_margins(logits, scores, bias, units)
     for unit, n in (("a", 10), ("b", 20)):
         m = units == unit
         w = np.exp(scores[m] - scores[m].max(0))
         w /= w.sum(0)
-        bag = (w * logits[m]).sum(0) - reference
+        bag = (w * logits[m]).sum(0) - bias
         assert margin[m].sum() / n == pytest.approx(bag[1] - bag[0], rel=1e-5)
-    # Cells with average logits contribute nothing, however much attention they get.
-    flat = cell_margins(np.tile(reference, (30, 1)), scores, reference, units)
-    assert np.allclose(flat, 0.0)
 
 
 def test_niches_are_numbered_by_margin_with_background_zero():

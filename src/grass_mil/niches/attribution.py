@@ -1,15 +1,8 @@
 """Per-cell attention-weighted margins.
 
 Within a unit, the attention of class ``c`` is a softmax over the unit's cells,
-so for any reference logit ``r_c`` the bag logit is exactly
-``L_c = r_c + sum_i A[i, c] (l[i, c] - r_c)``. The reference is the model's
-average cell (its mean instance logit over the cohort, recorded by
-``grass-mil-extract``), so a cell's contribution is positive when the cell
-pushes its unit's logit above what an average cell would. (The head bias is no
-neutral reference: the embeddings are not centred, so ``l - b`` carries a
-model-specific offset that would set the sign of every contribution.)
-
-The margin of a cell is its contribution to the positive class minus its
+so a cell's contribution ``A[i, c] (l[i, c] - b_c)`` sums over the unit to its
+bag logit minus the head bias ``b_c``. The margin of a cell is its contribution to the positive class minus its
 contribution to the other classes (their mean beyond two classes), multiplied
 by the unit's cell count ``N_u`` so that units of different sizes are
 comparable (a uniformly attended cell gets weight 1). For regression and
@@ -34,7 +27,7 @@ def unit_attention(scores: np.ndarray, unit_of_cell: np.ndarray) -> np.ndarray:
 def cell_margins(
     logits: np.ndarray,
     scores: np.ndarray,
-    reference: np.ndarray,
+    bias: np.ndarray,
     unit_of_cell: np.ndarray,
     *,
     positive_class: int = 1,
@@ -42,7 +35,7 @@ def cell_margins(
     """Size-scaled, attention-weighted margin of every cell toward the positive output."""
     logits = np.asarray(logits, dtype=np.float64)
     weights = unit_attention(np.asarray(scores, dtype=np.float64), unit_of_cell)
-    contrib = weights * (logits - np.asarray(reference, dtype=np.float64)[None, :])
+    contrib = weights * (logits - np.asarray(bias, dtype=np.float64)[None, :])
     n_classes = contrib.shape[1]
     if n_classes == 1:
         margin = contrib[:, 0]

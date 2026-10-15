@@ -28,15 +28,10 @@ grass-mil-niches cells_dir=<extract>/cells/fold0
 (`units=held_out`; or `all`, or a list).
 
 **Margin.** Within a unit, a cell's contribution to class `c` is
-`A[i, c] (l[i, c] - r_c)`, where `r_c` is the model's mean instance logit over
-every cell of the cohort (recorded by `grass-mil-extract`); summed over the unit
-it gives the unit's logit minus `r_c`. A positive contribution means the cell
-pushes its unit above what an average cell would. (The head bias is not used as
-the reference: the embeddings are not centred, so `l - b` carries a
-model-specific offset that would set the sign of every margin.) A cell's margin
-is its contribution to the positive class minus its contribution to the other
-class(es), multiplied by the unit's number of cells so that units of different
-size are comparable.
+`A[i, c] (l[i, c] - b_c)`, where `b_c` is the head bias; summed over the unit it
+gives the unit's logit minus the bias. A cell's margin is its contribution to
+the positive class minus its contribution to the other class(es), multiplied
+by the unit's number of cells so that units of different size are comparable.
 
 **Clustering.** Cells are clustered in the attention space
 (`clustering.space=attention`; `embedding` uses the encoder embedding, for which

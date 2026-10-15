@@ -21,7 +21,7 @@ class Cells:
     space: dict[str, np.ndarray]  # the loaded spaces: "attention" / "embedding" -> (N, d)
     instance_logits: np.ndarray  # (N, C)
     attention_logits: np.ndarray  # (N, C)
-    reference_logits: np.ndarray  # (C,) the model's mean instance logit
+    head_bias: np.ndarray  # (C,)
     cell_type: np.ndarray  # (N,) int (-1 without cell types)
     cell_type_names: list[str]
     pos: np.ndarray  # (N, 2)
@@ -115,7 +115,7 @@ def load_cells(cache: CellCache, units: Sequence[str], spaces: Sequence[str] = (
         space={s: np.concatenate(parts[s]).astype(np.float32) for s in spaces},
         instance_logits=np.concatenate(parts["logits"]),
         attention_logits=np.concatenate(parts["scores"]),
-        reference_logits=cache.reference_logits,
+        head_bias=cache.head_bias,
         cell_type=np.concatenate(parts["ct"]).astype(int),
         cell_type_names=cache.cell_types,
         pos=np.concatenate(parts["pos"]),
