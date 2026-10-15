@@ -1,33 +1,24 @@
-# @package _global_
-# grass-mil-extract: per-cell cache (embeddings, instance logits, attention) of
-# one or more trained models over ALL cells of every region.
+# grass-mil-extract: per-cell outputs (embeddings, attention space, logits) of
+# trained models over every cell of every unit.
 #
-#   grass-mil-extract regime=linear_ftall_reg data=... \
-#       extract.nested_cv_summary=<nested_cv_dir>/nested_cv_summary.json
-#   grass-mil-extract regime=mil data=... +extract.models.final=/path/to/last.ckpt
+#   grass-mil-extract experiment=my_cohort extract.nested_cv_summary=<run>/nested_cv_summary.json
+#   grass-mil-extract experiment=my_cohort +extract.models.final=<run>/checkpoints/last.ckpt
 #
-# The model is composed from the same `regime`/`model` keys as the training run
-# so the checkpoint fits; the ego-graph settings come from `data.sampler`.
+# Models are rebuilt from their checkpoints, including the ego-graph settings
+# they were trained with; `data` only needs to point at the same cohort.
 defaults:
   - train
   - _self_
 
-task_name: "extract"
-train: false
-test: false
+task_name: extract
 
 extract:
-  # Either a nested-CV summary (one model per outer fold, held-out regions
-  # recorded) or an explicit {name: checkpoint} mapping.
+  # One model per outer fold of a cross-validation (held-out units recorded) ...
   nested_cv_summary: null
+  # ... and/or explicit {name: checkpoint} models.
   models: {}
-  # Optional held-out region lists per explicit model: +extract.held_out.<name>=[...]
-  held_out: {}
   output_dir: ${paths.output_dir}/cells
-  regions: null # optional list / json file of unit ids to extract (null = all)
-  # auto = patch when the precompute holds several tiles per region, else region.
-  unit_id: auto # auto | region | sample | patch
+  units: null # subset of unit ids (list or file); null = every unit
   batch_size: 512 # ego-graphs per forward pass
-  autocast: true # fp16 autocast on GPU
-  device: auto
+  device: auto # auto | cpu | cuda
   resume: true

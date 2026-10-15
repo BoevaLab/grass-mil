@@ -1,0 +1,21 @@
+# grass-mil-predict: score a cohort with a trained checkpoint.
+#
+#   grass-mil-predict experiment=new_cohort ckpt_path=<run>/checkpoints/last.ckpt
+#
+# The model and its ego-graph settings come from the checkpoint; `data` points
+# at the cohort to score (labels optional; with labels, metrics are reported).
+defaults:
+  - train
+  - _self_
+
+task_name: predict
+ckpt_path: ???
+
+predict:
+  units: null # subset of unit ids (list or file); null = every unit
+  # Patient scores (needs data.labels.patient_column): `mean` averages the
+  # unit predictions; `merged_bag` pools every cell of the patient's units in
+  # one attention bag.
+  patient_aggregation: mean # mean | merged_bag
+  batch_size: 512
+  device: auto

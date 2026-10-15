@@ -1,0 +1,15 @@
+# BGRL pretraining of the ego-graph encoder (selected by regime=pretrain).
+defaults:
+  - encoder: gine
+  - _self_
+
+_target_: grass_mil.models.BGRLModule
+_recursive_: false
+
+encoder:
+  dropout: 0.1
+pretrain: ${pretrain}
+optim: ${optim}
+scheduler: ${scheduler}
+# Continue from an earlier encoder checkpoint; null = random initialisation.
+init_from_ckpt: null

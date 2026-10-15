@@ -1,53 +1,33 @@
 # @package _global_
-# Template for a cohort of whole regions (cores, ROIs, slides) given as CSV cell
-# tables. Copy this file, rename it (e.g. my_cohort.yaml), fill in the paths and
-# column names, then select it on every command with `experiment=my_cohort`:
+# Template describing one cohort. Copy it to my_cohort.yaml, fill in paths and
+# column names, and pass experiment=my_cohort to every command:
 #
-#   grass-mil-train      experiment=my_cohort regime=pretrain_a3 paths.output_dir=runs/pretrain_a3
-#   grass-mil-nested-cv  experiment=my_cohort regime=linear_ftall_reg model.init_from_ckpt=...
-#   grass-mil-extract    experiment=my_cohort regime=linear_ftall_reg extract.nested_cv_summary=...
-#
-# Keys listed here are the ones that describe a dataset. Every other setting
-# (encoder, ego-graphs, regimes, clustering) keeps its preset default and can
-# still be overridden on the command line. Values are examples.
+#   grass-mil-train      experiment=my_cohort regime=pretrain
+#   grass-mil-nested-cv  experiment=my_cohort model.init_from_ckpt=<pretrain>/checkpoints/last.ckpt
+#   grass-mil-extract    experiment=my_cohort extract.nested_cv_summary=<nested_cv>/nested_cv_summary.json
 
 paths:
-  data_dir: /path/to/my_cohort # holds raw/ and processed/
+  data_dir: /path/to/my_cohort
 
 data:
-  # --- inputs -------------------------------------------------------------
-  raw_manifest_path: ${paths.data_dir}/raw/manifest.csv # sample_id,input_path,input_type,region_id
-  processed_dir: ${paths.data_dir}/processed # graphs are written here once
-  sample_unit: full # full = one graph per region; tile = cut regions into tiles (see docs)
-  coord_scale_um: 1.0 # multiply coordinates by this to get the unit used below
-  min_cells: 10 # regions with fewer cells are dropped
-  csv:
-    sep: ","
+  manifest_path: ${paths.data_dir}/manifest.csv # sample_id,input_path[,region_id]
+  processed_dir: ${paths.data_dir}/processed
+  unit: region
+  coord_scale_um: 1.0
+  input:
     coord_columns: [x, y]
     cell_id_column: cell_id
-    categorical_label_columns: [cell_type] # the cell-type column (any name)
-    molecular_columns: [SIZE] # continuous node features; [] for cell type only
-  categorical_features:
-    include_labels: [cell_type] # must match the column above
-  # --- graph --------------------------------------------------------------
-  graph_builder:
-    name: delaunay
-    kwargs:
-      edge_features: [log_distance, neighbor] # GRASS-MIL default
-      neighbor_cutoff_um: 55.0 # contact distance, in the coordinate unit after coord_scale_um
-  # --- labels and grouping -------------------------------------------------
-  graph_labels:
-    label_file: ${paths.data_dir}/raw/labels.csv # REGION_ID,STAS,PATIENT
-    id_column: REGION_ID
-    tasks: [STAS] # target column(s); 0/1 or category names
-    scope: region
-    patient_column: PATIENT # grouping; never a target
-  split:
-    split_by: region # persisted random split used only when no explicit split is given
-    train_val_test_split: [0.8, 0.1, 0.1]
+    cell_type_column: cell_type
+    features: [area] # continuous node features; null for cell type only
+  graph:
+    neighbor_cutoff: 20.0 # contact distance in coordinate units
+  labels:
+    file: ${paths.data_dir}/labels.csv # region_id,label,patient_id
+    id_column: region_id
+    patient_column: patient_id
+
+task:
+  target_columns: [label]
 
 nested_cv:
-  folds_file: ${paths.data_dir}/raw/folds.json # JSON list of lists of region ids, patient-grouped
-
-task_name: my_cohort
-tags: [my_cohort]
+  folds_file: ${paths.data_dir}/folds.json # JSON list of lists of region ids

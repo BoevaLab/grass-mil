@@ -1,0 +1,15 @@
+# @package _global_
+# Encoder fine-tuned end to end with a randomly initialised two-layer MLP head.
+defaults:
+  - finetune
+
+regime_name: mlp_head
+
+finetune:
+  lr_scales:
+    head: 1.0
+  head_weight_decay: null
+  head_init: random
+model:
+  head:
+    num_layers: 2

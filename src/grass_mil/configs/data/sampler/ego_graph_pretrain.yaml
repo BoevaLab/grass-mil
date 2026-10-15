@@ -1,33 +1,7 @@
-# Ego-graph batches for BGRL pretraining (preprint "A3" defaults): roots drawn
-# uniformly from the union of ALL regions (`merge_units`), 64 full k-hop
-# ego-graphs per step (depth 4, unlimited neighbours, no radius cap).
-name: shadow_custom
-kwargs: {}
-runtime:
-  enabled: true
-  depth: 4
-  num_neighbors: -1
-  subgraph_batch_size: 64
-  replace: false
-  shuffle_subgraphs: true
-  proportional_root_sampling: false
-  property_name: cell_type
-  weight_mode: inverse
-  min_weight: 1.0e-6
-  subsample_fraction: 1.0
-  subsample_count: null
-  subsample_seed: null
-  fixed_per_unit_seed: null
-  unit_as_bag: false
-  merge_units: true
-  interior_seeds:
-    enabled: false
-    n_hops: null
-    seed_tolerance_multiplier: 1.0
-    keep_largest_component: true
-    cache_dir: null
-  ego_radius:
-    enabled: false
-    radius_per_hop: 75.0
-    radius_offset: 55.0
-    keep_root_component: true
+# Pretraining: roots of all units pooled, batch_size ego-graphs per step.
+defaults:
+  - ego_graph
+  - _self_
+
+roots_per_unit: null
+merge_units: true

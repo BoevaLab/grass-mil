@@ -1,0 +1,26 @@
+# Keep the epoch with the best validation metric of the task and stop early when
+# it has not improved for `task.selection.patience` epochs (after
+# trainer.min_epochs).
+defaults:
+  - model_checkpoint
+  - early_stopping
+  - model_summary
+  - rich_progress_bar
+  - _self_
+
+model_checkpoint:
+  dirpath: ${paths.output_dir}/checkpoints
+  filename: "epoch_{epoch:03d}"
+  monitor: ${task.selection.metric}
+  mode: ${task.selection.mode}
+  save_last: true
+  save_top_k: 1
+  auto_insert_metric_name: false
+
+early_stopping:
+  monitor: ${task.selection.metric}
+  mode: ${task.selection.mode}
+  patience: ${task.selection.patience}
+  strict: false
+  # NaN (e.g. AUROC of a single-class validation set) counts as no improvement.
+  check_finite: false

@@ -1,5 +1,7 @@
+# One GPU with fp16 mixed precision.
 defaults:
   - default
 
 accelerator: gpu
 devices: 1
+precision: 16-mixed
