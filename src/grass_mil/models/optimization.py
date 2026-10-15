@@ -12,7 +12,9 @@ __all__ = ["build_optimizer", "build_scheduler"]
 
 
 def _plain(cfg: Any) -> dict:
-    return dict(OmegaConf.to_container(cfg, resolve=True)) if OmegaConf.is_config(cfg) else dict(cfg)
+    return (
+        dict(OmegaConf.to_container(cfg, resolve=True)) if OmegaConf.is_config(cfg) else dict(cfg)
+    )
 
 
 def build_optimizer(cfg: Mapping[str, Any], groups: list[dict]) -> torch.optim.Optimizer:
@@ -51,4 +53,6 @@ def build_scheduler(
     warmup = torch.optim.lr_scheduler.LinearLR(
         optimizer, start_factor=1.0 / (warmup_steps + 1), end_factor=1.0, total_iters=warmup_steps
     )
-    return torch.optim.lr_scheduler.SequentialLR(optimizer, [warmup, main], milestones=[warmup_steps])
+    return torch.optim.lr_scheduler.SequentialLR(
+        optimizer, [warmup, main], milestones=[warmup_steps]
+    )

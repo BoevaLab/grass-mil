@@ -62,7 +62,9 @@ class PretrainConfig:
 
     def momentum(self, step: int) -> float:
         progress = min(max(step, 0), self.total_steps) / max(1, self.total_steps)
-        return self.momentum_end - (self.momentum_end - self.momentum_start) * 0.5 * (1 + math.cos(math.pi * progress))
+        return self.momentum_end - (self.momentum_end - self.momentum_start) * 0.5 * (
+            1 + math.cos(math.pi * progress)
+        )
 
 
 class Predictor(nn.Module):
@@ -103,7 +105,10 @@ class BGRLModule(L.LightningModule):
     def build(self, spec: InputSpec, feature_names: list[str] | None = None) -> None:
         self.input_spec = spec
         self.encoder = GINEEncoder(
-            self.encoder_cfg, feature_dim=spec.feature_dim, cell_types=spec.cell_types, edge_dim=spec.edge_dim
+            self.encoder_cfg,
+            feature_dim=spec.feature_dim,
+            cell_types=spec.cell_types,
+            edge_dim=spec.edge_dim,
         )
         self.predictor = Predictor(self.encoder.output_dim, self.pretrain.predictor_hidden_dim)
         self.target_encoder = copy.deepcopy(self.encoder)
@@ -120,7 +125,10 @@ class BGRLModule(L.LightningModule):
         if self.hparams.init_from_ckpt:
             load_encoder_weights(self.encoder, self.hparams.init_from_ckpt)
             self.target_encoder.load_state_dict(self.encoder.state_dict())
-        if self.trainer.max_steps not in (-1, None) and self.trainer.max_steps != self.pretrain.total_steps:
+        if (
+            self.trainer.max_steps not in (-1, None)
+            and self.trainer.max_steps != self.pretrain.total_steps
+        ):
             rank_zero_warn(
                 f"trainer.max_steps={self.trainer.max_steps} differs from pretrain.total_steps="
                 f"{self.pretrain.total_steps}; the schedules follow pretrain.total_steps."
@@ -136,11 +144,22 @@ class BGRLModule(L.LightningModule):
         with torch.no_grad():
             y1 = self.target_encoder.node_embeddings(view1)
             y2 = self.target_encoder.node_embeddings(view2)
-        return 2.0 - F.cosine_similarity(q1, y2, dim=-1).mean() - F.cosine_similarity(q2, y1, dim=-1).mean()
+        return (
+            2.0
+            - F.cosine_similarity(q1, y2, dim=-1).mean()
+            - F.cosine_similarity(q2, y1, dim=-1).mean()
+        )
 
     def training_step(self, batch, batch_idx: int) -> torch.Tensor:
         loss = self._loss(batch)
-        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True, batch_size=int(batch.num_graphs))
+        self.log(
+            "train/loss",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            batch_size=int(batch.num_graphs),
+        )
         return loss
 
     def validation_step(self, batch, batch_idx: int) -> None:
@@ -169,4 +188,7 @@ class BGRLModule(L.LightningModule):
         )
         if scheduler is None:
             return optimizer
-        return {"optimizer": optimizer, "lr_scheduler": {"scheduler": scheduler, "interval": "step"}}
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {"scheduler": scheduler, "interval": "step"},
+        }

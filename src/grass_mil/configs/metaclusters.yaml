@@ -1,69 +1,31 @@
-# grass-mil-metaclusters: cross-fold niche replication.
+# grass-mil-metaclusters (optional): replication of niches across the models of
+# a cross-validation (see docs/niche_analysis.md).
 #
-#   grass-mil-metaclusters cells_dir=<extract_out>/cells labels.label_file=labels.csv \
-#       labels.label_column=STAS labels.patient_column=PATIENT stage=all
-#
-# Stages: cluster (each fold model's held-out cells in its own space, fixed
-# settings) -> match (Hellinger distance on composition, cannot-link within
-# fold, threshold scanned or fixed) -> transfer (every model labels every
-# region; train vs held-out, pairwise ARI, consensus patient shares) ->
-# basis (shared label-free k-means basis with per-model attribution).
+#   grass-mil-metaclusters cells_dir=<extract output>/cells
 defaults:
   - _self_
   - paths: default
   - hydra: default
 
 task_name: metaclusters
-cells_dir: ??? # directory holding one cache subdirectory per fold model
-models: null # subset of model names; null = every cache with held-out regions
+cells_dir: ??? # one cache per fold model (written by grass-mil-extract from a nested CV)
 output_dir: ${paths.output_dir}
 stage: all # all | cluster | match | transfer | basis
-labels:
-  label_file: ??? # region labels (and patient column)
-  id_column: REGION_ID
-  label_column: ???
-  patient_column: null
 positive_class: 1
 positive_name: positive
-
-# Stage 1 clustering (same keys as grass-mil-niches)
-reduction:
-  method: pca
-  n_components: 10
-  random_state: 42
-clustering:
-  method: hdbscan
-  n_clusters: null
-  random_state: 42
-  params:
-    min_cluster_size: 300
-    min_samples: 1
-    cluster_selection_method: eom
-sample_size: 100000
-l2_normalise: true
-assign_k: 15
-seed: 0
+# Niche discovery of every model; same keys as `clustering` of grass-mil-niches.
+clustering: {}
 n_boot: 2000
 
-# Stage 2 matching
 match:
-  distance: hellinger # hellinger | aitchison
-  threshold: null # fixed threshold (e.g. 0.40); null = scan
-  scan: {min: 0.15, max: 0.6, n: 46}
-  min_folds: 3 # "replicated" = members from at least this many folds
+  threshold: null # Hellinger distance threshold; null = scan
+  scan: [0.15, 0.6, 46] # start, stop, number of thresholds
+  min_models: 3 # a metacluster is replicated when found by this many models
 
-# Stage 3 transfer
-transfer:
-  min_cells: 100
-  present_threshold: 0.02
-
-# Stage 4 shared basis
 basis:
   enabled: true
-  space_model: null # model name whose embedding defines the basis (null = first); or a cache dir
+  model: null # model whose space defines the partition (null = the first)
+  space: embedding # attention | embedding
   k: 20
   sample_size: 300000
-  n_init: 10
   seed: 0
-
-figures: true

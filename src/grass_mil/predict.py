@@ -7,7 +7,6 @@ import logging
 from pathlib import Path
 
 import hydra
-import pandas as pd
 import torch
 from omegaconf import DictConfig
 
@@ -45,7 +44,8 @@ def run_predict(cfg: DictConfig) -> dict:
     if wanted is not None:
         wanted = set(wanted)
         units = GraphUnitDataset(
-            [e for e in units.entries if {e.unit_id, e.region_id, e.sample_id} & wanted], units.labels
+            [e for e in units.entries if {e.unit_id, e.region_id, e.sample_id} & wanted],
+            units.labels,
         )
     sampler = sampler_of_checkpoint(ckpt, int(pcfg.batch_size))
     meta = datamodule.unit_table(units)

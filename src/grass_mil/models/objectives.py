@@ -20,7 +20,14 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-__all__ = ["TARGET_TYPES", "output_dim", "Objective", "region_metrics", "concordance_index", "class_weights_from_labels"]
+__all__ = [
+    "TARGET_TYPES",
+    "output_dim",
+    "Objective",
+    "region_metrics",
+    "concordance_index",
+    "class_weights_from_labels",
+]
 
 TARGET_TYPES = ("classification", "regression", "survival")
 
@@ -56,18 +63,26 @@ class Objective:
         if self.kind == "survival" and len(task.get("target_columns") or []) != 2:
             raise ValueError("Survival tasks need task.target_columns: [time, event].")
 
-    def __call__(self, logits: torch.Tensor, targets: torch.Tensor, weights: torch.Tensor | None = None) -> torch.Tensor:
+    def __call__(
+        self, logits: torch.Tensor, targets: torch.Tensor, weights: torch.Tensor | None = None
+    ) -> torch.Tensor:
         logits = logits.float()
         if self.kind == "classification":
             weight = self.class_weight.to(logits.device) if self.class_weight is not None else None
-            per_bag = F.cross_entropy(logits, targets[:, 0].long(), weight=weight, reduction="none")
+            per_bag = F.cross_entropy(
+                logits, targets[:, 0].long(), weight=weight, reduction="none"
+            )
         elif self.kind == "regression":
             if self.loss_name == "huber":
-                per_bag = F.huber_loss(logits, targets, delta=self.huber_delta, reduction="none").mean(1)
+                per_bag = F.huber_loss(
+                    logits, targets, delta=self.huber_delta, reduction="none"
+                ).mean(1)
             else:
                 per_bag = F.mse_loss(logits, targets, reduction="none").mean(1)
         else:
-            return cox_loss(logits[:, 0], targets[:, 0], targets[:, 1], weights, self.cox_regularization)
+            return cox_loss(
+                logits[:, 0], targets[:, 0], targets[:, 1], weights, self.cox_regularization
+            )
         if weights is not None:
             per_bag = per_bag * weights.view(-1).to(per_bag.device)
         return per_bag.mean()
@@ -87,7 +102,11 @@ def cox_loss(
     """
     order = torch.argsort(time, descending=True)
     risk, event = risk[order], event[order].float()
-    w = torch.ones_like(risk) if weights is None else weights.view(-1)[order].float().to(risk.device)
+    w = (
+        torch.ones_like(risk)
+        if weights is None
+        else weights.view(-1)[order].float().to(risk.device)
+    )
     # Cumulative log-sum-exp over the risk set (everyone with time >= t_i).
     log_risk_set = torch.logcumsumexp(risk + torch.log(w), dim=0)
     n_events = (event * w).sum()
@@ -142,7 +161,13 @@ def region_metrics(kind: str, logits: torch.Tensor, targets: torch.Tensor) -> di
                 out["auroc"] = float(
                     roc_auc_score(y, prob[:, 1])
                     if prob.shape[1] == 2
-                    else roc_auc_score(y, prob, multi_class="ovr", average="macro", labels=list(range(prob.shape[1])))
+                    else roc_auc_score(
+                        y,
+                        prob,
+                        multi_class="ovr",
+                        average="macro",
+                        labels=list(range(prob.shape[1])),
+                    )
                 )
             except ValueError:
                 pass
@@ -155,8 +180,17 @@ def region_metrics(kind: str, logits: torch.Tensor, targets: torch.Tensor) -> di
         out["r2"] = out["pearson"] = float("nan")
         if bool((ss_tot > 0).all()):
             out["r2"] = float((1 - (err**2).sum(0) / ss_tot).mean())
-            out["pearson"] = float(np.mean([np.corrcoef(logits[:, j], targets[:, j])[0, 1] for j in range(targets.shape[1])]))
+            out["pearson"] = float(
+                np.mean(
+                    [
+                        np.corrcoef(logits[:, j], targets[:, j])[0, 1]
+                        for j in range(targets.shape[1])
+                    ]
+                )
+            )
     else:
         out["loss"] = float(cox_loss(logits[:, 0], targets[:, 0], targets[:, 1]))
-        out["c_index"] = concordance_index(logits[:, 0].numpy(), targets[:, 0].numpy(), targets[:, 1].numpy())
+        out["c_index"] = concordance_index(
+            logits[:, 0].numpy(), targets[:, 0].numpy(), targets[:, 1].numpy()
+        )
     return out

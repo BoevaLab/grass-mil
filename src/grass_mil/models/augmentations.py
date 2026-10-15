@@ -77,7 +77,9 @@ def drop_importance(batch, *, mu: float, p_lambda: float, unassigned_index: int 
     out = batch.clone()
     imp = degree_importance(out.edge_index, int(out.num_nodes))
     p_node = torch.clamp((1.0 - imp) * mu, max=p_lambda)
-    out = mask_nodes(out, _rand(p_node.shape, generator, p_node.device) <= p_node, unassigned_index)
+    out = mask_nodes(
+        out, _rand(p_node.shape, generator, p_node.device) <= p_node, unassigned_index
+    )
     if out.edge_index.numel():
         e = (imp[out.edge_index[0]] + imp[out.edge_index[1]]) / 2.0
         e = torch.clamp((e - e.mean()) / (e.max() - e.mean() + 1e-8), min=0.0)
@@ -143,7 +145,13 @@ class PretrainViews:
         columns = _columns(self.noise_features, feature_names)
 
         def view(batch, generator):
-            out = drop_importance(batch, mu=self.mu, p_lambda=self.p_lambda, unassigned_index=unassigned_index, generator=generator)
+            out = drop_importance(
+                batch,
+                mu=self.mu,
+                p_lambda=self.p_lambda,
+                unassigned_index=unassigned_index,
+                generator=generator,
+            )
             return feature_noise(out, std=self.noise_std, columns=columns, generator=generator)
 
         return view

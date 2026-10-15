@@ -32,7 +32,9 @@ def resolve_models(ecfg: DictConfig) -> list[dict[str, Any]]:
         for fold in summary["folds"]:
             ckpt = Path(fold["run_dir"]) / "checkpoints" / "last.ckpt"
             held_out = oof.loc[oof["outer"] == fold["outer"], "unit_id"].astype(str).tolist()
-            models.append({"name": f"fold{fold['outer']}", "ckpt_path": str(ckpt), "held_out": held_out})
+            models.append(
+                {"name": f"fold{fold['outer']}", "ckpt_path": str(ckpt), "held_out": held_out}
+            )
     for name, ckpt in dict(ecfg.get("models") or {}).items():
         models.append({"name": str(name), "ckpt_path": str(ckpt), "held_out": []})
     if not models:
@@ -61,7 +63,9 @@ def run_extract(cfg: DictConfig) -> list[str]:
         ckpt = torch.load(spec["ckpt_path"], map_location="cpu", weights_only=False)
         model = SupervisedModule.from_checkpoint(spec["ckpt_path"])
         if tuple(model.input_spec.cell_types) != tuple(datamodule.input_spec.cell_types):
-            raise ValueError(f"{spec['ckpt_path']} was trained on other cell types than this cohort.")
+            raise ValueError(
+                f"{spec['ckpt_path']} was trained on other cell types than this cohort."
+            )
         model_dir = extract_cells(
             model,
             units,

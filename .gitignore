@@ -127,12 +127,8 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-### VisualStudioCode
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-!.vscode/extensions.json
+### Editors
+.vscode/
 *.code-workspace
 
 # JetBrains
@@ -143,16 +139,10 @@ dmypy.json
 *.tar
 *.tar.gz
 
-# Lightning-Hydra-Template
-configs/local/default.yaml
-src/grass_mil/configs/local/*.yaml
-!src/grass_mil/configs/local/.gitkeep
+# Run outputs and local data
 /data/
 /logs/
 .env
-
-# Aim logging
-.aim
 
 # Vignette scratch space (downloaded data, graphs, runs)
 vignettes/vignette_work/

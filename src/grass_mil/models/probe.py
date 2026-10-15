@@ -37,7 +37,9 @@ class ProbeConfig:
 
 
 @torch.no_grad()
-def collect_embeddings(encoder: torch.nn.Module, loader, device: torch.device) -> tuple[np.ndarray, np.ndarray]:
+def collect_embeddings(
+    encoder: torch.nn.Module, loader, device: torch.device
+) -> tuple[np.ndarray, np.ndarray]:
     """Embeddings and inherited targets of every ego-graph of ``loader``."""
     was_training = encoder.training
     encoder.eval()
@@ -81,7 +83,9 @@ def fit_linear_head(
     w = coef / scaler.scale_[None, :]
     b = intercept - (coef * scaler.mean_[None, :] / scaler.scale_[None, :]).sum(axis=1)
     if coef.shape[0] not in (1, num_logits):
-        raise ValueError(f"The probe saw {coef.shape[0]} classes but the head has {num_logits} logits.")
+        raise ValueError(
+            f"The probe saw {coef.shape[0]} classes but the head has {num_logits} logits."
+        )
     weight = torch.zeros(num_logits, embeddings.shape[1])
     bias = torch.zeros(num_logits)
     if kind == "classification" and coef.shape[0] == 1:

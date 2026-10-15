@@ -84,8 +84,14 @@ def frame_metrics(frame: pd.DataFrame, target_type: str) -> dict[str, float]:
         logits = torch.log(torch.as_tensor(probs, dtype=torch.float32).clamp_min(1e-12))
         targets = torch.as_tensor(frame[["label"]].to_numpy(), dtype=torch.float32)
     elif target_type == "regression":
-        logits = torch.as_tensor(frame[[c for c in frame.columns if c.startswith("pred_")]].to_numpy(), dtype=torch.float32)
-        targets = torch.as_tensor(frame[[c for c in frame.columns if c.startswith("target_")]].to_numpy(), dtype=torch.float32)
+        logits = torch.as_tensor(
+            frame[[c for c in frame.columns if c.startswith("pred_")]].to_numpy(),
+            dtype=torch.float32,
+        )
+        targets = torch.as_tensor(
+            frame[[c for c in frame.columns if c.startswith("target_")]].to_numpy(),
+            dtype=torch.float32,
+        )
     else:
         logits = torch.as_tensor(frame[["risk"]].to_numpy(), dtype=torch.float32)
         targets = torch.as_tensor(frame[["time", "event"]].to_numpy(), dtype=torch.float32)

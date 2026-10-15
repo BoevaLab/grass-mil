@@ -17,7 +17,14 @@ from typing import Any, Mapping, Sequence
 import torch
 from torch import nn
 
-__all__ = ["HeadConfig", "AttentionConfig", "InstanceHead", "GatedAttention", "attention_pool", "pool_by_bag"]
+__all__ = [
+    "HeadConfig",
+    "AttentionConfig",
+    "InstanceHead",
+    "GatedAttention",
+    "attention_pool",
+    "pool_by_bag",
+]
 
 
 @dataclass(frozen=True)
@@ -96,7 +103,9 @@ class GatedAttention(nn.Module):
     def __init__(self, input_dim: int, num_classes: int, cfg: AttentionConfig) -> None:
         super().__init__()
         p, h = cfg.projection_dim, cfg.hidden_dim
-        self.projection = nn.Sequential(nn.Linear(input_dim, p), nn.LeakyReLU(), nn.Dropout(cfg.dropout))
+        self.projection = nn.Sequential(
+            nn.Linear(input_dim, p), nn.LeakyReLU(), nn.Dropout(cfg.dropout)
+        )
         self.attention_a = nn.Sequential(nn.Linear(p, h), nn.Tanh(), nn.Dropout(cfg.dropout))
         self.attention_b = nn.Sequential(nn.Linear(p, h), nn.Sigmoid(), nn.Dropout(cfg.dropout))
         self.attention_c = nn.Linear(h, num_classes)
@@ -117,7 +126,9 @@ class GatedAttention(nn.Module):
         return self.attention_a[0](self.projection[1](self.projection[0](x)))
 
 
-def attention_pool(logits: torch.Tensor, scores: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+def attention_pool(
+    logits: torch.Tensor, scores: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Pool one bag: ``(bag_logits [C], attention weights [n, C])``."""
     if scores.shape != logits.shape:
         raise ValueError(

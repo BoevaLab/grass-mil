@@ -56,7 +56,9 @@ def _reduce(epochs: Sequence[int], how: str, minimum: int) -> int:
     return max(int(minimum), int(round(reducers[how](epochs))))
 
 
-def _run(cfg: DictConfig, *, train_ids, val_ids, test_ids, out: Path, max_epochs: int | None = None) -> dict[str, Any]:
+def _run(
+    cfg: DictConfig, *, train_ids, val_ids, test_ids, out: Path, max_epochs: int | None = None
+) -> dict[str, Any]:
     """One training run on explicit unit lists (resumable through ``done.json``)."""
     done = out / "done.json"
     if done.exists() and cfg.nested_cv.resume:
@@ -73,8 +75,17 @@ def _run(cfg: DictConfig, *, train_ids, val_ids, test_ids, out: Path, max_epochs
             run_cfg.trainer.max_epochs = run_cfg.trainer.min_epochs = int(max_epochs)
     out.mkdir(parents=True, exist_ok=True)
     metrics, _ = train(run_cfg)
-    epochs, used = best_epoch(read_epoch_metrics(out / "metrics_per_epoch.jsonl"), cfg.task.selection.metric, cfg.task.selection.mode)
-    result = {"metrics": metrics, "best_epoch": epochs, "selection_metric_used": used, "output_dir": str(out)}
+    epochs, used = best_epoch(
+        read_epoch_metrics(out / "metrics_per_epoch.jsonl"),
+        cfg.task.selection.metric,
+        cfg.task.selection.mode,
+    )
+    result = {
+        "metrics": metrics,
+        "best_epoch": epochs,
+        "selection_metric_used": used,
+        "output_dir": str(out),
+    }
     done.write_text(json.dumps(result, indent=1))
     return result
 
@@ -92,13 +103,26 @@ def run_nested_cv(cfg: DictConfig) -> dict[str, Any]:
     if datamodule.read_labels() is None:
         raise ValueError("Cross-validation needs labels (data.labels.file).")
     meta = datamodule.unit_table(units)
-    labelled = {e.unit_id: units.label_id(e) for e in units.entries if units.label_id(e) is not None}
-    groups = {u: (meta.loc[u, "patient_id"] if "patient_id" in meta.columns else meta.loc[u, "region_id"]) for u in labelled}
-    classes = {u: class_index(units.labels.target(i)[0]) for u, i in labelled.items()} if kind == "classification" else None
+    labelled = {
+        e.unit_id: units.label_id(e) for e in units.entries if units.label_id(e) is not None
+    }
+    groups = {
+        u: (
+            meta.loc[u, "patient_id"] if "patient_id" in meta.columns else meta.loc[u, "region_id"]
+        )
+        for u in labelled
+    }
+    classes = (
+        {u: class_index(units.labels.target(i)[0]) for u, i in labelled.items()}
+        if kind == "classification"
+        else None
+    )
 
     def _units_of(ids: Sequence[str]) -> list[str]:
         wanted = set(map(str, ids))
-        return sorted(u for u in labelled if {u, meta.loc[u, "region_id"], meta.loc[u, "sample_id"]} & wanted)
+        return sorted(
+            u for u in labelled if {u, meta.loc[u, "region_id"], meta.loc[u, "sample_id"]} & wanted
+        )
 
     folds = [_units_of(f) for f in load_folds(str(ncfg.folds_file))]
     if any(not f for f in folds):
@@ -116,15 +140,26 @@ def run_nested_cv(cfg: DictConfig) -> dict[str, Any]:
             continue
         test = folds[i]
         dev = sorted(u for j, f in enumerate(folds) if j != i for u in f)
-        inner = inner_folds(dev, groups=groups, classes=classes, k=int(ncfg.inner_k), seed=int(ncfg.inner_seed))
+        inner = inner_folds(
+            dev, groups=groups, classes=classes, k=int(ncfg.inner_k), seed=int(ncfg.inner_seed)
+        )
         epochs = []
         for j, (tr, va) in enumerate(inner):
             res = _run(cfg, train_ids=tr, val_ids=va, test_ids=[], out=fold_dir / f"inner_{j}")
             if res["selection_metric_used"] != cfg.task.selection.metric:
-                log.warning(f"[outer {i} inner {j}] epoch chosen by {res['selection_metric_used']}")
+                log.warning(
+                    f"[outer {i} inner {j}] epoch chosen by {res['selection_metric_used']}"
+                )
             epochs.append(int(res["best_epoch"]))
         n_epochs = _reduce(epochs, str(ncfg.epoch_reduce), int(ncfg.min_refit_epochs))
-        refit = _run(cfg, train_ids=dev, val_ids=[], test_ids=test, out=fold_dir / "refit", max_epochs=n_epochs)
+        refit = _run(
+            cfg,
+            train_ids=dev,
+            val_ids=[],
+            test_ids=test,
+            out=fold_dir / "refit",
+            max_epochs=n_epochs,
+        )
         preds = pd.read_csv(fold_dir / "refit" / "test_predictions.csv")
         preds.insert(0, "outer", i)
         preds.to_csv(fold_dir / "oof_predictions.csv", index=False)
@@ -140,7 +175,9 @@ def run_nested_cv(cfg: DictConfig) -> dict[str, Any]:
         result_path.write_text(json.dumps(fold, indent=1))
         results.append(fold)
         oof.append(preds)
-        log.info(f"[outer {i}] {n_epochs} epochs, held-out {metric} {fold['metrics'].get(metric, float('nan')):.4f}")
+        log.info(
+            f"[outer {i}] {n_epochs} epochs, held-out {metric} {fold['metrics'].get(metric, float('nan')):.4f}"
+        )
 
     oof_frame = pd.concat(oof, ignore_index=True)
     oof_frame.to_csv(out_dir / "oof_predictions.csv", index=False)
@@ -162,7 +199,9 @@ def run_nested_cv(cfg: DictConfig) -> dict[str, Any]:
         patients.to_csv(out_dir / "oof_patient_predictions.csv", index=False)
         summary["patient"] = frame_metrics(patients, kind)
     (out_dir / "nested_cv_summary.json").write_text(json.dumps(summary, indent=1, default=float))
-    log.info(f"{metric}: {summary['mean']:.4f} ± {summary['sd']:.4f} over {len(finite)} outer folds")
+    log.info(
+        f"{metric}: {summary['mean']:.4f} ± {summary['sd']:.4f} over {len(finite)} outer folds"
+    )
     return summary
 
 

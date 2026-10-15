@@ -95,7 +95,9 @@ class CellCache:
 def sampler_of_checkpoint(ckpt: dict[str, Any], batch_size: int) -> SamplerConfig:
     """Ego-graph settings the model was trained with, scoring every cell."""
     cfg = dict(ckpt["datamodule_hyper_parameters"]["sampler"])
-    cfg.update(roots_per_unit=None, batch_size=int(batch_size), merge_units=False, root_weighting=None)
+    cfg.update(
+        roots_per_unit=None, batch_size=int(batch_size), merge_units=False, root_weighting=None
+    )
     cfg["interior_roots"] = {**dict(cfg.get("interior_roots") or {}), "enabled": False}
     return SamplerConfig.from_dict(cfg)
 
@@ -136,7 +138,12 @@ def extract_cells(
     for i, entry in enumerate(dataset.entries):
         if wanted is not None and entry.unit_id not in wanted:
             continue
-        info = {"unit_id": entry.unit_id, "region_id": entry.region_id, "sample_id": entry.sample_id, "n_cells": entry.n_cells}
+        info = {
+            "unit_id": entry.unit_id,
+            "region_id": entry.region_id,
+            "sample_id": entry.sample_id,
+            "n_cells": entry.n_cells,
+        }
         info.update((unit_meta or {}).get(entry.unit_id, {}))
         index_units.append(info)
         path = _npz_path(model_dir, entry.unit_id)
@@ -146,7 +153,9 @@ def extract_cells(
         n = int(data.num_nodes)
         arrays: dict[str, np.ndarray] = {}
         seen = np.zeros(n, dtype=bool)
-        for batch in EgoGraphLoader(_OneUnit(data, entry), sampler, mode="chunks", roots_per_unit=None):
+        for batch in EgoGraphLoader(
+            _OneUnit(data, entry), sampler, mode="chunks", roots_per_unit=None
+        ):
             roots = batch.root_cell.numpy()
             batch = batch.to(device)
             with torch.autocast(device.type, dtype=torch.float16, enabled=autocast):
@@ -164,7 +173,9 @@ def extract_cells(
                 arrays[key][roots] = value.float().cpu().numpy()
             seen[roots] = True
         if not seen.all():
-            raise RuntimeError(f"Unit {entry.unit_id}: {int((~seen).sum())} cells were not scored.")
+            raise RuntimeError(
+                f"Unit {entry.unit_id}: {int((~seen).sum())} cells were not scored."
+            )
         arrays["pos"] = data.pos.numpy().astype(np.float32)
         arrays["edge_index"] = data.edge_index.numpy().astype(np.int64)
         arrays["cell_ids"] = np.asarray(dataset.load(i)["cell_ids"], dtype=str)

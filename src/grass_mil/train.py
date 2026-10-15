@@ -8,7 +8,7 @@ from typing import Any
 
 import hydra
 import lightning as L
-from omegaconf import DictConfig, OmegaConf, open_dict
+from omegaconf import DictConfig, open_dict
 
 from grass_mil.inference.predictions import prediction_frame
 from grass_mil.runtime import EpochMetricsWriter, instantiate_group, start_run

@@ -36,7 +36,9 @@ def instantiate_group(group: DictConfig | None) -> list[Any]:
     """Instantiate every entry of a ``{name: {_target_: ...}}`` group (callbacks, loggers)."""
     if not group:
         return []
-    return [hydra.utils.instantiate(conf) for conf in group.values() if conf and "_target_" in conf]
+    return [
+        hydra.utils.instantiate(conf) for conf in group.values() if conf and "_target_" in conf
+    ]
 
 
 def resolve_device(name: str | None) -> torch.device:
@@ -65,7 +67,10 @@ class EpochMetricsWriter(L.Callback):
         # Runs after the module logged its epoch-level validation metrics.
         if trainer.sanity_checking or not trainer.is_global_zero:
             return
-        row: dict[str, Any] = {"epoch": int(trainer.current_epoch), "step": int(trainer.global_step)}
+        row: dict[str, Any] = {
+            "epoch": int(trainer.current_epoch),
+            "step": int(trainer.global_step),
+        }
         for key, value in trainer.callback_metrics.items():
             if key.startswith(("train/", "val/")) and not key.endswith("_step"):
                 value = float(value)

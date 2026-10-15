@@ -98,7 +98,10 @@ class NodeInput(nn.Module):
             if cfg.unassigned_cell_type is None:
                 rows, self.unassigned_index = len(cell_types) + 1, len(cell_types)
             elif cfg.unassigned_cell_type in cell_types:
-                rows, self.unassigned_index = len(cell_types), cell_types.index(cfg.unassigned_cell_type)
+                rows, self.unassigned_index = (
+                    len(cell_types),
+                    cell_types.index(cfg.unassigned_cell_type),
+                )
             else:
                 raise ValueError(
                     f"model.encoder.unassigned_cell_type '{cfg.unassigned_cell_type}' is not a "
@@ -121,25 +124,36 @@ class NodeInput(nn.Module):
 
 
 class GINEEncoder(nn.Module):
-    def __init__(self, cfg: EncoderConfig, *, feature_dim: int, cell_types: tuple[str, ...], edge_dim: int) -> None:
+    def __init__(
+        self, cfg: EncoderConfig, *, feature_dim: int, cell_types: tuple[str, ...], edge_dim: int
+    ) -> None:
         super().__init__()
         self.cfg = cfg
         if cfg.edge_feature is not None and not 0 <= cfg.edge_feature < edge_dim:
-            raise ValueError(f"model.encoder.edge_feature={cfg.edge_feature} but edges have {edge_dim} feature(s).")
+            raise ValueError(
+                f"model.encoder.edge_feature={cfg.edge_feature} but edges have {edge_dim} feature(s)."
+            )
         conv_edge_dim = 1 if cfg.edge_feature is not None else edge_dim
         h, k = cfg.hidden_dim, cfg.mlp_ratio * cfg.hidden_dim
         self.input_proj = NodeInput(feature_dim, cell_types, cfg)
         self.layers = nn.ModuleList(
-            GINEConv(nn.Sequential(nn.Linear(h, k), nn.ReLU(), nn.Linear(k, h)), edge_dim=conv_edge_dim, train_eps=cfg.train_eps)
+            GINEConv(
+                nn.Sequential(nn.Linear(h, k), nn.ReLU(), nn.Linear(k, h)),
+                edge_dim=conv_edge_dim,
+                train_eps=cfg.train_eps,
+            )
             for _ in range(cfg.num_layers)
         )
         self.norms = nn.ModuleList(
-            _NORM[cfg.norm](h) if cfg.norm != "none" else nn.Identity() for _ in range(cfg.num_layers)
+            _NORM[cfg.norm](h) if cfg.norm != "none" else nn.Identity()
+            for _ in range(cfg.num_layers)
         )
         self.act = _ACT[cfg.act]()
         self.dropout = nn.Dropout(cfg.dropout)
         jk_dim = h * (cfg.num_layers + 1) if cfg.jk == "concat" else h
-        self.output_proj = nn.Identity() if jk_dim == cfg.out_dim else nn.Linear(jk_dim, cfg.out_dim)
+        self.output_proj = (
+            nn.Identity() if jk_dim == cfg.out_dim else nn.Linear(jk_dim, cfg.out_dim)
+        )
         self.output_dim = cfg.out_dim
 
     @property
