@@ -180,7 +180,7 @@ class SpatialOmicsDataModule(L.LightningDataModule):
 
     def _random_assignment(self, units: Sequence[UnitEntry]) -> dict[str, str]:
         groups = {u.unit_id: self._group_of(u) for u in units}
-        # Stratify by the first target when the units carry discrete labels.
+        # Stratify by the first target when it holds a few integer classes.
         strata = None
         labels = self.read_labels()
         if labels is not None:
@@ -189,7 +189,8 @@ class SpatialOmicsDataModule(L.LightningDataModule):
                 label_id = labels.resolve(u.unit_id, u.region_id, u.sample_id)
                 if label_id is not None:
                     values[groups[u.unit_id]] = float(labels.targets.loc[label_id].iloc[0])
-            if len(values) == len(set(groups.values())) and len(set(values.values())) <= 10:
+            discrete = all(float(v).is_integer() for v in values.values())
+            if discrete and len(values) == len(set(groups.values())) and len(set(values.values())) <= 10:
                 strata = {g: str(v) for g, v in values.items()}
         ratios = self.split_cfg.get("ratios", (0.8, 0.1, 0.1))
         return random_split(groups, ratios, int(self.split_cfg.get("seed", 0)), strata)

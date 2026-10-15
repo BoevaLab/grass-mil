@@ -39,11 +39,6 @@ class Cells:
     def unit_class(self, unit: str) -> int:
         return class_index(self.targets[unit][0])
 
-    def unit_value(self, unit: str) -> float:
-        """The value that defines a positive unit: the class, or the event (survival)."""
-        t = self.targets[unit]
-        return float(t[1]) if self.target_type == "survival" else float(t[0])
-
     def positive(self, positive_class: int) -> dict[str, bool]:
         """Which units count as positive (class ``positive_class``; event for survival)."""
         if self.target_type == "classification":
