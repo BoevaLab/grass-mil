@@ -39,8 +39,9 @@ git clone https://github.com/BoevaLab/grass-mil.git
 cd grass-mil
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[io]"
-# torch-sparse, matching your PyTorch build (ego-graph sampling):
-pip install torch-sparse -f https://data.pyg.org/whl/torch-$(python -c "import torch; print(torch.__version__.split('+')[0])").html
+# torch-sparse for your PyTorch version (ego-graph sampling runs on the CPU, so the
+# CPU wheel serves CUDA builds of PyTorch as well):
+pip install torch-sparse -f https://data.pyg.org/whl/torch-$(python -c "import torch; print(torch.__version__.split('+')[0])")+cpu.html
 ```
 
 or `conda env create -f environment.yaml`. Extras: `io` (h5ad inputs, polygon

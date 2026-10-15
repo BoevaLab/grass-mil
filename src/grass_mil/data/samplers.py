@@ -180,7 +180,7 @@ class EgoGraphLoader:
         if not WITH_TORCH_SPARSE:
             raise ImportError(
                 "Ego-graph sampling needs torch-sparse; install the wheel matching your PyTorch "
-                "build, e.g. pip install torch-sparse -f https://data.pyg.org/whl/torch-<version>.html"
+                "version, e.g. pip install torch-sparse -f https://data.pyg.org/whl/torch-<version>+cpu.html"
             )
         self.dataset = dataset
         self.cfg = cfg
