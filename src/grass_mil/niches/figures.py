@@ -52,49 +52,45 @@ def niche_panel(
         return path
     base = table.attrs.get("base_rate", np.nan)
     frac = [f"frac_{c}" for c in cell_types if f"frac_{c}" in t.columns]
-    y = np.arange(len(t))[::-1]
-    widths = [max(2.0, 0.28 * len(frac)), 1.1, 1.3, 0.9] if frac else [1.1, 1.3, 0.9]
+    y = np.arange(len(t))
+    widths = ([max(2.4, 0.3 * len(frac))] if frac else []) + [1.6, 1.6, 1.1]
     fig, axes = plt.subplots(
         1,
         len(widths),
-        figsize=(sum(widths) + 2.5, 0.42 * len(t) + 1.8),
-        gridspec_kw={"width_ratios": widths},
+        figsize=(1.6 * sum(widths) + 1.5, 0.45 * len(t) + 2.0),
+        gridspec_kw={"width_ratios": widths, "wspace": 0.15},
+        sharey=True,
     )
     axes = list(np.atleast_1d(axes))
     if frac:
         ax = axes.pop(0)
         im = ax.imshow(t[frac].to_numpy() * 100, aspect="auto", cmap="viridis", vmin=0)
         ax.set_xticks(range(len(frac)), [c[5:] for c in frac], rotation=90, fontsize=7)
-        ax.set_yticks(range(len(t)), t["niche"], fontsize=8)
-        plt.colorbar(im, ax=ax, fraction=0.04, label="% of niche cells")
-        ax.set_title("composition", fontsize=9)
+        cbar = fig.colorbar(im, ax=ax, location="top", shrink=0.8, pad=0.02)
+        cbar.set_label("composition (% of niche cells)", fontsize=8)
+        cbar.ax.tick_params(labelsize=7)
     ax_assoc, ax_margin, ax_share = axes
-    ax_assoc.barh(
-        y,
-        t["association"],
-        color=["#b2182b" if v > base else "#2166ac" for v in t["association"]],
-        height=0.6,
-    )
+    colours = ["#b2182b" if v > base else "#2166ac" for v in t["association"]]
+    ax_assoc.barh(y, t["association"], color=colours, height=0.6)
     ax_assoc.axvline(base, color="k", ls=":", lw=1)
     ax_assoc.set_xlim(0, 1)
-    ax_assoc.set_xlabel(f"fraction from {positive_name} units")
-    ax_margin.errorbar(
-        t["margin"],
-        y,
-        xerr=[t["margin"] - t["margin_lo"], t["margin_hi"] - t["margin"]],
-        fmt="o",
-        color="#1b9e77",
-        ms=4,
-        capsize=2,
-    )
+    ax_assoc.set_title(f"association\n(fraction from {positive_name} units)", fontsize=8)
+    xerr = [t["margin"] - t["margin_lo"], t["margin_hi"] - t["margin"]]
+    ax_margin.errorbar(t["margin"], y, xerr=xerr, fmt="o", color="#1b9e77", ms=4, capsize=2)
     ax_margin.axvline(0, color="k", lw=0.8)
-    ax_margin.set_xlabel(f"attention-weighted margin (+ = {positive_name})")
+    ax_margin.set_title(f"attention-weighted margin\n(95% CI; + = {positive_name})", fontsize=8)
     ax_share.barh(y, 100 * t["share"], color="#7f7f7f", height=0.6)
-    ax_share.set_xlabel("% of cells")
+    ax_share.set_title("share\n(% of cells)", fontsize=8)
+    axes_all = fig.axes
+    axes_all[0].set_yticks(y, t["niche"], fontsize=8)
+    if not frac:
+        axes_all[0].invert_yaxis()  # Niche 1 on top (imshow already does this)
     for ax in (ax_assoc, ax_margin, ax_share):
-        ax.set_yticks(y, [] if frac else t["niche"])
+        ax.tick_params(labelsize=7)
         ax.spines[["top", "right"]].set_visible(False)
-    return _save(fig, path)
+    fig.savefig(path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    return path
 
 
 def embedding_panel(
@@ -109,14 +105,15 @@ def embedding_panel(
 ) -> Path:
     """The clustering space (first two PCs): niches | margin | unit class."""
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.6))
+    size = float(np.clip(20000.0 / max(len(coords), 1), 0.5, 20.0))
     colours = niche_colours(sorted(set(niche_names), key=lambda n: (n == "Background", n)))
     for name, colour in colours.items():
         m = niche_names == name
-        axes[0].scatter(coords[m, 0], coords[m, 1], s=2, color=colour, lw=0, label=name)
+        axes[0].scatter(coords[m, 0], coords[m, 1], s=size, color=colour, lw=0, label=name)
     axes[0].legend(markerscale=6, fontsize=6, ncol=2)
     lim = float(np.nanpercentile(np.abs(margin), 99)) or 1.0
     sc = axes[1].scatter(
-        coords[:, 0], coords[:, 1], s=2, c=margin, cmap="RdBu_r", vmin=-lim, vmax=lim, lw=0
+        coords[:, 0], coords[:, 1], s=size, c=margin, cmap="RdBu_r", vmin=-lim, vmax=lim, lw=0
     )
     plt.colorbar(sc, ax=axes[1], label=f"margin (+ = {positive_name})")
     hb = axes[2].hexbin(
@@ -180,20 +177,21 @@ def unit_maps(
     """One unit in the tissue: cell types | cell margins | niches."""
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     cmap = plt.get_cmap("tab20")
+    size = float(np.clip(4000.0 / max(len(pos), 1), 1.0, 30.0))
     for j, name in enumerate(type_names):
         m = cell_types == j
         if m.any():
-            axes[0].scatter(pos[m, 0], pos[m, 1], s=4, color=cmap(j % 20), lw=0, label=name)
+            axes[0].scatter(pos[m, 0], pos[m, 1], s=size, color=cmap(j % 20), lw=0, label=name)
     axes[0].legend(markerscale=3, fontsize=6, ncol=2)
     lim = float(np.nanpercentile(np.abs(margin), 99)) or 1.0
     sc = axes[1].scatter(
-        pos[:, 0], pos[:, 1], s=4, c=margin, cmap="RdBu_r", vmin=-lim, vmax=lim, lw=0
+        pos[:, 0], pos[:, 1], s=size, c=margin, cmap="RdBu_r", vmin=-lim, vmax=lim, lw=0
     )
     plt.colorbar(sc, ax=axes[1], label="margin")
     colours = niche_colours(sorted(set(niche_names), key=lambda n: (n == "Background", n)))
     for name, colour in colours.items():
         m = niche_names == name
-        axes[2].scatter(pos[m, 0], pos[m, 1], s=4, color=colour, lw=0, label=name)
+        axes[2].scatter(pos[m, 0], pos[m, 1], s=size, color=colour, lw=0, label=name)
     axes[2].legend(markerscale=3, fontsize=6)
     for ax, sub in zip(axes, ("cell types", "attention-weighted margin", "niches")):
         ax.set_aspect("equal")
@@ -222,7 +220,9 @@ def pair_heatmaps(
             a, b = index[r["type_a"]], index[r["type_b"]]
             m[a, b] = m[b, a] = r[value]
         im = ax.imshow(m, cmap="RdBu_r", vmin=-lim, vmax=lim)
-        ax.set_title(niche, fontsize=8)
+        rows_of = table[table["niche"] == niche]
+        suffix = f" (r* = {rows_of['r_star'].iloc[0]:.3g})" if "r_star" in table else ""
+        ax.set_title(niche + suffix, fontsize=8)
         ax.set_xticks(range(k), cell_types, rotation=90, fontsize=5)
         ax.set_yticks(range(k), cell_types, fontsize=5)
     for ax in list(axes.flat)[len(niches) :]:
