@@ -15,7 +15,9 @@ positive_class: 1
 positive_name: positive
 # Niche discovery of every model; same keys as `clustering` of grass-mil-niches.
 clustering: {}
-n_boot: 2000
+present_threshold: 0.02 # as in grass-mil-niches
+enrichment_threshold: 1.5
+n_boot: 2000 # bootstrap over patients for margin intervals
 
 match:
   threshold: null # Hellinger distance threshold; null = scan

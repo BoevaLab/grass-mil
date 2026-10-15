@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 import numpy as np
+
+from grass_mil.utils import checked
 
 __all__ = ["TilingConfig", "grid_tiles", "polygon_members", "inside_any"]
 
@@ -19,10 +21,7 @@ class TilingConfig:
 
     @classmethod
     def from_dict(cls, cfg: Mapping[str, Any] | None) -> TilingConfig:
-        cfg = dict(cfg or {})
-        unknown = set(cfg) - {f.name for f in fields(cls)}
-        if unknown:
-            raise ValueError(f"Unknown data.tiling keys: {sorted(unknown)}")
+        cfg = checked(cls, cfg, "data.tiling")
         out = cls(**{k: float(v) for k, v in cfg.items()})
         if out.size <= 0 or out.stride <= 0:
             raise ValueError("data.tiling.size and stride must be positive.")

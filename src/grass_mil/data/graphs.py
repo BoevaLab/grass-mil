@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 import numpy as np
 import torch
+
+from grass_mil.utils import checked
 
 __all__ = ["GraphConfig", "delaunay_edges", "edge_features", "log_distance_feature"]
 
@@ -34,10 +36,7 @@ class GraphConfig:
 
     @classmethod
     def from_dict(cls, cfg: Mapping[str, Any] | None) -> GraphConfig:
-        cfg = dict(cfg or {})
-        unknown = set(cfg) - {f.name for f in fields(cls)}
-        if unknown:
-            raise ValueError(f"Unknown data.graph keys: {sorted(unknown)}")
+        cfg = checked(cls, cfg, "data.graph")
         out = cls(
             edge_features=tuple(cfg.get("edge_features", cls.edge_features)),
             neighbor_cutoff=float(cfg.get("neighbor_cutoff", cls.neighbor_cutoff)),

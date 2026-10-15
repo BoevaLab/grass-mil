@@ -6,15 +6,10 @@ from typing import Any, Mapping
 
 import hydra
 import torch
-from omegaconf import OmegaConf
+
+from grass_mil.utils import plain
 
 __all__ = ["build_optimizer", "build_scheduler"]
-
-
-def _plain(cfg: Any) -> dict:
-    return (
-        dict(OmegaConf.to_container(cfg, resolve=True)) if OmegaConf.is_config(cfg) else dict(cfg)
-    )
 
 
 def build_optimizer(cfg: Mapping[str, Any], groups: list[dict]) -> torch.optim.Optimizer:
@@ -23,7 +18,7 @@ def build_optimizer(cfg: Mapping[str, Any], groups: list[dict]) -> torch.optim.O
     Groups may carry their own ``lr`` / ``weight_decay``; the rest inherit the
     optimizer's.
     """
-    kwargs = _plain(cfg)
+    kwargs = dict(plain(cfg))
     cls = hydra.utils.get_class(kwargs.pop("_target_"))
     return cls(groups, **kwargs)
 
@@ -42,7 +37,7 @@ def build_scheduler(
     """
     if cfg is None:
         return None
-    kwargs = _plain(cfg)
+    kwargs = dict(plain(cfg))
     if str(kwargs.get("T_max", "")).lower() == "auto":
         if not total_steps:
             raise ValueError("scheduler.T_max=auto needs the total number of optimizer steps.")

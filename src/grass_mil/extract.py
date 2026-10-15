@@ -9,11 +9,10 @@ from typing import Any
 
 import hydra
 import pandas as pd
-import torch
 from omegaconf import DictConfig
 
 from grass_mil.data.splits import read_ids
-from grass_mil.inference.cell_cache import extract_cells, sampler_of_checkpoint
+from grass_mil.inference.cell_cache import extract_cells, scoring_sampler
 from grass_mil.models import SupervisedModule
 from grass_mil.runtime import resolve_device, start_run
 
@@ -48,7 +47,7 @@ def run_extract(cfg: DictConfig) -> list[str]:
     device = resolve_device(ecfg.device)
     datamodule = hydra.utils.instantiate(cfg.data, _recursive_=False)
     datamodule.prepare_data()
-    units = datamodule.all_units()
+    units = datamodule.all_units().select(read_ids(ecfg.get("units")))
     meta = datamodule.unit_table(units)
     unit_meta = {}
     for entry in units.entries:
@@ -60,22 +59,17 @@ def run_extract(cfg: DictConfig) -> list[str]:
     written = []
     for spec in resolve_models(ecfg):
         log.info(f"[{spec['name']}] {spec['ckpt_path']}")
-        ckpt = torch.load(spec["ckpt_path"], map_location="cpu", weights_only=False)
         model = SupervisedModule.from_checkpoint(spec["ckpt_path"])
-        if tuple(model.input_spec.cell_types) != tuple(datamodule.input_spec.cell_types):
-            raise ValueError(
-                f"{spec['ckpt_path']} was trained on other cell types than this cohort."
-            )
+        model.input_spec.check_matches(datamodule.input_spec, spec["ckpt_path"])
         model_dir = extract_cells(
             model,
             units,
-            sampler=sampler_of_checkpoint(ckpt, int(ecfg.batch_size)),
+            sampler=scoring_sampler(model.trained_sampler, int(ecfg.batch_size), every_cell=True),
             out_dir=str(ecfg.output_dir),
             model_name=spec["name"],
             ckpt_path=spec["ckpt_path"],
             held_out=spec["held_out"],
             unit_meta=unit_meta,
-            units=read_ids(ecfg.get("units")),
             device=device,
             resume=bool(ecfg.resume),
         )

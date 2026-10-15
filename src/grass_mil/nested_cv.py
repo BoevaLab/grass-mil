@@ -3,10 +3,10 @@
 For every outer fold the remaining folds form the development set, which is
 split into group-aware inner folds. Every inner run reports the epoch with the
 best validation metric (``task.selection``); the model is refitted on the whole
-development set for the reduced number of epochs, without validation, and
-scored once on the held-out fold. The summary reports the metric of every
-outer fold, its mean and standard deviation, and the pooled out-of-fold metric
-at unit and patient level.
+development set with the same learning-rate schedule, stopped at the reduced
+number of epochs, without validation, and scored once on the held-out fold.
+The summary reports the metric of every outer fold, its mean and standard
+deviation, and the pooled out-of-fold metric at unit and patient level.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 from omegaconf import DictConfig, open_dict
 
-from grass_mil.data.labels import class_index
+from grass_mil.data.datamodule import GraphUnitDataset
 from grass_mil.data.splits import inner_folds, load_folds
 from grass_mil.inference.predictions import frame_metrics, patient_frame
 from grass_mil.runtime import read_epoch_metrics, start_run
@@ -72,6 +72,10 @@ def _run(
         run_cfg.trainer.default_root_dir = str(out)
         run_cfg.test = bool(test_ids)
         if max_epochs is not None:
+            # Stop at the selected epoch of the schedule the inner runs followed.
+            run_cfg.finetune.schedule_epochs = cfg.finetune.schedule_epochs or int(
+                cfg.trainer.max_epochs
+            )
             run_cfg.trainer.max_epochs = run_cfg.trainer.min_epochs = int(max_epochs)
     out.mkdir(parents=True, exist_ok=True)
     metrics, _ = train(run_cfg)
@@ -90,6 +94,22 @@ def _run(
     return result
 
 
+def _check_outer_folds(folds: list[list[str]], groups: dict[str, str]) -> None:
+    """Every fold holds labelled units, and every unit and patient sits in one fold only."""
+    if any(not f for f in folds):
+        raise ValueError("An outer fold holds no labelled unit.")
+    fold_of_unit: dict[str, int] = {}
+    fold_of_group: dict[str, int] = {}
+    for i, fold in enumerate(folds):
+        for unit in fold:
+            for key, seen in ((unit, fold_of_unit), (groups[unit], fold_of_group)):
+                if seen.setdefault(key, i) != i:
+                    raise ValueError(
+                        f"'{key}' is in outer folds {seen[key]} and {i}: the folds must keep "
+                        "every unit and every patient (or region) in one fold."
+                    )
+
+
 def run_nested_cv(cfg: DictConfig) -> dict[str, Any]:
     start_run(cfg)
     ncfg = cfg.nested_cv
@@ -102,31 +122,20 @@ def run_nested_cv(cfg: DictConfig) -> dict[str, Any]:
     units = datamodule.all_units()
     if datamodule.read_labels() is None:
         raise ValueError("Cross-validation needs labels (data.labels.file).")
-    meta = datamodule.unit_table(units)
-    labelled = {
-        e.unit_id: units.label_id(e) for e in units.entries if units.label_id(e) is not None
-    }
-    groups = {
-        u: (
-            meta.loc[u, "patient_id"] if "patient_id" in meta.columns else meta.loc[u, "region_id"]
-        )
-        for u in labelled
-    }
+    labelled = GraphUnitDataset(
+        [e for e in units.entries if units.label_id(e) is not None], units.labels
+    )
+    groups = {e.unit_id: datamodule.group_of(e) for e in labelled.entries}
     classes = (
-        {u: class_index(units.labels.target(i)[0]) for u, i in labelled.items()}
+        {e.unit_id: units.labels.classes(units.label_id(e)) for e in labelled.entries}
         if kind == "classification"
         else None
     )
-
-    def _units_of(ids: Sequence[str]) -> list[str]:
-        wanted = set(map(str, ids))
-        return sorted(
-            u for u in labelled if {u, meta.loc[u, "region_id"], meta.loc[u, "sample_id"]} & wanted
-        )
-
-    folds = [_units_of(f) for f in load_folds(str(ncfg.folds_file))]
-    if any(not f for f in folds):
-        raise ValueError("An outer fold holds no labelled unit.")
+    folds = [
+        sorted(e.unit_id for e in labelled.select(ids).entries)
+        for ids in load_folds(str(ncfg.folds_file))
+    ]
+    _check_outer_folds(folds, groups)
     selected = list(ncfg.outer_folds) if ncfg.outer_folds is not None else range(len(folds))
     metric = str(cfg.task.selection.metric).split("/", 1)[-1]
 
@@ -195,9 +204,13 @@ def run_nested_cv(cfg: DictConfig) -> dict[str, Any]:
         "folds": results,
     }
     if "patient_id" in oof_frame.columns:
-        patients = patient_frame(oof_frame, kind)
-        patients.to_csv(out_dir / "oof_patient_predictions.csv", index=False)
-        summary["patient"] = frame_metrics(patients, kind)
+        try:
+            patients = patient_frame(oof_frame, kind)
+        except ValueError as err:
+            log.warning(f"No patient-level metrics: {err}")
+        else:
+            patients.to_csv(out_dir / "oof_patient_predictions.csv", index=False)
+            summary["patient"] = frame_metrics(patients, kind)
     (out_dir / "nested_cv_summary.json").write_text(json.dumps(summary, indent=1, default=float))
     log.info(
         f"{metric}: {summary['mean']:.4f} ± {summary['sd']:.4f} over {len(finite)} outer folds"

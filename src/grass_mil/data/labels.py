@@ -17,7 +17,7 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 
-__all__ = ["LabelTable", "class_index"]
+__all__ = ["LabelTable"]
 
 
 @dataclass
@@ -83,9 +83,6 @@ class LabelTable:
     def target_columns(self) -> list[str]:
         return list(self.targets.columns)
 
-    def __contains__(self, unit_id: str) -> bool:
-        return str(unit_id) in self.targets.index
-
     def resolve(self, *ids: str | None) -> str | None:
         """The first of ``ids`` that has a label (unit id, then region, then sample)."""
         for value in ids:
@@ -100,10 +97,8 @@ class LabelTable:
         return str(self.patients.loc[str(label_id)])
 
     def classes(self, label_id: str) -> int:
-        """Integer class of a classification label (first target column)."""
-        return class_index(float(self.targets.loc[str(label_id)].iloc[0]))
-
-
-def class_index(value: float) -> int:
-    """Integer class of a label value: the nearest integer, halves rounded up (0.5 -> 1)."""
-    return int(np.floor(float(value) + 0.5))
+        """Class of a classification label (first target column), which must be an integer."""
+        value = float(self.targets.loc[str(label_id)].iloc[0])
+        if not value.is_integer():
+            raise ValueError(f"Label {value} of '{label_id}' is not an integer class.")
+        return int(value)

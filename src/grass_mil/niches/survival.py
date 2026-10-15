@@ -10,13 +10,14 @@ compared with Kaplan-Meier curves and a log-rank test.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 import numpy as np
 import pandas as pd
 
 from grass_mil.spatial.stats import bh
+from grass_mil.utils import checked
 
 __all__ = ["SurvivalConfig", "niche_survival", "cox_univariate", "kaplan_meier", "logrank"]
 
@@ -32,46 +33,48 @@ class SurvivalConfig:
 
     @classmethod
     def from_dict(cls, cfg: Mapping[str, Any] | None) -> SurvivalConfig:
-        cfg = dict(cfg or {})
-        unknown = set(cfg) - {f.name for f in fields(cls)}
-        if unknown:
-            raise ValueError(f"Unknown survival keys: {sorted(unknown)}")
+        cfg = checked(cls, cfg, "survival")
         cfg["score"] = tuple(cfg.get("score") or ())
         return cls(**cfg)
 
 
 def cox_univariate(
-    x: np.ndarray, time: np.ndarray, event: np.ndarray, n_iter: int = 50
+    x: np.ndarray, time: np.ndarray, event: np.ndarray, max_iter: int = 50
 ) -> tuple[float, float, float, float]:
-    """Cox model with one covariate (Breslow ties): ``(hr, lo, hi, p)`` with a 95% Wald interval."""
+    """Cox model with one covariate (Breslow ties): ``(hr, lo, hi, p)`` with a 95% Wald interval.
+
+    Newton-Raphson with step halving; NaN when the fit does not converge (for
+    example a covariate that separates events perfectly).
+    """
     from scipy.stats import norm
 
     order = np.argsort(-time, kind="stable")
-    x, event, t = x[order], event[order].astype(bool), time[order]
-    # Risk set of cell i: everyone with time >= t_i, including later ties.
+    x, died, t = x[order], event[order] > 0, time[order]
+    # Risk set of subject i: everyone with time >= t_i, including later ties.
     last = np.searchsorted(-t, -t, side="right") - 1
-    beta = 0.0
-    info = np.nan
-    for _ in range(n_iter):
+
+    def fit(beta: float) -> tuple[float, float, float]:
         w = np.exp(beta * x)
-        s0, s1, s2 = np.cumsum(w)[last], np.cumsum(w * x)[last], np.cumsum(w * x * x)[last]
+        s0, s1, s2 = (np.cumsum(w * x**power)[last][died] for power in (0, 1, 2))
         mean = s1 / s0
-        grad = float(np.sum(x[event] - mean[event]))
-        info = float(np.sum(s2[event] / s0[event] - mean[event] ** 2))
-        if info <= 0:
-            return (float("nan"),) * 4
-        step = grad / info
-        beta += step
-        if abs(step) < 1e-9:
+        loglik = float(np.sum(beta * x[died] - np.log(s0)))
+        return loglik, float(np.sum(x[died] - mean)), float(np.sum(s2 / s0 - mean**2))
+
+    beta = 0.0
+    loglik, grad, info = fit(beta)
+    for _ in range(max_iter):
+        if not info > 0:
             break
-    se = 1.0 / np.sqrt(info)
-    p = 2 * norm.sf(abs(beta / se))
-    return (
-        float(np.exp(beta)),
-        float(np.exp(beta - 1.96 * se)),
-        float(np.exp(beta + 1.96 * se)),
-        float(p),
-    )
+        step = grad / info
+        while (trial := fit(beta + step))[0] < loglik and abs(step) > 1e-12:
+            step /= 2.0
+        beta += step
+        loglik, grad, info = trial
+        if abs(step) < 1e-9 and info > 0:
+            se = 1.0 / np.sqrt(info)
+            hr, lo, hi = np.exp([beta, beta - 1.96 * se, beta + 1.96 * se])
+            return float(hr), float(lo), float(hi), float(2 * norm.sf(abs(beta / se)))
+    return (float("nan"),) * 4
 
 
 def kaplan_meier(time: np.ndarray, event: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -111,7 +114,7 @@ def niche_survival(patient_shares: pd.DataFrame, outcomes: pd.DataFrame, cfg: Su
 
     ``patient_shares``: patients x niches; ``outcomes``: patients x [time, event].
     """
-    data = patient_shares.join(outcomes, how="inner")
+    data = patient_shares.join(outcomes, how="inner").dropna(subset=["time", "event"])
     niches = [c for c in patient_shares.columns if c != "Background"]
     z = np.log(data[niches] + cfg.pseudo_share)
     z = (z - z.mean()) / z.std(ddof=0).replace(0, np.nan)

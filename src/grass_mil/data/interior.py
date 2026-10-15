@@ -9,11 +9,13 @@ and low-cellularity gaps inside the tissue are not treated as boundary.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
 import numpy as np
+
+from grass_mil.utils import checked
 
 __all__ = ["InteriorConfig", "InteriorCache", "interior_mask", "interior_indices"]
 
@@ -40,10 +42,7 @@ class InteriorConfig:
 
     @classmethod
     def from_dict(cls, cfg: Mapping[str, Any] | None) -> InteriorConfig:
-        cfg = dict(cfg or {})
-        unknown = set(cfg) - {f.name for f in fields(cls)}
-        if unknown:
-            raise ValueError(f"Unknown interior_roots keys: {sorted(unknown)}")
+        cfg = checked(cls, cfg, "interior_roots")
         return cls(**cfg)
 
 

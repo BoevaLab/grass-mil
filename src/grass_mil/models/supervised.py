@@ -4,7 +4,8 @@ Each training batch is one bag (all sampled ego-graphs of one unit). Bag
 logits of ``finetune.hyperbatch_size`` consecutive bags are stacked and the
 loss is computed over the stack before one optimizer step, so a step sees
 several units (which the Cox objective needs) while a bag's attention softmax
-always covers the whole unit. Validation and test units may be scored in
+always covers the whole unit. The last, smaller stack of an epoch is stepped on
+its last batch, before validation. Validation and test units may be scored in
 several chunks; their instances are pooled per unit at the end of the epoch.
 """
 
@@ -12,15 +13,15 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 import lightning as L
 import torch
 import torch.distributed as dist
-from omegaconf import OmegaConf
 
 from grass_mil.data.datamodule import InputSpec
+from grass_mil.utils import checked, plain
 
 from .augmentations import FinetuneAugmentation
 from .checkpoints import load_encoder_weights
@@ -53,10 +54,12 @@ class FinetuneConfig:
         head_weight_decay: Weight decay of the head (``None``: the optimizer's).
         head_init: ``probe`` (fit a linear probe on the frozen embeddings of
             the training units first) or ``random``.
-        freeze_head: Keep the initial head fixed.
         hyperbatch_size: Bags per optimizer step.
         grad_clip_norm: Gradient-norm clip per step (``None``: off).
         warmup_steps: Linear learning-rate warmup steps.
+        schedule_epochs: Epochs the learning-rate schedule spans (``None``:
+            ``trainer.max_epochs``). Cross-validation refits keep the schedule
+            of the inner runs and stop early, at the selected epoch.
         augmentation: Edge drop / node masking during training.
         probe: Probe settings for ``head_init: probe``.
     """
@@ -64,19 +67,16 @@ class FinetuneConfig:
     lr_scales: Mapping[str, float]
     head_weight_decay: float | None = None
     head_init: str = "probe"
-    freeze_head: bool = False
     hyperbatch_size: int = 12
     grad_clip_norm: float | None = 1.0
     warmup_steps: int = 0
+    schedule_epochs: int | None = None
     augmentation: FinetuneAugmentation = FinetuneAugmentation()
     probe: ProbeConfig = ProbeConfig()
 
     @classmethod
     def from_dict(cls, cfg: Mapping[str, Any]) -> FinetuneConfig:
-        cfg = dict(cfg)
-        unknown = set(cfg) - {f.name for f in fields(cls)}
-        if unknown:
-            raise ValueError(f"Unknown finetune keys: {sorted(unknown)}")
+        cfg = checked(cls, cfg, "finetune")
         scales = dict(cfg.get("lr_scales") or {})
         if set(scales) != {"encoder", "head", "attention"} or any(
             v is None for v in scales.values()
@@ -95,10 +95,6 @@ class FinetuneConfig:
         return out
 
 
-def _plain(value: Any) -> Any:
-    return OmegaConf.to_container(value, resolve=True) if OmegaConf.is_config(value) else value
-
-
 class SupervisedModule(L.LightningModule):
     def __init__(
         self,
@@ -112,7 +108,7 @@ class SupervisedModule(L.LightningModule):
         init_from_ckpt: str | None = None,
     ) -> None:
         super().__init__()
-        hparams = {k: _plain(v) for k, v in locals().items() if k not in ("self", "__class__")}
+        hparams = {k: plain(v) for k, v in locals().items() if k not in ("self", "__class__")}
         self.save_hyperparameters(hparams, logger=False)
         self.automatic_optimization = False
         self.encoder_cfg = EncoderConfig.from_dict(hparams["encoder"])
@@ -127,9 +123,11 @@ class SupervisedModule(L.LightningModule):
         self.attention: GatedAttention | None = None
         self.objective = Objective(self.task)
         self._augment = None
-        self._bag_buffer: list[tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]] = []
+        self._bag_buffer: list[tuple[torch.Tensor, torch.Tensor]] = []
         self._eval_buffer: dict[str, list] = {}
         self.test_predictions: dict[str, Any] | None = None
+        # Sampling settings of the training data, set by from_checkpoint().
+        self.trained_sampler: dict[str, Any] | None = None
 
     # ------------------------------------------------------------- building
     @property
@@ -161,27 +159,31 @@ class SupervisedModule(L.LightningModule):
         if self.hparams.init_from_ckpt:
             load_encoder_weights(self.encoder, self.hparams.init_from_ckpt)
         if stage == "fit":
-            self._configure_class_weights(datamodule.dataset_train)
+            if self.task["target_type"] == "classification":
+                self._check_classes(datamodule)
             if self.finetune.head_init == "probe":
                 self._fit_probe_head(datamodule)
         self._apply_freezing()
 
-    def _configure_class_weights(self, dataset) -> None:
-        setting = self.task.get("class_weights")
-        if self.task["target_type"] != "classification" or setting is None:
-            return
-        if setting == "auto":
+    def _check_classes(self, datamodule) -> None:
+        """Labels must be classes ``0..C-1``; sets the class weights."""
+        train = None
+        for dataset in (datamodule.dataset_train, datamodule.dataset_val, datamodule.dataset_test):
             labels = [dataset.labels.classes(dataset.label_id(e)) for e in dataset.entries]
-            self.objective.class_weight = class_weights_from_labels(labels, self.num_logits)
-        else:
+            outside = sorted({c for c in labels if not 0 <= c < self.num_logits})
+            if outside:
+                raise ValueError(
+                    f"Class labels {outside} are outside 0..{self.num_logits - 1} "
+                    "(task.num_classes)."
+                )
+            train = labels if train is None else train
+        setting = self.task.get("class_weights")
+        if setting == "auto":
+            self.objective.class_weight = class_weights_from_labels(train, self.num_logits)
+        elif setting is not None:
             self.objective.class_weight = torch.tensor([float(w) for w in setting])
 
     def _fit_probe_head(self, datamodule) -> None:
-        if self.task["target_type"] == "survival":
-            log.info(
-                "No probe for survival targets; the head starts from a random initialisation."
-            )
-            return
         if not self.head.is_linear:
             raise ValueError(
                 "finetune.head_init=probe needs a linear head (model.head.num_layers=1)."
@@ -205,18 +207,15 @@ class SupervisedModule(L.LightningModule):
             self.head.net[0].weight.copy_(weight)
             self.head.net[0].bias.copy_(bias)
         log.info(
-            f"Probe head fitted on {len(embeddings)} ego-graphs of {len(datamodule.dataset_train)} units."
+            f"Probe head fitted on {len(embeddings)} ego-graphs of "
+            f"{len(datamodule.dataset_train)} units (weight norm {float(weight.norm()):.3g})."
         )
 
     def _apply_freezing(self) -> None:
         scales = self.finetune.lr_scales
-        for module, frozen in (
-            (self.encoder, scales["encoder"] == 0),
-            (self.head, scales["head"] == 0 or self.finetune.freeze_head),
-            (self.attention, scales["attention"] == 0),
-        ):
-            if frozen:
-                module.requires_grad_(False)
+        for name in ("encoder", "head", "attention"):
+            if scales[name] == 0:
+                getattr(self, name).requires_grad_(False)
         if scales["encoder"] == 0:
             self.encoder.eval()
 
@@ -234,13 +233,14 @@ class SupervisedModule(L.LightningModule):
         cls, path: str, map_location: str | torch.device = "cpu"
     ) -> SupervisedModule:
         """Rebuild a trained module from its checkpoint alone (eval mode)."""
-        ckpt = torch.load(path, map_location=map_location, weights_only=False)
+        ckpt = torch.load(path, map_location=map_location, weights_only=True)
         hparams = dict(ckpt["hyper_parameters"])
         hparams["init_from_ckpt"] = None
         hparams["finetune"] = {**hparams["finetune"], "head_init": "random"}
         module = cls(**hparams)
         module.build(InputSpec.from_dict(ckpt["input_spec"]))
         module.load_state_dict(ckpt["state_dict"])
+        module.trained_sampler = ckpt["datamodule_hyper_parameters"]["sampler"]
         return module.eval()
 
     # -------------------------------------------------------------- forward
@@ -258,26 +258,20 @@ class SupervisedModule(L.LightningModule):
 
     # ------------------------------------------------------------- training
     def training_step(self, batch, batch_idx: int) -> None:
-        bag_logits = self(batch).unsqueeze(0)
-        weights = getattr(batch, "graph_w", None)
-        self._bag_buffer.append(
-            (bag_logits, batch.graph_y[:1].float(), None if weights is None else weights[:1])
-        )
-        if len(self._bag_buffer) >= self.finetune.hyperbatch_size:
-            self._optimizer_step(on_step=True)
+        self._bag_buffer.append((self(batch).unsqueeze(0), batch.graph_y[:1].float()))
+        if len(self._bag_buffer) >= self.finetune.hyperbatch_size or self.trainer.is_last_batch:
+            self._optimizer_step()
 
     def on_train_epoch_end(self) -> None:
+        # Only an epoch cut short (trainer.limit_train_batches) leaves bags here.
         if self._bag_buffer:
-            self._optimizer_step(on_step=False)
+            self._optimizer_step()
 
-    def _optimizer_step(self, *, on_step: bool) -> None:
+    def _optimizer_step(self) -> None:
         logits = torch.cat([b[0] for b in self._bag_buffer])
         targets = torch.cat([b[1] for b in self._bag_buffer])
-        weights = None
-        if all(b[2] is not None for b in self._bag_buffer):
-            weights = torch.cat([b[2] for b in self._bag_buffer])
         self._bag_buffer.clear()
-        loss = self.objective(logits, targets, weights)
+        loss = self.objective(logits, targets)
         optimizer = self.optimizers()
         optimizer.zero_grad(set_to_none=True)
         self.manual_backward(loss)
@@ -291,12 +285,7 @@ class SupervisedModule(L.LightningModule):
             if scheduler is not None:
                 scheduler.step()
         self.log(
-            "train/loss",
-            loss.detach(),
-            on_step=on_step,
-            on_epoch=True,
-            prog_bar=True,
-            batch_size=len(targets),
+            "train/loss", loss.detach(), on_epoch=True, prog_bar=True, batch_size=len(targets)
         )
 
     def on_before_optimizer_step(self, optimizer) -> None:
@@ -323,20 +312,16 @@ class SupervisedModule(L.LightningModule):
         if not groups:
             raise ValueError("Nothing to train: every component is frozen.")
         optimizer = build_optimizer(self.hparams.optim, groups)
+        epochs = self.finetune.schedule_epochs or int(self.trainer.max_epochs)
         n_units = len(self.trainer.datamodule.dataset_train)
-        steps = int(self.trainer.max_epochs) * math.ceil(n_units / self.finetune.hyperbatch_size)
         scheduler = build_scheduler(
             self.hparams.scheduler,
             optimizer,
-            total_steps=steps,
+            total_steps=epochs * math.ceil(n_units / self.finetune.hyperbatch_size),
             warmup_steps=self.finetune.warmup_steps,
         )
-        if scheduler is None:
-            return optimizer
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {"scheduler": scheduler, "interval": "step"},
-        }
+        # Stepped by _optimizer_step (manual optimisation).
+        return optimizer if scheduler is None else ([optimizer], [scheduler])
 
     # ----------------------------------------------------------- evaluation
     def _eval_step(self, batch) -> None:

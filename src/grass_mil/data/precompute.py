@@ -40,7 +40,7 @@ __all__ = ["BuildConfig", "UnitEntry", "ProcessedIndex", "read_manifest", "build
 log = logging.getLogger(__name__)
 
 INDEX_NAME = "processed_index.json"
-INDEX_VERSION = 2
+INDEX_VERSION = 3
 UNIT_KINDS = ("region", "tile", "polygon")
 
 
@@ -69,6 +69,11 @@ class UnitEntry:
     path: str
     n_cells: int
 
+    @property
+    def ids(self) -> set[str]:
+        """The ids that select this unit: its own, its region's and its sample's."""
+        return {self.unit_id, self.region_id, self.sample_id}
+
 
 @dataclass
 class ProcessedIndex:
@@ -78,6 +83,7 @@ class ProcessedIndex:
     edge_features: list[str]
     fingerprint: str
     feature_reducer: dict
+    preprocessing: str
 
     @classmethod
     def read(cls, processed_dir: str | Path) -> ProcessedIndex:
@@ -97,6 +103,7 @@ class ProcessedIndex:
             edge_features=list(raw["edge_features"]),
             fingerprint=str(raw["fingerprint"]),
             feature_reducer=dict(raw.get("feature_reducer") or {}),
+            preprocessing=str(raw["preprocessing"]),
         )
 
     def write(self, processed_dir: str | Path) -> Path:
@@ -141,6 +148,12 @@ def fingerprint(cfg: BuildConfig, manifest: pd.DataFrame, split_key: str = "") -
     h.update(manifest.to_csv(index=False).encode())
     h.update(split_key.encode())
     return h.hexdigest()[:16]
+
+
+def preprocessing_fingerprint(graph: GraphConfig, reducer_state) -> str:
+    """What a model's inputs depend on beyond feature names: graph settings and feature basis."""
+    payload = json.dumps({"graph": asdict(graph), "reducer": reducer_state}, sort_keys=True)
+    return hashlib.sha1(payload.encode()).hexdigest()[:16]
 
 
 def _units_of(table: CellTable, row: pd.Series, cfg: BuildConfig) -> list[tuple[str, np.ndarray]]:
@@ -222,7 +235,7 @@ def build_graphs(
     graph_dir.mkdir(parents=True, exist_ok=True)
     written: list[UnitEntry] = []
     for row, table, units in tables:
-        features = project(table, str(row["sample_id"]))
+        features = project(table)
         for uid, idx in units:
             path = graph_dir / f"{_safe(uid)}.pt"
             data = _unit_graph(table, features, idx, code_of, cfg.graph)
@@ -235,6 +248,7 @@ def build_graphs(
         edge_features=list(cfg.graph.edge_features),
         fingerprint=fp,
         feature_reducer={**asdict(cfg.feature_reducer), "state": reducer_state},
+        preprocessing=preprocessing_fingerprint(cfg.graph, reducer_state),
     )
     index.write(processed_dir)
     log.info(f"Wrote {len(written)} graph unit(s) to {processed_dir}")
@@ -246,33 +260,20 @@ def _safe(name: str) -> str:
 
 
 def _fit_reducer(tables, entries, cfg: ReducerConfig, training_units):
-    """The fitted reducer state and a ``(table, sample_id) -> features`` projection."""
+    """The fitted reducer state and a ``table -> features`` projection."""
     if cfg.name == "identity" or not any(t.features is not None for _, t, _ in tables):
-        return None, lambda table, sample_id: table.features
+        return None, lambda table: table.features
     if cfg.state_from:
         pca = load_reducer_state(cfg.state_from)
-        return pca.state(), lambda table, sample_id: pca.transform(table.features)
-    if cfg.fit_on == "sample":
-        fitted = {
-            str(row["sample_id"]): Pca.fit(table.features, cfg.n_components)
-            for row, table, _ in tables
-        }
-        state = {sample: pca.state() for sample, pca in fitted.items()}
-        return state, lambda table, sample_id: fitted[sample_id].transform(table.features)
-    if cfg.fit_on == "train":
+    elif cfg.fit_on == "train":
         if training_units is None:
             raise ValueError("feature_reducer.fit_on=train needs a training split.")
         train = training_units(entries)
-        parts = [
-            table.features[idx]
-            for _, table, units in tables
-            for uid, idx in units
-            if uid in train
-        ]
+        parts = [t.features[idx] for _, t, units in tables for uid, idx in units if uid in train]
+        pca = Pca.fit(np.concatenate(parts), cfg.n_components)
     else:
-        parts = [table.features for _, table, _ in tables]
-    pca = Pca.fit(np.concatenate(parts), cfg.n_components)
-    return pca.state(), lambda table, sample_id: pca.transform(table.features)
+        pca = Pca.fit(np.concatenate([t.features for _, t, _ in tables]), cfg.n_components)
+    return pca.state(), lambda table: pca.transform(table.features)
 
 
 def _unit_graph(

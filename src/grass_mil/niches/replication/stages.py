@@ -7,7 +7,8 @@
    fixed or chosen to maximise the metaclusters found in ``min_models`` models.
 3. ``transfer``: every model labels every unit with its own niches (mapped to
    metaclusters); reports train vs held-out behaviour, agreement between models
-   and consensus metacluster shares per patient.
+   and consensus metacluster shares (descriptive: most models trained on most
+   units, so only the held-out shares of ``match`` are tested against labels).
 4. ``basis``: one label-free k-means partition of a single space, attributed by
    every model, so the margins of different models refer to the same cells.
 """
@@ -22,7 +23,7 @@ import numpy as np
 import pandas as pd
 
 from grass_mil.inference.cell_cache import CellCache
-from grass_mil.spatial.stats import bh, bootstrap_mean
+from grass_mil.spatial.stats import bootstrap_mean
 
 from ..attribution import cell_margins
 from ..cells import Cells, load_cells
@@ -38,7 +39,6 @@ __all__ = [
     "held_out_shares",
     "transfer_niches",
     "shared_basis",
-    "share_tests",
 ]
 
 log = logging.getLogger(__name__)
@@ -61,18 +61,24 @@ def _margins(cells: Cells, positive_class: int) -> np.ndarray:
     return cell_margins(
         cells.instance_logits,
         cells.attention_logits,
-        cells.head_bias,
+        cells.reference_logits,
         cells.unit_of_cell,
         positive_class=positive_class,
     )
 
 
 def cluster_folds(
-    caches: dict[str, CellCache], cfg: ClusteringConfig, *, positive_class: int, n_boot: int
+    caches: dict[str, CellCache],
+    cfg: ClusteringConfig,
+    *,
+    positive_class: int,
+    present_threshold: float,
+    enrichment_threshold: float,
+    n_boot: int,
 ) -> FoldNiches:
     frames, out = [], FoldNiches(records=pd.DataFrame())
     for name, cache in caches.items():
-        cells = load_cells(cache, sorted(cache.held_out))
+        cells = load_cells(cache, sorted(cache.held_out), spaces=[cfg.space])
         margin = _margins(cells, positive_class)
         model, niches = fit_niches(cells.space[cfg.space], margin, cells.unit_of_cell, cfg)
         positive = cells.positive(positive_class)
@@ -81,8 +87,8 @@ def cluster_folds(
             cells,
             margin,
             positive=positive,
-            present_threshold=0.02,
-            enrichment_threshold=1.5,
+            present_threshold=present_threshold,
+            enrichment_threshold=enrichment_threshold,
             n_boot=n_boot,
             seed=cfg.seed,
         )
@@ -187,37 +193,6 @@ def match_niches(
     return records, pd.DataFrame(rows), float(threshold), scan_table
 
 
-def share_tests(shares: pd.DataFrame, positive: dict[str, bool]) -> pd.DataFrame:
-    """Per column: mean share in positive and other patients, AUROC, Mann-Whitney p and BH q."""
-    from scipy.stats import mannwhitneyu
-    from sklearn.metrics import roc_auc_score
-
-    y = np.array([positive.get(p, False) for p in shares.index])
-    rows = []
-    for column in shares.columns:
-        v = shares[column].to_numpy(float)
-        ok = y.sum() > 2 and (~y).sum() > 2
-        rows.append(
-            {
-                "metacluster": column,
-                "share_pos": float(v[y].mean()) if y.any() else float("nan"),
-                "share_neg": float(v[~y].mean()) if (~y).any() else float("nan"),
-                "auroc": float(roc_auc_score(y, v)) if ok else float("nan"),
-                "p": float(mannwhitneyu(v[y], v[~y]).pvalue) if ok else float("nan"),
-            }
-        )
-    table = pd.DataFrame(rows)
-    table["q"] = bh(table["p"].to_numpy())
-    return table.sort_values("p")
-
-
-def _patient_positive(folds: FoldNiches) -> dict[str, bool]:
-    out: dict[str, bool] = {}
-    for unit, pos in folds.positive.items():
-        out[folds.patients.get(unit, unit)] = out.get(folds.patients.get(unit, unit), False) or pos
-    return out
-
-
 def held_out_shares(folds: FoldNiches, records: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Metacluster shares of every unit (labelled by the model that held it out) and per patient."""
     meta_of = {(r.model, r.niche_id): f"M{r.metacluster}" for r in records.itertuples()}
@@ -232,6 +207,15 @@ def held_out_shares(folds: FoldNiches, records: pd.DataFrame) -> tuple[pd.DataFr
     return units, patients
 
 
+def _aligned(caches: dict[str, CellCache], units: list[str], spaces=()) -> dict[str, Cells]:
+    """The same units' cells from every cache, checked to be in the same order."""
+    out = {name: load_cells(cache, units, spaces=spaces) for name, cache in caches.items()}
+    first = next(iter(out.values()))
+    if any(not np.array_equal(c.cell_ids, first.cell_ids) for c in out.values()):
+        raise ValueError("The caches hold different cells for the same units.")
+    return out
+
+
 def transfer_niches(
     caches: dict[str, CellCache], folds: FoldNiches, records: pd.DataFrame, *, positive_class: int
 ) -> dict[str, pd.DataFrame]:
@@ -241,11 +225,11 @@ def transfer_niches(
     meta_of = {(r.model, r.niche_id): int(r.metacluster) for r in records.itertuples()}
     names = list(caches)
     units = sorted(set().union(*(c.units for c in caches.values())))
+    spaces = sorted({m.cfg.space for m in folds.models.values()})
+    cells_of = _aligned(caches, units, spaces)
     labels, rows = {}, []
-    reference = None
     for name in names:
-        cells = load_cells(caches[name], units)
-        reference = cells if reference is None else reference
+        cells = cells_of[name]
         niches = folds.models[name].predict(cells.space[folds.models[name].cfg.space])
         meta = np.array([meta_of.get((name, int(n)), 0) for n in niches])
         labels[name] = meta
@@ -255,7 +239,7 @@ def transfer_niches(
         for k in sorted(set(meta.tolist()) - {0}):
             for split, mask in (("held_out", held), ("train", ~held)):
                 m = (meta == k) & mask
-                if mask.any() and m.any():
+                if m.any():
                     rows.append(
                         {
                             "metacluster": f"M{k}",
@@ -277,23 +261,16 @@ def transfer_niches(
             if both.sum() > 10:
                 ari.loc[a, b] = adjusted_rand_score(labels[a][both], labels[b][both])
     metas = sorted(set(np.concatenate(list(labels.values())).tolist()) - {0})
-    consensus = pd.DataFrame(
-        {
-            f"M{k}": [
-                np.mean([np.mean(labels[n][reference.unit_of_cell == u] == k) for n in names])
-                for u in units
-            ]
-            for k in metas
-        },
-        index=units,
+    unit_of_cell = cells_of[names[0]].unit_of_cell
+    votes = pd.DataFrame(
+        {f"M{k}": np.mean([labels[n] == k for n in names], axis=0) for k in metas}
     )
-    patients = consensus.groupby([folds.patients.get(u, u) for u in consensus.index]).mean()
+    consensus = votes.groupby(unit_of_cell).mean().reindex(units)
     return {
         "by_model": pd.DataFrame(rows),
         "agreement": ari,
         "unit_shares": consensus,
-        "patient_shares": patients,
-        "patient_tests": share_tests(patients, _patient_positive(folds)),
+        "patient_shares": consensus.groupby([folds.patients.get(u, u) for u in units]).mean(),
     }
 
 
@@ -312,35 +289,35 @@ def shared_basis(
     from sklearn.cluster import MiniBatchKMeans
     from sklearn.preprocessing import StandardScaler
 
-    names = list(caches)
-    basis_name = space_model or names[0]
+    basis_name = space_model or next(iter(caches))
     units = sorted(caches[basis_name].units)
-    base = load_cells(caches[basis_name], units)
+    cells_of = _aligned(caches, units)
+    base = load_cells(caches[basis_name], units, spaces=[space])
     x = base.space[space]
-    rng = np.random.default_rng(seed)
-    sample = rng.choice(len(x), min(sample_size, len(x)), replace=False)
+    sample = np.random.default_rng(seed).choice(len(x), min(sample_size, len(x)), replace=False)
     scaler = StandardScaler().fit(x[sample])
     kmeans = MiniBatchKMeans(k, random_state=seed, n_init=10).fit(scaler.transform(x[sample]))
     groups = kmeans.predict(scaler.transform(x)) + 1
     positive = base.positive(positive_class)
     is_pos = np.array([positive.get(u, False) for u in base.unit_of_cell])
-    pairs = []
-    for name in names:
-        cells = load_cells(caches[name], units)
-        margin = _margins(cells, positive_class)
-        held = set(caches[name].held_out)
-        frame = pd.DataFrame({"unit": cells.unit_of_cell, "group": groups, "margin": margin})
-        for (unit, group), g in frame.groupby(["unit", "group"]):
-            pairs.append(
+    frames = []
+    for name, cells in cells_of.items():
+        frame = (
+            pd.DataFrame(
                 {
-                    "model": name,
-                    "unit_id": unit,
-                    "group": int(group),
-                    "split": "held_out" if unit in held else "train",
-                    "margin": float(g["margin"].mean()),
+                    "unit_id": cells.unit_of_cell,
+                    "group": groups,
+                    "margin": _margins(cells, positive_class),
                 }
             )
-    pairs = pd.DataFrame(pairs)
+            .groupby(["unit_id", "group"], as_index=False)["margin"]
+            .mean()
+        )
+        held = frame["unit_id"].isin(caches[name].held_out)
+        frame.insert(0, "model", name)
+        frame.insert(3, "split", np.where(held, "held_out", "train"))
+        frames.append(frame)
+    pairs = pd.concat(frames, ignore_index=True)
     rows = []
     k_types = len(base.cell_type_names)
     for group in range(1, k + 1):
@@ -359,9 +336,15 @@ def shared_basis(
             ),
         }
         for split in ("held_out", "train"):
-            values = pairs.loc[(pairs.group == group) & (pairs.split == split), "margin"]
+            chosen = pairs[(pairs.group == group) & (pairs.split == split)]
+            # Every model scores the same units: resample patients, not (model, unit) pairs.
             row[f"margin_{split}"], row[f"margin_{split}_lo"], row[f"margin_{split}_hi"] = (
-                bootstrap_mean(values, n_boot=n_boot, seed=seed)
+                bootstrap_mean(
+                    chosen["margin"],
+                    clusters=[base.patient_of(u) for u in chosen["unit_id"]],
+                    n_boot=n_boot,
+                    seed=seed,
+                )
             )
         rows.append(row)
     return {"groups": pd.DataFrame(rows), "pairs": pairs}

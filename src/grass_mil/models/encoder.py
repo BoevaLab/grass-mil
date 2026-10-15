@@ -11,12 +11,14 @@ layers) and a pooling of the node states into one vector per ego-graph.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 import torch
 from torch import nn
 from torch_geometric.nn import GINEConv, global_add_pool, global_max_pool, global_mean_pool
+
+from grass_mil.utils import checked
 
 __all__ = ["EncoderConfig", "GINEEncoder"]
 
@@ -66,10 +68,7 @@ class EncoderConfig:
 
     @classmethod
     def from_dict(cls, cfg: Mapping[str, Any] | None) -> EncoderConfig:
-        cfg = dict(cfg or {})
-        unknown = set(cfg) - {f.name for f in fields(cls)}
-        if unknown:
-            raise ValueError(f"Unknown model.encoder keys: {sorted(unknown)}")
+        cfg = checked(cls, cfg, "model.encoder")
         out = cls(**cfg)
         checks = {
             "norm": (out.norm, {"layernorm", "batchnorm", "none"}),

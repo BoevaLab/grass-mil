@@ -12,17 +12,17 @@ from __future__ import annotations
 
 import copy
 import math
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 import lightning as L
 import torch
 import torch.nn.functional as F
 from lightning.pytorch.utilities import rank_zero_warn
-from omegaconf import OmegaConf
 from torch import nn
 
 from grass_mil.data.datamodule import InputSpec
+from grass_mil.utils import checked, plain
 
 from .augmentations import PretrainViews
 from .checkpoints import load_encoder_weights
@@ -53,10 +53,7 @@ class PretrainConfig:
 
     @classmethod
     def from_dict(cls, cfg: Mapping[str, Any] | None) -> PretrainConfig:
-        cfg = dict(cfg or {})
-        unknown = set(cfg) - {f.name for f in fields(cls)}
-        if unknown:
-            raise ValueError(f"Unknown pretrain keys: {sorted(unknown)}")
+        cfg = checked(cls, cfg, "pretrain")
         cfg["augmentation"] = PretrainViews.from_dict(cfg.get("augmentation"))
         return cls(**cfg)
 
@@ -76,10 +73,6 @@ class Predictor(nn.Module):
         return self.net(x)
 
 
-def _plain(value: Any) -> Any:
-    return OmegaConf.to_container(value, resolve=True) if OmegaConf.is_config(value) else value
-
-
 class BGRLModule(L.LightningModule):
     def __init__(
         self,
@@ -90,7 +83,7 @@ class BGRLModule(L.LightningModule):
         init_from_ckpt: str | None = None,
     ) -> None:
         super().__init__()
-        hparams = {k: _plain(v) for k, v in locals().items() if k not in ("self", "__class__")}
+        hparams = {k: plain(v) for k, v in locals().items() if k not in ("self", "__class__")}
         self.save_hyperparameters(hparams, logger=False)
         self.encoder_cfg = EncoderConfig.from_dict(hparams["encoder"])
         self.pretrain = PretrainConfig.from_dict(hparams["pretrain"])
@@ -102,7 +95,7 @@ class BGRLModule(L.LightningModule):
         self._generator = torch.Generator().manual_seed(int(self.pretrain.seed))
         self._last_ema_step = 0
 
-    def build(self, spec: InputSpec, feature_names: list[str] | None = None) -> None:
+    def build(self, spec: InputSpec) -> None:
         self.input_spec = spec
         self.encoder = GINEEncoder(
             self.encoder_cfg,
@@ -114,14 +107,14 @@ class BGRLModule(L.LightningModule):
         self.target_encoder = copy.deepcopy(self.encoder)
         self.target_encoder.requires_grad_(False)
         self._view = self.pretrain.augmentation.build(
-            feature_names=feature_names or [], unassigned_index=self.encoder.unassigned_index
+            feature_names=spec.feature_names, unassigned_index=self.encoder.unassigned_index
         )
 
     def setup(self, stage: str | None = None) -> None:
         if self.encoder is not None:
             return
         datamodule = self.trainer.datamodule
-        self.build(datamodule.input_spec, feature_names=datamodule.index.feature_names)
+        self.build(datamodule.input_spec)
         if self.hparams.init_from_ckpt:
             load_encoder_weights(self.encoder, self.hparams.init_from_ckpt)
             self.target_encoder.load_state_dict(self.encoder.state_dict())

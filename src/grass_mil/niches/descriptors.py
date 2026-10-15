@@ -5,32 +5,36 @@ niche's subgraph: its cells and the cell-graph edges between them) and then
 averaged over the units in which the niche has at least ``min_cells`` cells:
 
 * ``moran``: Moran's I of every cell-type indicator (are cells of a type
-  clustered within the niche?), mean and s.e.m. over units, with a
-  label-permutation p-value of the mean and BH correction over niche x type;
-* ``enrichment``: neighbourhood-enrichment z-score of every cell-type pair;
-* ``cross_l``: Ripley's centred cross-L of every cell-type pair on a shared
-  radius grid; ``r_star`` is the radius maximising the mean absolute value
-  over pairs, and the table reports ``L(r*) - r*``;
+  clustered within the niche?), mean and s.e.m. over units, with a z-test of
+  the mean against its expectation under random labelling (exact moments per
+  unit) and BH correction over niche x type;
+* ``enrichment``: neighbourhood enrichment of every cell-type pair, as the
+  permutation z-score and the size-free ``log2`` observed/expected ratio;
+* ``cross_l``: Ripley's cross-L of every cell-type pair relative to random
+  labelling of the niche's cells, ``L_ab(r) - L(r)``, on a shared radius grid;
+  ``r_star`` is the radius where the mean absolute value over pairs peaks;
 * ``contacts``: ``log2`` of a pair's share of the contacts inside the niche
   over its share of all contacts of the analysed cells (all units pooled),
-  masked below ``min_contacts`` contacts inside the niche.
+  masked below ``min_contacts`` contacts inside the niche. A pair of the
+  niche's dominant cell type is enriched by composition alone.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
-from typing import Any, Mapping
+from dataclasses import dataclass
+from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
 
-from grass_mil.spatial.graph_stats import contact_counts, cross_l, enrichment_zscores, morans_i
+from grass_mil.spatial.graph_stats import contact_counts, cross_l, enrichment, morans_i
 from grass_mil.spatial.stats import bh
+from grass_mil.utils import checked
 
 from .cells import Cells
 from .discovery import BACKGROUND, niche_name
 
-__all__ = ["DescriptorConfig", "niche_descriptors"]
+__all__ = ["DescriptorConfig", "niche_descriptors", "short_edges"]
 
 ANALYSES = ("moran", "enrichment", "cross_l", "contacts")
 
@@ -48,10 +52,7 @@ class DescriptorConfig:
 
     @classmethod
     def from_dict(cls, cfg: Mapping[str, Any] | None) -> DescriptorConfig:
-        cfg = dict(cfg or {})
-        unknown = set(cfg) - {f.name for f in fields(cls)}
-        if unknown:
-            raise ValueError(f"Unknown descriptors keys: {sorted(unknown)}")
+        cfg = checked(cls, cfg, "descriptors")
         cfg["analyses"] = tuple(cfg.get("analyses", ANALYSES))
         bad = set(cfg["analyses"]) - set(ANALYSES)
         if bad:
@@ -61,8 +62,16 @@ class DescriptorConfig:
         return cls(**cfg)
 
 
+def short_edges(cells: Cells, max_length: float | None) -> np.ndarray:
+    """The cell-graph edges no longer than ``max_length`` (all edges for ``None``)."""
+    if max_length is None:
+        return cells.edges
+    a, b = cells.edges
+    return cells.edges[:, np.linalg.norm(cells.pos[a] - cells.pos[b], axis=1) <= max_length]
+
+
 def _subgraphs(cells: Cells, niches: np.ndarray, edges: np.ndarray, min_cells: int):
-    """``(niche, unit, cell indices, local edges)`` of every niche subgraph with enough cells."""
+    """``(niche, cell indices, local edges)`` of every niche subgraph with enough cells."""
     _, unit_index = np.unique(cells.unit_of_cell, return_inverse=True)
     key = niches.astype(np.int64) * (int(unit_index.max()) + 1) + unit_index
     order = np.argsort(key, kind="stable")
@@ -76,10 +85,9 @@ def _subgraphs(cells: Cells, niches: np.ndarray, edges: np.ndarray, min_cells: i
     for idx in np.split(order, starts[1:]):
         if idx.size < min_cells or niches[idx[0]] == BACKGROUND:
             continue
-        k = key[idx[0]]
-        lo, hi = np.searchsorted(edge_key, [k, k + 1])
+        lo, hi = np.searchsorted(edge_key, [key[idx[0]], key[idx[0]] + 1])
         local[idx] = np.arange(idx.size)
-        yield int(niches[idx[0]]), str(cells.unit_of_cell[idx[0]]), idx, local[inside[:, lo:hi]]
+        yield int(niches[idx[0]]), idx, local[inside[:, lo:hi]]
 
 
 def niche_descriptors(
@@ -89,44 +97,33 @@ def niche_descriptors(
         return {}
     names = cells.cell_type_names
     k = len(names)
-    edges = cells.edges
-    if cfg.max_edge_length is not None:
-        length = np.linalg.norm(cells.pos[edges[0]] - cells.pos[edges[1]], axis=1)
-        edges = edges[:, length <= cfg.max_edge_length]
+    edges = short_edges(cells, cfg.max_edge_length)
     rng = np.random.default_rng(cfg.seed)
     radii = _radii(cells, cfg)
     pairs = [(a, b) for a in range(k) for b in range(a, k)]
-    collected: dict[str, list] = {a: [] for a in cfg.analyses}
-    for niche, unit, idx, local_edges in _subgraphs(cells, niches, edges, cfg.min_cells):
+    first, second = np.array(pairs).T
+    records: dict[str, dict[int, list]] = {a: {} for a in cfg.analyses if a != "contacts"}
+    for niche, idx, local_edges in _subgraphs(cells, niches, edges, cfg.min_cells):
         types = cells.cell_type[idx]
-        if "moran" in cfg.analyses:
-            onehot = np.eye(k)[types]
-            observed = morans_i(onehot, local_edges)
-            null = np.stack(
-                [
-                    morans_i(onehot[rng.permutation(idx.size)], local_edges)
-                    for _ in range(cfg.n_perms)
-                ]
-            )
-            collected["moran"].append((niche, observed, null))
-        if "enrichment" in cfg.analyses:
-            z = enrichment_zscores(types, local_edges, k, n_perms=cfg.n_perms, rng=rng)
-            collected["enrichment"].append((niche, z))
-        if "cross_l" in cfg.analyses:
-            coords = cells.pos[idx]
-            curves = np.full((len(pairs), radii.size), np.nan)
-            counts = np.bincount(types, minlength=k)
-            for p, (a, b) in enumerate(pairs):
-                if counts[a] >= 2 and counts[b] >= 2:
-                    curves[p] = cross_l(coords, types == a, types == b, radii)
-            collected["cross_l"].append((niche, curves))
+        values = {}
+        if "moran" in records:
+            i, expected, var = morans_i(np.eye(k)[types], local_edges)
+            values["moran"] = np.stack([i, np.full(k, expected), var])
+        if "enrichment" in records:
+            z, ratio = enrichment(types, local_edges, k, n_perms=cfg.n_perms, rng=rng)
+            values["enrichment"] = np.stack([z[first, second], ratio[first, second]])
+        if "cross_l" in records:
+            values["cross_l"] = cross_l(cells.pos[idx], types, pairs, radii)
+        for name, value in values.items():
+            records[name].setdefault(niche, []).append(value)
+    stacks = {a: {n: np.stack(v) for n, v in sorted(r.items())} for a, r in records.items()}
     out: dict[str, pd.DataFrame] = {}
-    if "moran" in cfg.analyses:
-        out["moran"] = _moran_table(collected["moran"], names)
-    if "enrichment" in cfg.analyses:
-        out["enrichment"] = _pair_table(collected["enrichment"], names, "z")
-    if "cross_l" in cfg.analyses:
-        out["cross_l"] = _cross_l_table(collected["cross_l"], names, pairs, radii)
+    if "moran" in stacks:
+        out["moran"] = _moran_table(stacks["moran"], names)
+    if "enrichment" in stacks:
+        out["enrichment"] = _pair_table(stacks["enrichment"], names, pairs, ["z", "log2_ratio"])
+    if "cross_l" in stacks:
+        out["cross_l"] = _cross_l_table(stacks["cross_l"], names, pairs, radii)
     if "contacts" in cfg.analyses:
         out["contacts"] = _contact_table(niches, cells.cell_type, edges, names, cfg.min_contacts)
     return out
@@ -136,92 +133,70 @@ def _radii(cells: Cells, cfg: DescriptorConfig) -> np.ndarray:
     if cfg.max_radius is not None:
         top = float(cfg.max_radius)
     else:
-        diagonals = [
-            float(np.linalg.norm(np.ptp(cells.pos[cells.unit_of_cell == u], axis=0)))
-            for u in cells.units
-        ]
+        diagonals = [np.linalg.norm(np.ptp(cells.pos[s], axis=0)) for s in cells.slices.values()]
         top = 0.25 * float(np.median(diagonals))
     return np.linspace(top / cfg.n_radii, top, cfg.n_radii)
 
 
-def _moran_table(records, names) -> pd.DataFrame:
+def _moran_table(stacks: dict[int, np.ndarray], names: Sequence[str]) -> pd.DataFrame:
+    from scipy.stats import norm
+
     rows = []
-    for niche in sorted({r[0] for r in records}):
-        obs = np.stack([r[1] for r in records if r[0] == niche])  # (units, k)
-        null = np.stack([r[2] for r in records if r[0] == niche])  # (units, perms, k)
+    for niche, stack in stacks.items():  # (units, [I, E, Var], types)
         for j, name in enumerate(names):
-            values = obs[:, j]
-            finite = np.isfinite(values)
-            if not finite.any():
+            i, expected, var = stack[:, 0, j], stack[:, 1, j], stack[:, 2, j]
+            ok = np.isfinite(i) & np.isfinite(var)
+            u = int(ok.sum())
+            if not u:
                 continue
-            mean = float(values[finite].mean())
-            null_mean = np.nanmean(null[finite][:, :, j], axis=0)
-            centre = float(np.nanmean(null_mean))
-            extreme = np.abs(null_mean - centre) >= abs(mean - centre)
+            z = (i[ok].mean() - expected[ok].mean()) / (np.sqrt(var[ok].sum()) / u)
             rows.append(
                 {
                     "niche": niche_name(niche),
                     "cell_type": name,
-                    "morans_i": mean,
-                    "sem": float(values[finite].std(ddof=1) / np.sqrt(finite.sum()))
-                    if finite.sum() > 1
-                    else float("nan"),
-                    "n_units": int(finite.sum()),
-                    "p": float((1 + extreme.sum()) / (1 + null_mean.size)),
+                    "morans_i": float(i[ok].mean()),
+                    "expected": float(expected[ok].mean()),
+                    "sem": float(i[ok].std(ddof=1) / np.sqrt(u)) if u > 1 else float("nan"),
+                    "n_units": u,
+                    "z": float(z),
+                    "p": float(2 * norm.sf(abs(z))),
                 }
             )
-    table = pd.DataFrame(rows, columns=["niche", "cell_type", "morans_i", "sem", "n_units", "p"])
+    columns = ["niche", "cell_type", "morans_i", "expected", "sem", "n_units", "z", "p"]
+    table = pd.DataFrame(rows, columns=columns)
     table["q"] = bh(table["p"].to_numpy())
     return table
 
 
-def _pair_table(records, names, value: str) -> pd.DataFrame:
+def _pair_table(
+    stacks: dict[int, np.ndarray], names: Sequence[str], pairs, columns: Sequence[str]
+) -> pd.DataFrame:
+    """Mean over units of every value of every cell-type pair; ``stacks`` hold
+    ``(units, len(columns), len(pairs))`` per niche."""
     rows = []
-    for niche in sorted({r[0] for r in records}):
-        stack = np.stack([r[1] for r in records if r[0] == niche])
+    for niche, stack in stacks.items():
         with np.errstate(all="ignore"):
             mean = np.nanmean(stack, axis=0)
-        n = np.isfinite(stack).sum(0)
-        for a in range(len(names)):
-            for b in range(a, len(names)):
-                if n[a, b]:
-                    rows.append(
-                        {
-                            "niche": niche_name(niche),
-                            "type_a": names[a],
-                            "type_b": names[b],
-                            value: float(mean[a, b]),
-                            "n_units": int(n[a, b]),
-                        }
-                    )
-    return pd.DataFrame(rows, columns=["niche", "type_a", "type_b", value, "n_units"])
-
-
-def _cross_l_table(records, names, pairs, radii) -> pd.DataFrame:
-    rows = []
-    for niche in sorted({r[0] for r in records}):
-        stack = np.stack([r[1] for r in records if r[0] == niche])  # (units, pairs, radii)
-        with np.errstate(all="ignore"):
-            mean = np.nanmean(stack, axis=0)
-            strength = np.nanmean(np.abs(mean), axis=0)
-        if not np.isfinite(strength).any():
-            continue
-        r_idx = int(np.nanargmax(strength))
+        n = np.isfinite(stack[:, 0]).sum(0)
         for p, (a, b) in enumerate(pairs):
-            if np.isfinite(mean[p, r_idx]):
-                rows.append(
-                    {
-                        "niche": niche_name(niche),
-                        "type_a": names[a],
-                        "type_b": names[b],
-                        "r_star": float(radii[r_idx]),
-                        "centred_l": float(mean[p, r_idx]),
-                        "n_units": int(np.isfinite(stack[:, p, r_idx]).sum()),
-                    }
-                )
-    return pd.DataFrame(
-        rows, columns=["niche", "type_a", "type_b", "r_star", "centred_l", "n_units"]
-    )
+            if n[p]:
+                row = {"niche": niche_name(niche), "type_a": names[a], "type_b": names[b]}
+                row.update({c: float(mean[j, p]) for j, c in enumerate(columns)})
+                rows.append({**row, "n_units": int(n[p])})
+    return pd.DataFrame(rows, columns=["niche", "type_a", "type_b", *columns, "n_units"])
+
+
+def _cross_l_table(stacks, names, pairs, radii) -> pd.DataFrame:
+    at_r_star, r_star = {}, {}
+    for niche, stack in stacks.items():  # (units, pairs, radii)
+        with np.errstate(all="ignore"):
+            strength = np.nanmean(np.abs(np.nanmean(stack, axis=0)), axis=0)
+        if np.isfinite(strength).any():
+            r = int(np.nanargmax(strength))
+            at_r_star[niche], r_star[niche] = stack[:, None, :, r], float(radii[r])
+    table = _pair_table(at_r_star, names, pairs, ["cross_l"])
+    table.insert(3, "r_star", table["niche"].map({niche_name(n): r for n, r in r_star.items()}))
+    return table
 
 
 def _contact_table(niches, types, edges, names, min_contacts: int) -> pd.DataFrame:
@@ -231,8 +206,7 @@ def _contact_table(niches, types, edges, names, min_contacts: int) -> pd.DataFra
     rows = []
     same = niches[edges[0]] == niches[edges[1]]
     for niche in sorted(set(niches.tolist()) - {BACKGROUND}):
-        inside = edges[:, same & (niches[edges[0]] == niche)]
-        counts = contact_counts(types, inside, k)
+        counts = contact_counts(types, edges[:, same & (niches[edges[0]] == niche)], k)
         frac = counts / max(counts.sum(), 1.0)
         for a in range(k):
             for b in range(a, k):

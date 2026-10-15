@@ -14,7 +14,8 @@ and once per unit the cell types, positions, cell ids and the cell graph::
 
 ``index.json`` records the checkpoint, the units with their labels and
 patients, the units held out from the model's training (cross-validation), the
-head bias and the cell-type names.
+model's mean instance logit over every cell (the reference of the margins) and
+the cell-type names.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ import torch
 
 from grass_mil.data.samplers import EgoGraphLoader, SamplerConfig
 
-__all__ = ["CellCache", "extract_cells", "sampler_of_checkpoint"]
+__all__ = ["CellCache", "extract_cells", "scoring_sampler"]
 
 log = logging.getLogger(__name__)
 
@@ -74,14 +75,14 @@ class CellCache:
         return list(self.index["cell_types"])
 
     @property
-    def head_bias(self) -> np.ndarray:
-        return np.asarray(self.index["head_bias"], dtype=np.float64)
+    def reference_logits(self) -> np.ndarray:
+        """The model's mean instance logit over every cell of the cache."""
+        return np.asarray(self.index["reference_logits"], dtype=np.float64)
 
     def unit_info(self, unit_id: str) -> dict[str, Any]:
-        for u in self.index["units"]:
-            if u["unit_id"] == unit_id:
-                return u
-        raise KeyError(unit_id)
+        if "_by_unit" not in self.__dict__:
+            self.__dict__["_by_unit"] = {u["unit_id"]: u for u in self.index["units"]}
+        return self.__dict__["_by_unit"][unit_id]
 
     def load(self, unit_id: str) -> dict[str, np.ndarray]:
         with np.load(_npz_path(self.model_dir, unit_id), allow_pickle=False) as z:
@@ -92,14 +93,32 @@ class CellCache:
             yield unit, self.load(unit)
 
 
-def sampler_of_checkpoint(ckpt: dict[str, Any], batch_size: int) -> SamplerConfig:
-    """Ego-graph settings the model was trained with, scoring every cell."""
-    cfg = dict(ckpt["datamodule_hyper_parameters"]["sampler"])
+def scoring_sampler(
+    trained: dict[str, Any], batch_size: int, *, every_cell: bool
+) -> SamplerConfig:
+    """The ego-graph settings a model was trained with (``trained``), scoring all roots.
+
+    Without ``every_cell`` the roots are the ones training drew from (the tissue
+    interior when ``interior_roots`` was on), as for the test split; with it,
+    every cell is scored, as per-cell outputs need.
+    """
+    cfg = dict(trained)
     cfg.update(
         roots_per_unit=None, batch_size=int(batch_size), merge_units=False, root_weighting=None
     )
-    cfg["interior_roots"] = {**dict(cfg.get("interior_roots") or {}), "enabled": False}
+    if every_cell:
+        cfg["interior_roots"] = {**dict(cfg.get("interior_roots") or {}), "enabled": False}
     return SamplerConfig.from_dict(cfg)
+
+
+def _mean_logits(model_dir: Path, units: Sequence[str]) -> list[float]:
+    """Mean instance logit over every cell of ``units``."""
+    total, count = 0.0, 0
+    for unit in units:
+        with np.load(_npz_path(model_dir, unit)) as z:
+            logits = z["instance_logits"].astype(np.float64)
+        total, count = total + logits.sum(0), count + len(logits)
+    return (total / max(count, 1)).tolist()
 
 
 class _OneUnit:
@@ -124,20 +143,31 @@ def extract_cells(
     ckpt_path: str,
     held_out: Sequence[str] = (),
     unit_meta: dict[str, dict[str, Any]] | None = None,
-    units: Sequence[str] | None = None,
     device: torch.device,
     resume: bool = True,
 ) -> Path:
     """Score every cell of every unit of ``dataset`` and write the cache."""
     model_dir = Path(out_dir) / model_name
     model_dir.mkdir(parents=True, exist_ok=True)
+    # Resume only over files written by this very checkpoint and sampling (the
+    # JSON round trip makes the stamp compare equal to the stored one).
+    stat = Path(ckpt_path).stat()
+    source = json.loads(
+        json.dumps(
+            {
+                "ckpt": [str(ckpt_path), stat.st_size, stat.st_mtime_ns],
+                "sampler": sampler.as_dict(),
+            }
+        )
+    )
+    stamp = model_dir / "source.json"
+    if resume and (not stamp.exists() or json.loads(stamp.read_text()) != source):
+        resume = False
+    stamp.write_text(json.dumps(source))
     model.to(device).eval()
-    wanted = set(units) if units is not None else None
     index_units = []
     autocast = device.type == "cuda"
     for i, entry in enumerate(dataset.entries):
-        if wanted is not None and entry.unit_id not in wanted:
-            continue
         info = {
             "unit_id": entry.unit_id,
             "region_id": entry.region_id,
@@ -190,7 +220,7 @@ def extract_cells(
         "target_type": model.task["target_type"],
         "units": index_units,
         "held_out_units": sorted(map(str, held_out)),
-        "head_bias": model.head.bias.detach().cpu().tolist(),
+        "reference_logits": _mean_logits(model_dir, [u["unit_id"] for u in index_units]),
         "cell_types": list(model.input_spec.cell_types),
         "sampler": sampler.as_dict(),
     }

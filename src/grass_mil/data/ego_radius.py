@@ -11,11 +11,13 @@ after ``coord_scale_um``. Applied to every sampled ego-graph after sampling.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 import numpy as np
 import torch
+
+from grass_mil.utils import checked
 
 __all__ = ["EgoRadiusConfig", "EgoRadiusCutoff", "radius_for_depth"]
 
@@ -29,10 +31,7 @@ class EgoRadiusConfig:
 
     @classmethod
     def from_dict(cls, cfg: Mapping[str, Any] | None) -> EgoRadiusConfig:
-        cfg = dict(cfg or {})
-        unknown = set(cfg) - {f.name for f in fields(cls)}
-        if unknown:
-            raise ValueError(f"Unknown ego_radius keys: {sorted(unknown)}")
+        cfg = checked(cls, cfg, "ego_radius")
         return cls(**cfg)
 
 

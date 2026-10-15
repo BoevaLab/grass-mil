@@ -41,7 +41,7 @@ graph:
 feature_reducer:
   name: identity # identity | pca
   n_components: 32
-  fit_on: all # all | train | sample
+  fit_on: all # all | train (single random split only)
   state_from: null # processed_index.json of a cohort whose PCA basis to reuse
 
 labels:

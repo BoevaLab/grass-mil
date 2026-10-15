@@ -33,12 +33,12 @@ clustering:
 
 present_threshold: 0.02 # a niche is present in a unit above this share
 enrichment_threshold: 1.5 # cell types over-represented by more than this factor
-n_boot: 2000 # bootstrap over units for the margin interval
+n_boot: 2000 # bootstrap resamples (of patients) for the margin interval
 
 descriptors:
   analyses: [moran, enrichment, cross_l, contacts]
   min_cells: 20 # cells of a niche in a unit needed to describe it
-  n_perms: 100
+  n_perms: 100 # label permutations for neighbourhood enrichment
   n_radii: 20
   max_radius: null # null = a quarter of the median unit diagonal
   min_contacts: 100

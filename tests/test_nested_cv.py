@@ -6,6 +6,7 @@ import json
 
 import pandas as pd
 import pytest
+import torch
 
 from grass_mil.nested_cv import best_epoch, run_nested_cv
 from tests.helpers.cohort import cohort_overrides, compose_cfg
@@ -43,6 +44,26 @@ def test_refit_trains_without_validation(nested_cv):
     assert (refit / "checkpoints" / "last.ckpt").exists()
     done = json.loads((refit / "done.json").read_text())
     assert not any(k.startswith("val/") for k in done["metrics"])
+
+
+def test_refit_follows_the_schedule_of_the_inner_runs(nested_cv):
+    ckpt = nested_cv / "outer_0" / "refit" / "checkpoints" / "last.ckpt"
+    finetune = torch.load(ckpt, weights_only=True)["hyper_parameters"]["finetune"]
+    assert finetune["schedule_epochs"] == 2  # the inner runs' trainer.max_epochs
+
+
+def test_outer_folds_must_keep_every_patient_in_one_fold(cohort, tmp_path):
+    folds = json.loads(cohort.folds.read_text())
+    moved = folds[0].pop()  # one region of a patient whose other region stays in fold 0
+    folds[1].append(moved)
+    (tmp_path / "folds.json").write_text(json.dumps(folds))
+    cfg = compose_cfg(
+        "nested_cv",
+        cohort_overrides(cohort) + [f"nested_cv.folds_file={tmp_path / 'folds.json'}"],
+        tmp_path / "out",
+    )
+    with pytest.raises(ValueError, match="outer folds 0 and 1"):
+        run_nested_cv(cfg)
 
 
 @pytest.mark.slow

@@ -4,16 +4,10 @@ from __future__ import annotations
 
 from typing import Sequence
 
-import numpy as np
 import pandas as pd
 import torch
 
-__all__ = ["prediction_frame", "patient_frame", "frame_metrics", "score_column"]
-
-
-def score_column(target_type: str) -> str:
-    """The column holding the score that metrics such as AUROC are computed on."""
-    return {"classification": "prob_1", "regression": "pred_0", "survival": "risk"}[target_type]
+__all__ = ["prediction_frame", "patient_frame", "frame_metrics"]
 
 
 def prediction_frame(
@@ -44,7 +38,7 @@ def prediction_frame(
     if targets is not None:
         t = targets.detach().float().cpu().numpy()
         if target_type == "classification":
-            df["label"] = np.floor(t[:, 0] + 0.5).astype(int)
+            df["label"] = t[:, 0].astype(int)
         elif target_type == "survival":
             df["time"], df["event"] = t[:, 0], t[:, 1]
         else:
@@ -56,18 +50,26 @@ def prediction_frame(
 
 
 def patient_frame(units: pd.DataFrame, target_type: str) -> pd.DataFrame:
-    """Patient scores as the mean of the patient's unit scores."""
+    """Patient scores as the mean of the patient's unit scores.
+
+    Needs one target per patient: units of a patient with different labels have
+    no patient-level truth to score against.
+    """
     if "patient_id" not in units.columns:
         raise ValueError("Patient-level scores need a patient_id column.")
     value_cols = [c for c in units.columns if c.startswith(("prob_", "pred_")) or c == "risk"]
+    target_cols = [
+        c for c in units.columns if c in ("label", "time", "event") or c.startswith("target_")
+    ]
+    varying = units.groupby("patient_id")[target_cols].nunique().gt(1).any()
+    if varying.any():
+        raise ValueError(
+            f"Units of one patient have different targets ({', '.join(varying[varying].index)})."
+        )
     agg: dict[str, tuple[str, str]] = {c: (c, "mean") for c in value_cols}
     agg["n_units"] = ("unit_id", "nunique")
-    for c in ("label", "time", "event", *[c for c in units.columns if c.startswith("target_")]):
-        if c in units.columns:
-            agg[c] = (c, "first")
-    for c in ("outer",):
-        if c in units.columns:
-            agg[c] = (c, "first")
+    for c in [*target_cols, *(["outer"] if "outer" in units.columns else [])]:
+        agg[c] = (c, "first")
     out = units.groupby("patient_id").agg(**agg).reset_index()
     if target_type == "classification":
         probs = out[[c for c in out.columns if c.startswith("prob_")]].to_numpy()

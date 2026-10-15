@@ -11,7 +11,6 @@ import torch
 
 from grass_mil.data import LabelTable, SpatialOmicsDataModule
 from grass_mil.data.graphs import GraphConfig, delaunay_edges, edge_features, log_distance_feature
-from grass_mil.data.labels import class_index
 from grass_mil.data.loaders import InputConfig, input_type_of, load_cell_table
 from grass_mil.data.precompute import ProcessedIndex, read_manifest
 from grass_mil.data.splits import inner_folds, load_folds, random_split
@@ -130,13 +129,17 @@ def test_label_table_encodes_text_labels_and_patients(tmp_path):
     table = LabelTable.read(tmp_path / "l.csv", id_column="region_id", patient_column="patient_id")
     assert table.codes == {"grade": ["high", "low"]}
     assert table.target("r2").tolist() == [1.0]
-    assert "r3" not in table  # unlabelled
+    assert table.resolve("r3") is None  # unlabelled
     assert table.patient("r1") == "p1"
     assert table.resolve("x", "r2") == "r2"
 
 
-def test_class_index_rounds_halves_up():
-    assert [class_index(v) for v in (0.0, 0.49, 0.5, 1.0, 2.0)] == [0, 0, 1, 1, 2]
+def test_class_labels_must_be_integers(tmp_path):
+    (tmp_path / "l.csv").write_text("region_id,label\nr1,1\nr2,0.5\n")
+    table = LabelTable.read(tmp_path / "l.csv", id_column="region_id")
+    assert table.classes("r1") == 1
+    with pytest.raises(ValueError, match="not an integer"):
+        table.classes("r2")
 
 
 # ---------------------------------------------------------------- splits
@@ -174,9 +177,9 @@ def test_datamodule_builds_reuses_and_refuses_stale_graphs(cohort, tmp_path):
     dm = _datamodule(cohort, tmp_path)
     dm.prepare_data()
     dm.setup()
-    assert dm.input_spec.feature_dim == 1
+    assert dm.input_spec.feature_names == ("area",)
     assert dm.input_spec.cell_types == ("A", "B", "C", "D")
-    assert dm.input_spec.edge_dim == 2
+    assert dm.input_spec.edge_features == ("log_distance", "neighbor")
     sizes = [len(dm.dataset_train), len(dm.dataset_val), len(dm.dataset_test)]
     assert sum(sizes) == len(cohort.regions) and min(sizes) > 0
     data = dm.dataset_train[0]
@@ -199,6 +202,9 @@ def test_explicit_split_by_region_or_patientless_ids(cohort, tmp_path):
     with pytest.raises(ValueError, match="no processed unit"):
         bad = _datamodule(cohort, tmp_path, split={"train": ["nope"]})
         bad.setup()
+    with pytest.raises(ValueError, match="in both"):
+        split = {"train": cohort.regions[:6], "val": cohort.regions[5:8]}
+        _datamodule(cohort, tmp_path, split=split).setup()
 
 
 def test_tile_units_inherit_region_labels(cohort, tmp_path):
@@ -233,6 +239,24 @@ def test_pca_reducer_end_to_end_and_reuse_of_its_basis(cohort, tmp_path):
     a = dm.all_units()[0].x
     b = other.all_units()[0].x
     assert torch.allclose(a, b)
+
+
+def test_train_fitted_reducer_sees_the_training_split_of_setup(cohort, tmp_path):
+    # Two regions without a label: the split of the labelled units must not change.
+    labels = pd.read_csv(cohort.labels).iloc[2:]
+    labels.to_csv(tmp_path / "labels.csv", index=False)
+    dm = _datamodule(
+        cohort,
+        tmp_path,
+        feature_reducer={"name": "pca", "n_components": 1, "fit_on": "train"},
+        labels={"file": str(tmp_path / "labels.csv"), "patient_column": "patient_id"},
+    )
+    dm.prepare_data()
+    dm.setup()
+    train = [e.region_id for e in dm.dataset_train.entries]
+    area = pd.concat(pd.read_csv(cohort.manifest.parent / f"{r}.csv") for r in train)["area"]
+    mean = ProcessedIndex.read(tmp_path / "processed").feature_reducer["state"]["mean"]
+    assert mean == pytest.approx([area.mean()])
 
 
 def test_train_fitted_reducer_is_refused_for_explicit_splits(cohort, tmp_path):

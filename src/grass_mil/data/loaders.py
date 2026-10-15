@@ -7,12 +7,14 @@ columns are read is described by one :class:`InputConfig` for all formats.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
+
+from grass_mil.utils import checked
 
 __all__ = ["CellTable", "InputConfig", "load_cell_table", "load_polygons", "input_type_of"]
 
@@ -30,9 +32,11 @@ class InputConfig:
             ``None`` reads ``coord_columns`` from ``colData``.
         cell_id_column: Column of cell ids (``None``: row names / row number).
         cell_type_column: Column of cell-type labels (``None``: no cell types).
-        features: Continuous node features: ``"all"`` (every remaining CSV
-            column, every h5ad variable / SCE feature), a list of names, or
-            ``None`` / ``[]`` for none (cell type only).
+        features: Continuous node features: ``"all"`` (every remaining
+            numeric CSV column, every h5ad variable / SCE feature), a list of
+            names, or ``None`` / ``[]`` for none (cell type only). Name an id
+            column in ``cell_id_column`` so that ``all`` does not take it for a
+            feature.
         h5ad_layer: Read h5ad features from this layer instead of ``X``.
         sce_assay: SCE assay name (``None``: the first assay).
         sep: CSV separator (``.tsv`` files always use a tab).
@@ -50,10 +54,7 @@ class InputConfig:
 
     @classmethod
     def from_dict(cls, cfg: Mapping[str, Any] | None) -> InputConfig:
-        cfg = dict(cfg or {})
-        unknown = set(cfg) - {f.name for f in fields(cls)}
-        if unknown:
-            raise ValueError(f"Unknown data.input keys: {sorted(unknown)}")
+        cfg = checked(cls, cfg, "data.input")
         if "coord_columns" in cfg:
             cfg["coord_columns"] = tuple(cfg["coord_columns"])
         features = cfg.get("features", "all")
@@ -75,15 +76,6 @@ class CellTable:
     def __len__(self) -> int:
         return int(self.coords.shape[0])
 
-    def subset(self, indices: np.ndarray) -> CellTable:
-        return CellTable(
-            coords=self.coords[indices],
-            cell_ids=self.cell_ids[indices],
-            cell_types=None if self.cell_types is None else self.cell_types[indices],
-            features=None if self.features is None else self.features[indices],
-            feature_names=list(self.feature_names),
-        )
-
 
 _SUFFIX_TYPES = {".csv": "csv", ".tsv": "tsv", ".txt": "tsv", ".h5ad": "h5ad", ".rds": "sce"}
 
@@ -102,12 +94,17 @@ def input_type_of(path: str | Path, declared: str | None = None) -> str:
 
 def load_cell_table(path: str | Path, kind: str, cfg: InputConfig) -> CellTable:
     if kind in {"csv", "tsv"}:
-        return _load_csv(path, cfg, sep="\t" if kind == "tsv" else cfg.sep)
-    if kind == "h5ad":
-        return _load_h5ad(path, cfg)
-    if kind == "sce":
-        return _load_sce(path, cfg)
-    raise ValueError(f"Unsupported input type '{kind}'.")
+        table = _load_csv(path, cfg, sep="\t" if kind == "tsv" else cfg.sep)
+    elif kind == "h5ad":
+        table = _load_h5ad(path, cfg)
+    elif kind == "sce":
+        table = _load_sce(path, cfg)
+    else:
+        raise ValueError(f"Unsupported input type '{kind}'.")
+    for name, values in (("coordinates", table.coords), ("features", table.features)):
+        if values is not None and not np.isfinite(values).all():
+            raise ValueError(f"{path}: the {name} hold missing or infinite values.")
+    return table
 
 
 def _select_features(names: Sequence[str], cfg: InputConfig, *, exclude: set[str]) -> list[str]:
@@ -133,6 +130,7 @@ def _load_csv(path: str | Path, cfg: InputConfig, *, sep: str) -> CellTable:
     if missing:
         raise ValueError(f"{path} has no column(s) {missing}")
     exclude = {*cfg.coord_columns, cfg.cell_type_column, cfg.cell_id_column}
+    exclude |= {c for c in df.columns if not pd.api.types.is_numeric_dtype(df[c])}
     names = _select_features(list(df.columns), cfg, exclude=exclude)
     return CellTable(
         coords=df[list(cfg.coord_columns)].to_numpy(dtype=np.float64),

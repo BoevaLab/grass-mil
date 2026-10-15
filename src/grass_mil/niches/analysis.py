@@ -18,7 +18,7 @@ from grass_mil.spatial.graph_stats import colocalisation
 from . import figures
 from .attribution import cell_margins
 from .cells import Cells, load_cells
-from .descriptors import DescriptorConfig, niche_descriptors
+from .descriptors import DescriptorConfig, niche_descriptors, short_edges
 from .discovery import BACKGROUND, ClusteringConfig, NicheModel, fit_niches, niche_name
 from .survival import SurvivalConfig, niche_survival
 from .tables import niche_table, unit_niche_shares
@@ -59,7 +59,7 @@ def analyse_niches(
     enrichment_threshold: float = 1.5,
     n_boot: int = 2000,
 ) -> NicheAnalysis:
-    cells = load_cells(cache, units)
+    cells = load_cells(cache, units, spaces=[clustering.space])
     missing = [u for u in units if u not in cells.targets]
     if missing:
         raise ValueError(
@@ -68,7 +68,7 @@ def analyse_niches(
     margin = cell_margins(
         cells.instance_logits,
         cells.attention_logits,
-        cells.head_bias,
+        cells.reference_logits,
         cells.unit_of_cell,
         positive_class=positive_class,
     )
@@ -88,7 +88,11 @@ def analyse_niches(
     )
     shares = unit_niche_shares(niches, cells)
     named = [n for n in table["niche"] if n != "Background"]
-    coloc = colocalisation(np.where(niches == BACKGROUND, -1, niches - 1), cells.edges, len(named))
+    coloc = colocalisation(
+        np.where(niches == BACKGROUND, -1, niches - 1),
+        short_edges(cells, descriptors.max_edge_length),
+        len(named),
+    )
     result = NicheAnalysis(
         cells=cells,
         model=model,
@@ -115,7 +119,7 @@ def analyse_niches(
         outcomes = outcomes[[survival.time_column, survival.event_column]].set_axis(
             ["time", "event"], axis=1
         )
-        patients = shares.groupby([cells.patients.get(u, u) for u in shares.index]).mean()
+        patients = shares.groupby([cells.patient_of(u) for u in shares.index]).mean()
         result.survival = niche_survival(patients, outcomes, survival)
     return result
 
@@ -211,7 +215,11 @@ def _figures(result: NicheAnalysis, out: Path, *, positive_name: str, render_uni
         )
     if "cross_l" in desc:
         figures.pair_heatmaps(
-            desc["cross_l"], "centred_l", names, fig_dir / "cross_l.png", label="L(r*) - r*"
+            desc["cross_l"],
+            "cross_l",
+            names,
+            fig_dir / "cross_l.png",
+            label="cross-L at r* vs random labelling",
         )
     if "contacts" in desc:
         figures.pair_heatmaps(
@@ -237,7 +245,7 @@ def _unit_maps(result: NicheAnalysis, out: Path, n: int) -> None:
     order = unit_margin.sort_values().index.tolist()
     chosen = list(dict.fromkeys(order[-((n + 1) // 2) :][::-1] + order[: n // 2]))
     for unit in chosen:
-        m = cells.unit_of_cell == unit
+        m = cells.slices[unit]
         figures.unit_maps(
             cells.pos[m],
             cells.cell_type[m],

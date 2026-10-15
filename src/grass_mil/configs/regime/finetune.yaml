@@ -11,10 +11,10 @@ finetune:
     attention: 2.0
   head_weight_decay: 1.0e-3 # null = optim.weight_decay
   head_init: probe # probe | random
-  freeze_head: false
   hyperbatch_size: 12 # units per optimizer step
   grad_clip_norm: 1.0
   warmup_steps: 0
+  schedule_epochs: null # epochs the lr schedule spans (null = trainer.max_epochs)
   augmentation:
     drop_edge_p: 0.0
     mask_node_p: 0.0

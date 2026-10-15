@@ -1,18 +1,22 @@
 """Stochastic graph augmentations (pretraining views and fine-tuning regularisation).
 
 All functions take an explicit ``torch.Generator`` (so seeded runs are
-reproducible) and return a new batch instead of modifying their input. Edges
-are always dropped in both directions together, so the graph stays undirected.
-A masked node keeps its place in the graph, its features are zeroed and its
-cell type is set to the encoder's "unassigned" code.
+reproducible) and return a new batch instead of modifying their input. Each
+direction of an edge is drawn with the drop probability ``p`` and the edge is
+kept only when both directions are, so the graph stays undirected and an
+undirected edge is dropped with probability ``1 - (1 - p)^2``. A masked node
+keeps its place in the graph, its features are zeroed and its cell type is set
+to the encoder's "unassigned" code.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Sequence
 
 import torch
+
+from grass_mil.utils import checked
 
 __all__ = [
     "PretrainViews",
@@ -68,8 +72,8 @@ def degree_importance(edge_index: torch.Tensor, num_nodes: int) -> torch.Tensor:
 def drop_importance(batch, *, mu: float, p_lambda: float, unassigned_index: int | None, generator):
     """Mask low-degree nodes and drop low-importance edges.
 
-    The drop probability of a node (or edge) with importance ``s`` is
-    ``min((1 - s) * mu, p_lambda)``; an edge's importance is the mean of its
+    The drop probability of a node (or edge direction) with importance ``s``
+    is ``min((1 - s) * mu, p_lambda)``; an edge's importance is the mean of its
     end points', renormalised the same way.
     """
     if not (0.0 < mu <= 1.0 and 0.0 < p_lambda <= 1.0):
@@ -90,7 +94,7 @@ def drop_importance(batch, *, mu: float, p_lambda: float, unassigned_index: int 
 
 
 def drop_edges(batch, *, p: float, generator):
-    """Drop each undirected edge with probability ``p``."""
+    """Drop each edge direction with probability ``p``, and an edge with either direction."""
     if p <= 0.0 or batch.edge_index.numel() == 0:
         return batch
     out = batch.clone()
@@ -134,10 +138,7 @@ class PretrainViews:
 
     @classmethod
     def from_dict(cls, cfg: Mapping[str, Any] | None) -> PretrainViews:
-        cfg = dict(cfg or {})
-        unknown = set(cfg) - {f.name for f in fields(cls)}
-        if unknown:
-            raise ValueError(f"Unknown pretrain.augmentation keys: {sorted(unknown)}")
+        cfg = checked(cls, cfg, "pretrain.augmentation")
         cfg["noise_features"] = tuple(cfg.get("noise_features") or ())
         return cls(**cfg)
 
@@ -159,7 +160,8 @@ class PretrainViews:
 
 @dataclass(frozen=True)
 class FinetuneAugmentation:
-    """Uniform edge drop and node masking during fine-tuning (both off by default)."""
+    """Uniform edge drop (per direction, see above) and node masking during fine-tuning
+    (both off by default)."""
 
     drop_edge_p: float = 0.0
     mask_node_p: float = 0.0
@@ -167,10 +169,7 @@ class FinetuneAugmentation:
 
     @classmethod
     def from_dict(cls, cfg: Mapping[str, Any] | None) -> FinetuneAugmentation:
-        cfg = dict(cfg or {})
-        unknown = set(cfg) - {f.name for f in fields(cls)}
-        if unknown:
-            raise ValueError(f"Unknown finetune.augmentation keys: {sorted(unknown)}")
+        cfg = checked(cls, cfg, "finetune.augmentation")
         return cls(**cfg)
 
     @property

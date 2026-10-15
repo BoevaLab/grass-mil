@@ -7,22 +7,21 @@ from typing import Sequence
 
 import numpy as np
 
-from grass_mil.data.labels import class_index
 from grass_mil.inference.cell_cache import CellCache
 
 __all__ = ["Cells", "load_cells", "resolve_units"]
 
-SPACES = ("attention", "embedding")
+SPACES = {"attention": "attention_space", "embedding": "embedding"}
 
 
 @dataclass
 class Cells:
     units: list[str]
     unit_of_cell: np.ndarray  # (N,) unit id of every cell
-    space: dict[str, np.ndarray]  # "attention" / "embedding" -> (N, d)
+    space: dict[str, np.ndarray]  # the loaded spaces: "attention" / "embedding" -> (N, d)
     instance_logits: np.ndarray  # (N, C)
     attention_logits: np.ndarray  # (N, C)
-    head_bias: np.ndarray  # (C,)
+    reference_logits: np.ndarray  # (C,) the model's mean instance logit
     cell_type: np.ndarray  # (N,) int (-1 without cell types)
     cell_type_names: list[str]
     pos: np.ndarray  # (N, 2)
@@ -31,13 +30,24 @@ class Cells:
     target_type: str
     targets: dict[str, list[float]] = field(default_factory=dict)  # unit -> targets
     patients: dict[str, str] = field(default_factory=dict)  # unit -> patient
+    slices: dict[str, slice] = field(default_factory=dict)  # unit -> its block of cells
+    edge_slices: dict[str, slice] = field(default_factory=dict)  # unit -> its block of edges
 
     @property
     def n(self) -> int:
         return int(self.unit_of_cell.size)
 
+    def unit_graph(self, unit: str) -> tuple[slice, np.ndarray]:
+        """The unit's block of cells and its edges in local cell indices."""
+        block = self.slices[unit]
+        return block, self.edges[:, self.edge_slices[unit]] - block.start
+
+    def patient_of(self, unit: str) -> str:
+        """The unit's patient (the unit itself without patient information)."""
+        return self.patients.get(unit, unit)
+
     def unit_class(self, unit: str) -> int:
-        return class_index(self.targets[unit][0])
+        return int(self.targets[unit][0])
 
     def positive(self, positive_class: int) -> dict[str, bool]:
         """Which units count as positive (class ``positive_class``; event for survival)."""
@@ -64,53 +74,48 @@ def resolve_units(selection, cache: CellCache) -> list[str]:
     return sorted(read_ids(selection))
 
 
-def load_cells(cache: CellCache, units: Sequence[str]) -> Cells:
-    parts: dict[str, list] = {
-        k: []
-        for k in (
-            "attention",
-            "embedding",
-            "logits",
-            "scores",
-            "ct",
-            "pos",
-            "ids",
-            "edges",
-            "unit",
-        )
+def load_cells(cache: CellCache, units: Sequence[str], spaces: Sequence[str] = ()) -> Cells:
+    """The cells of ``units`` (in that order) with the requested ``spaces``."""
+    unknown = set(spaces) - set(SPACES)
+    if unknown:
+        raise ValueError(f"Unknown cell spaces {sorted(unknown)}; expected {list(SPACES)}.")
+    keys = {
+        "logits": "instance_logits",
+        "scores": "attention_logits",
+        "pos": "pos",
+        "ids": "cell_ids",
+        **{s: SPACES[s] for s in spaces},
     }
+    parts: dict[str, list] = {k: [] for k in [*keys, "ct", "edges", "unit"]}
     offset = 0
-    targets, patients = {}, {}
+    targets, patients, slices, edge_slices = {}, {}, {}, {}
+    n_edges = 0
     for unit in units:
         info = cache.unit_info(unit)
         d = cache.load(unit)
         n = int(d["pos"].shape[0])
-        parts["attention"].append(d["attention_space"].astype(np.float32))
-        parts["embedding"].append(d["embedding"].astype(np.float32))
-        parts["logits"].append(d["instance_logits"])
-        parts["scores"].append(d["attention_logits"])
+        for key, name in keys.items():
+            parts[key].append(d[name])
         parts["ct"].append(d["cell_type"] if "cell_type" in d else np.full(n, -1, dtype=np.int32))
-        parts["pos"].append(d["pos"])
-        parts["ids"].append(d["cell_ids"])
         e = d["edge_index"]
         e = e[:, e[0] < e[1]]
         parts["edges"].append(e + offset)
+        edge_slices[unit] = slice(n_edges, n_edges + e.shape[1])
+        n_edges += e.shape[1]
         parts["unit"].append(np.full(n, unit, dtype=object))
         if info.get("targets") is not None:
             targets[unit] = list(info["targets"])
         if info.get("patient_id") is not None:
             patients[unit] = str(info["patient_id"])
+        slices[unit] = slice(offset, offset + n)
         offset += n
     return Cells(
         units=list(units),
         unit_of_cell=np.concatenate(parts["unit"]),
-        space={
-            "attention": np.concatenate(parts["attention"]),
-            "embedding": np.concatenate(parts["embedding"]),
-        },
+        space={s: np.concatenate(parts[s]).astype(np.float32) for s in spaces},
         instance_logits=np.concatenate(parts["logits"]),
         attention_logits=np.concatenate(parts["scores"]),
-        head_bias=cache.head_bias,
+        reference_logits=cache.reference_logits,
         cell_type=np.concatenate(parts["ct"]).astype(int),
         cell_type_names=cache.cell_types,
         pos=np.concatenate(parts["pos"]),
@@ -119,4 +124,6 @@ def load_cells(cache: CellCache, units: Sequence[str]) -> Cells:
         target_type=str(cache.index.get("target_type", "classification")),
         targets=targets,
         patients=patients,
+        slices=slices,
+        edge_slices=edge_slices,
     )

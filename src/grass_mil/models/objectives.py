@@ -8,7 +8,7 @@
   computed over all bags of an optimisation step; Harrell's concordance index.
   Targets are ``[time, event]``.
 
-Every bag may carry a sample weight; class weights apply to classification.
+Class weights apply to classification.
 """
 
 from __future__ import annotations
@@ -63,37 +63,23 @@ class Objective:
         if self.kind == "survival" and len(task.get("target_columns") or []) != 2:
             raise ValueError("Survival tasks need task.target_columns: [time, event].")
 
-    def __call__(
-        self, logits: torch.Tensor, targets: torch.Tensor, weights: torch.Tensor | None = None
-    ) -> torch.Tensor:
+    def __call__(self, logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
         logits = logits.float()
         if self.kind == "classification":
             weight = self.class_weight.to(logits.device) if self.class_weight is not None else None
             per_bag = F.cross_entropy(
                 logits, targets[:, 0].long(), weight=weight, reduction="none"
             )
-        elif self.kind == "regression":
+            return per_bag.mean()
+        if self.kind == "regression":
             if self.loss_name == "huber":
-                per_bag = F.huber_loss(
-                    logits, targets, delta=self.huber_delta, reduction="none"
-                ).mean(1)
-            else:
-                per_bag = F.mse_loss(logits, targets, reduction="none").mean(1)
-        else:
-            return cox_loss(
-                logits[:, 0], targets[:, 0], targets[:, 1], weights, self.cox_regularization
-            )
-        if weights is not None:
-            per_bag = per_bag * weights.view(-1).to(per_bag.device)
-        return per_bag.mean()
+                return F.huber_loss(logits, targets, delta=self.huber_delta)
+            return F.mse_loss(logits, targets)
+        return cox_loss(logits[:, 0], targets[:, 0], targets[:, 1], self.cox_regularization)
 
 
 def cox_loss(
-    risk: torch.Tensor,
-    time: torch.Tensor,
-    event: torch.Tensor,
-    weights: torch.Tensor | None = None,
-    regularization: float = 0.0,
+    risk: torch.Tensor, time: torch.Tensor, event: torch.Tensor, regularization: float = 0.0
 ) -> torch.Tensor:
     """Negative Cox partial log-likelihood (Breslow ties), averaged over events.
 
@@ -101,20 +87,18 @@ def cox_loss(
     centred (the partial likelihood is invariant to a shared shift).
     """
     order = torch.argsort(time, descending=True)
-    risk, event = risk[order], event[order].float()
-    w = (
-        torch.ones_like(risk)
-        if weights is None
-        else weights.view(-1)[order].float().to(risk.device)
-    )
-    # Cumulative log-sum-exp over the risk set (everyone with time >= t_i).
-    log_risk_set = torch.logcumsumexp(risk + torch.log(w), dim=0)
-    n_events = (event * w).sum()
-    if n_events <= 0:
+    risk, time, event = risk[order], time[order], event[order].float()
+    # Log-sum-exp over the risk set {j: t_j >= t_i}: the running sum up to the
+    # last subject tied with i.
+    _, ties = torch.unique_consecutive(time, return_counts=True)
+    last = torch.repeat_interleave(ties.cumsum(0) - 1, ties)
+    log_risk_set = torch.logcumsumexp(risk, dim=0)[last]
+    n_events = event.sum()
+    if n_events == 0:
         # No observed event in this step: nothing to rank. Keep the graph so the
         # optimiser step is a well-defined no-op.
         return (risk * 0.0).sum()
-    loss = -((risk - log_risk_set) * event * w).sum() / n_events
+    loss = -((risk - log_risk_set) * event).sum() / n_events
     return loss + regularization * (risk**2).mean()
 
 
@@ -128,9 +112,17 @@ def class_weights_from_labels(labels: np.ndarray, num_classes: int) -> torch.Ten
 
 
 def concordance_index(risk: np.ndarray, time: np.ndarray, event: np.ndarray) -> float:
-    """Harrell's C: the fraction of comparable pairs ordered by risk (ties count half)."""
+    """Harrell's C: the fraction of comparable pairs ordered by risk (risk ties count half).
+
+    A pair is comparable when the shorter time is an event; a subject censored
+    at an event time counts as still at risk.
+    """
     risk, time, event = (np.asarray(a, dtype=float).ravel() for a in (risk, time, event))
-    comparable = (event[:, None] > 0) & (time[:, None] < time[None, :])
+    died = event[:, None] > 0
+    later = (time[:, None] < time[None, :]) | (
+        (time[:, None] == time[None, :]) & (event[None, :] == 0)
+    )
+    comparable = died & later
     n = comparable.sum()
     if n == 0:
         return float("nan")

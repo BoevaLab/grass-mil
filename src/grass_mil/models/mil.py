@@ -11,11 +11,13 @@ logit an exact sum of per-instance contributions ``A[i, c] l[i, c]``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 import torch
 from torch import nn
+
+from grass_mil.utils import checked
 
 __all__ = [
     "HeadConfig",
@@ -38,10 +40,7 @@ class HeadConfig:
 
     @classmethod
     def from_dict(cls, cfg: Mapping[str, Any] | None) -> HeadConfig:
-        cfg = dict(cfg or {})
-        unknown = set(cfg) - {f.name for f in fields(cls)}
-        if unknown:
-            raise ValueError(f"Unknown model.head keys: {sorted(unknown)}")
+        cfg = checked(cls, cfg, "model.head")
         return cls(**cfg)
 
 
@@ -56,10 +55,7 @@ class AttentionConfig:
 
     @classmethod
     def from_dict(cls, cfg: Mapping[str, Any] | None) -> AttentionConfig:
-        cfg = dict(cfg or {})
-        unknown = set(cfg) - {f.name for f in fields(cls)}
-        if unknown:
-            raise ValueError(f"Unknown model.attention keys: {sorted(unknown)}")
+        cfg = checked(cls, cfg, "model.attention")
         out = cls(**cfg)
         if out.init not in {"kaiming", "default"}:
             raise ValueError("model.attention.init must be 'kaiming' or 'default'.")

@@ -19,7 +19,7 @@ from grass_mil.models.objectives import (
 )
 from grass_mil.models.probe import ProbeConfig, fit_linear_head
 
-SPEC = InputSpec(feature_dim=1, cell_types=("a", "b", "c"), edge_dim=2)
+SPEC = InputSpec(feature_names=("f",), cell_types=("a", "b", "c"), edge_features=("d", "n"))
 
 
 def _batch(n_graphs: int = 3, n: int = 6) -> Batch:
@@ -93,22 +93,27 @@ def test_class_weights_inverse_frequency_mean_one():
     assert torch.allclose(w.mean(), torch.tensor(1.0)) and w[1] > w[0]
 
 
-def test_cox_loss_matches_the_partial_likelihood_and_ranks():
-    risk = torch.tensor([0.5, -0.2, 1.0, 0.0], requires_grad=True)
-    time = torch.tensor([3.0, 5.0, 1.0, 4.0])
-    event = torch.tensor([1.0, 0.0, 1.0, 1.0])
+def test_cox_loss_is_the_breslow_partial_likelihood_with_ties():
+    risk = torch.tensor([0.5, -0.2, 1.0, 0.0, 0.3, -1.0], requires_grad=True)
+    time = torch.tensor([3.0, 5.0, 1.0, 3.0, 3.0, 1.0])
+    event = torch.tensor([1.0, 0.0, 1.0, 1.0, 0.0, 1.0])
     loss = cox_loss(risk, time, event)
     expected = 0.0
-    for i in range(4):
+    for i in range(6):
         if event[i]:
-            at_risk = time >= time[i]
+            at_risk = time >= time[i]  # every subject tied with i is at risk
             expected -= float(risk[i] - torch.logsumexp(risk[at_risk], 0))
-    assert loss.item() == pytest.approx(expected / 3, rel=1e-5)
+    assert loss.item() == pytest.approx(expected / 4, rel=1e-5)
     loss.backward()
     assert risk.grad is not None and torch.isfinite(risk.grad).all()
-    assert (
-        concordance_index(np.array([3.0, 2, 1]), np.array([1.0, 2, 3]), np.array([1, 1, 1])) == 1.0
-    )
+
+
+def test_concordance_counts_censoring_at_an_event_time_as_at_risk():
+    times, events = np.array([1.0, 2, 3]), np.array([1, 1, 1])
+    assert concordance_index(np.array([3.0, 2, 1]), times, events) == 1.0
+    # Subject 1 is censored at subject 0's event time: the pair is comparable.
+    risk, times, events = np.array([1.0, 2.0]), np.array([1.0, 1.0]), np.array([1, 0])
+    assert concordance_index(risk, times, events) == 0.0
 
 
 def test_survival_objective_needs_time_and_event():
@@ -130,6 +135,19 @@ def test_probe_head_reproduces_the_logistic_decision():
     reference = LogisticRegression(max_iter=3000).fit(StandardScaler().fit_transform(x), y)
     expected = reference.predict_proba(StandardScaler().fit(x).transform(x))[:, 1]
     assert np.allclose(probs, expected, atol=1e-4)
+
+
+def test_cox_probe_ranks_by_the_risk_feature():
+    rng = np.random.default_rng(0)
+    x = rng.normal(size=(300, 4)).astype(np.float32)
+    time = rng.exponential(np.exp(-1.5 * x[:, 0]))
+    event = (rng.random(300) < 0.8).astype(float)
+    weight, bias = fit_linear_head(
+        x, np.stack([time, event], 1), kind="survival", num_logits=1, cfg=ProbeConfig()
+    )
+    risk = (torch.from_numpy(x) @ weight.T + bias)[:, 0].numpy()
+    assert weight[0, 0] > 3 * weight[0, 1:].abs().max()
+    assert concordance_index(risk, time, event) > 0.7
 
 
 def test_augmentations_keep_graphs_undirected_and_inputs_intact():

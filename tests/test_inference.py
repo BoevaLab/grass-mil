@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from grass_mil.inference.cell_cache import CellCache
+from grass_mil.inference.predictions import patient_frame
 from grass_mil.predict import run_predict
 from tests.helpers.cohort import cohort_overrides, compose_cfg
 
@@ -31,6 +32,26 @@ def test_predict_needs_only_the_checkpoint_and_reports_auroc(
     assert sorted(preds["unit_id"]) == sorted(cohort.regions)
     assert json.loads((tmp_path / "metrics.json").read_text())["n_units"] == len(cohort.regions)
     assert len(pd.read_csv(tmp_path / "patient_predictions.csv")) == 6
+
+
+def test_predict_refuses_a_cohort_preprocessed_differently(cohort, nested_cv, tmp_path):
+    ckpt = nested_cv / "outer_0" / "refit" / "checkpoints" / "last.ckpt"
+    overrides = cohort_overrides(cohort, processed="processed_cutoff30")
+    cfg = compose_cfg(
+        "predict", overrides + [f"ckpt_path={ckpt}", "data.graph.neighbor_cutoff=30"], tmp_path
+    )
+    with pytest.raises(ValueError, match="preprocessing"):
+        run_predict(cfg)
+
+
+def test_patient_scores_need_one_target_per_patient():
+    units = pd.DataFrame(
+        {"unit_id": ["a", "b"], "patient_id": ["p", "p"], "prob_0": [0.2, 0.6], "label": [0, 1]}
+    )
+    with pytest.raises(ValueError, match="different targets"):
+        patient_frame(units, "classification")
+    units["label"] = 1
+    assert patient_frame(units, "classification")["prob_0"].tolist() == [pytest.approx(0.4)]
 
 
 def test_extract_writes_every_cell_of_every_unit(cohort, cells_dir):

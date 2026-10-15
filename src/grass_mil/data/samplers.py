@@ -19,13 +19,15 @@ from __future__ import annotations
 
 import math
 import zlib
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 from typing import Any, Iterator, Mapping
 
 import torch
 from torch_geometric.data import Batch, Data
 from torch_geometric.loader import ShaDowKHopSampler
 from torch_geometric.typing import WITH_TORCH_SPARSE
+
+from grass_mil.utils import checked
 
 from .ego_radius import EgoRadiusConfig, EgoRadiusCutoff, radius_for_depth
 from .interior import InteriorCache, InteriorConfig
@@ -66,10 +68,7 @@ class SamplerConfig:
 
     @classmethod
     def from_dict(cls, cfg: Mapping[str, Any] | None) -> SamplerConfig:
-        cfg = dict(cfg or {})
-        unknown = set(cfg) - {f.name for f in fields(cls)}
-        if unknown:
-            raise ValueError(f"Unknown data.sampler keys: {sorted(unknown)}")
+        cfg = checked(cls, cfg, "data.sampler")
         cfg["interior_roots"] = InteriorConfig.from_dict(cfg.get("interior_roots"))
         cfg["ego_radius"] = EgoRadiusConfig.from_dict(cfg.get("ego_radius"))
         out = cls(**cfg)

@@ -13,16 +13,10 @@ import pandas as pd
 from omegaconf import DictConfig, OmegaConf
 
 from grass_mil.inference.cell_cache import CellCache
+from grass_mil.spatial.stats import group_tests, patient_labels
 
 from ..discovery import ClusteringConfig
-from .stages import (
-    cluster_folds,
-    held_out_shares,
-    match_niches,
-    share_tests,
-    shared_basis,
-    transfer_niches,
-)
+from .stages import cluster_folds, held_out_shares, match_niches, shared_basis, transfer_niches
 
 __all__ = ["run_metaclusters", "main", "open_caches"]
 
@@ -59,7 +53,12 @@ def run_metaclusters(cfg: DictConfig) -> dict:
 
     if "cluster" in stages:
         folds = cluster_folds(
-            caches, clustering, positive_class=positive_class, n_boot=int(cfg.n_boot)
+            caches,
+            clustering,
+            positive_class=positive_class,
+            present_threshold=float(cfg.present_threshold),
+            enrichment_threshold=float(cfg.enrichment_threshold),
+            n_boot=int(cfg.n_boot),
         )
         joblib.dump(folds, folds_path)
         folds.records.to_csv(out / "fold_niches.csv", index=False)
@@ -81,12 +80,9 @@ def run_metaclusters(cfg: DictConfig) -> dict:
             scan.to_csv(out / "threshold_scan.csv", index=False)
         units, patients = held_out_shares(folds, records)
         units.to_csv(out / "unit_metacluster_shares.csv")
-        positive = {}
-        for unit, pos in folds.positive.items():
-            positive[folds.patients.get(unit, unit)] = (
-                positive.get(folds.patients.get(unit, unit), False) or pos
-            )
-        share_tests(patients, positive).to_csv(out / "patient_metacluster_tests.csv", index=False)
+        group_tests(patients, patient_labels(folds.positive, folds.patients)).to_csv(
+            out / "patient_metacluster_tests.csv", index=False
+        )
         summary["match"] = {
             "threshold": threshold,
             "n_metaclusters": len(table),

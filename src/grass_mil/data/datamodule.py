@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, fields
 from typing import Any, Mapping, Sequence
 
 import lightning as L
 import torch
 from torch.utils.data import Dataset
+
+from grass_mil.utils import plain
 
 from .graphs import GraphConfig
 from .labels import LabelTable
@@ -26,22 +28,46 @@ log = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class InputSpec:
-    """What a model needs to know about the node and edge inputs."""
+    """The node and edge inputs a model is built for; it scores only data with the same spec.
 
-    feature_dim: int
+    ``preprocessing`` fingerprints the graph settings and the feature basis
+    (PCA), which the names alone do not identify.
+    """
+
+    feature_names: tuple[str, ...]
     cell_types: tuple[str, ...]
-    edge_dim: int
+    edge_features: tuple[str, ...]
+    preprocessing: str = ""
+
+    @property
+    def feature_dim(self) -> int:
+        return len(self.feature_names)
+
+    @property
+    def edge_dim(self) -> int:
+        return len(self.edge_features)
 
     def as_dict(self) -> dict[str, Any]:
-        return {
-            "feature_dim": self.feature_dim,
-            "cell_types": list(self.cell_types),
-            "edge_dim": self.edge_dim,
-        }
+        return {k: list(v) if isinstance(v, tuple) else v for k, v in asdict(self).items()}
 
     @classmethod
     def from_dict(cls, d: Mapping[str, Any]) -> InputSpec:
-        return cls(int(d["feature_dim"]), tuple(d["cell_types"]), int(d["edge_dim"]))
+        return cls(
+            tuple(d["feature_names"]),
+            tuple(d["cell_types"]),
+            tuple(d["edge_features"]),
+            str(d.get("preprocessing", "")),
+        )
+
+    def check_matches(self, other: InputSpec, what: str) -> None:
+        """Raise when ``other`` (the data) differs from this spec (the model)."""
+        differing = [f.name for f in fields(self) if getattr(self, f.name) != getattr(other, f.name)]
+        if differing:
+            raise ValueError(
+                f"{what} was built for other inputs than this cohort's ({', '.join(differing)} "
+                "differ). Use the model's cell types, features, graph settings and, for PCA "
+                "features, data.feature_reducer.state_from."
+            )
 
 
 class GraphUnitDataset(Dataset):
@@ -74,6 +100,13 @@ class GraphUnitDataset(Dataset):
         if label_id is not None:
             data.graph_y = torch.from_numpy(self.labels.target(label_id)).view(1, -1)
         return data
+
+    def select(self, ids: Sequence[str] | None) -> GraphUnitDataset:
+        """The units matching any of ``ids`` (unit, region or sample ids); all for ``None``."""
+        if ids is None:
+            return self
+        wanted = set(map(str, ids))
+        return GraphUnitDataset([e for e in self.entries if e.ids & wanted], self.labels)
 
 
 class SpatialOmicsDataModule(L.LightningDataModule):
@@ -108,7 +141,10 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         force_precompute: bool = False,
     ) -> None:
         super().__init__()
-        self.save_hyperparameters(_plain(locals()), logger=False)
+        self.save_hyperparameters(
+            {k: plain(v) for k, v in locals().items() if k not in ("self", "__class__")},
+            logger=False,
+        )
         self.build_cfg = BuildConfig(
             unit=str(unit),
             coord_scale_um=float(coord_scale_um),
@@ -159,90 +195,98 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         return self.labels
 
     def prepare_data(self) -> None:
-        reducer = self.build_cfg.feature_reducer
-        train_fn = self._random_assignment if reducer.fit_on == "train" else None
-        split_key = repr(sorted(self.split_cfg.items())) if train_fn else ""
+        fit_on_train = self.build_cfg.feature_reducer.fit_on == "train"
         build_graphs(
             self.manifest_path,
             self.processed_dir,
             self.build_cfg,
             force=self.force_precompute,
-            training_units=(lambda units: {u for u, s in train_fn(units).items() if s == "train"})
-            if train_fn
-            else None,
-            split_key=split_key,
+            # The same units and split as setup() draws, so PCA sees training cells only.
+            training_units=(
+                (lambda units: set(self._split(self._usable(units))["train"]))
+                if fit_on_train
+                else None
+            ),
+            split_key=repr(sorted(self.split_cfg.items())) if fit_on_train else "",
         )
         # A forced rebuild happens once per process, not once per setup().
         self.force_precompute = False
 
-    def _group_of(self, entry: UnitEntry) -> str:
+    def _usable(self, units: Sequence[UnitEntry]) -> list[UnitEntry]:
+        """The units a run uses: every unit, or only labelled ones with ``labelled_only``."""
+        labels = self.read_labels()
+        if not self.labelled_only or labels is None:
+            return list(units)
+        labelled = [u for u in units if labels.resolve(u.unit_id, u.region_id, u.sample_id)]
+        if len(labelled) < len(units):
+            log.warning(f"{len(units) - len(labelled)} unit(s) have no label and are skipped.")
+        return labelled
+
+    def group_of(self, entry: UnitEntry) -> str:
+        """The unit's patient, or its region when the labels name no patient."""
         labels = self.read_labels()
         label_id = (
             labels.resolve(entry.unit_id, entry.region_id, entry.sample_id) if labels else None
         )
-        if labels is not None and label_id is not None and self.labels_cfg.get("patient_column"):
+        if label_id is not None and self.labels_cfg.get("patient_column"):
             return labels.patient(label_id)
         return entry.region_id
 
-    def _random_assignment(self, units: Sequence[UnitEntry]) -> dict[str, str]:
-        groups = {u.unit_id: self._group_of(u) for u in units}
-        # Stratify by class when every group's units share one integer class.
-        strata = None
+    def _strata(self, units: Sequence[UnitEntry], groups: Mapping[str, str]) -> dict | None:
+        """The class of every group, when each group has one integer class (at most 10)."""
         labels = self.read_labels()
-        if labels is not None:
-            classes: dict[str, set[float]] = {}
-            for u in units:
-                label_id = labels.resolve(u.unit_id, u.region_id, u.sample_id)
-                if label_id is not None:
-                    value = float(labels.targets.loc[label_id].iloc[0])
-                    classes.setdefault(groups[u.unit_id], set()).add(value)
-            single = all(len(v) == 1 for v in classes.values())
-            values = {g: next(iter(v)) for g, v in classes.items()} if single else {}
-            discrete = all(float(v).is_integer() for v in values.values())
-            if (
-                values
-                and discrete
-                and len(values) == len(set(groups.values()))
-                and len(set(values.values())) <= 10
-            ):
-                strata = {g: str(v) for g, v in values.items()}
-        ratios = self.split_cfg.get("ratios", (0.8, 0.1, 0.1))
-        return random_split(groups, ratios, int(self.split_cfg.get("seed", 0)), strata)
+        if labels is None:
+            return None
+        values: dict[str, set[float]] = {}
+        for u in units:
+            label_id = labels.resolve(u.unit_id, u.region_id, u.sample_id)
+            value = float(labels.targets.loc[label_id].iloc[0]) if label_id else float("nan")
+            values.setdefault(groups[u.unit_id], set()).add(value)
+        classes = {g: next(iter(v)) for g, v in values.items() if len(v) == 1}
+        if len(classes) < len(values) or not all(float(c).is_integer() for c in classes.values()):
+            return None
+        return {g: str(c) for g, c in classes.items()} if len(set(classes.values())) <= 10 else None
 
-    def _members(self, units: Sequence[UnitEntry]) -> dict[str, list[UnitEntry]]:
-        if not self._explicit():
-            assignment = self._random_assignment(units)
-            return {
-                s: [u for u in units if assignment[u.unit_id] == s]
-                for s in ("train", "val", "test")
-            }
-        out: dict[str, list[UnitEntry]] = {}
-        for split in ("train", "val", "test"):
-            ids = read_ids(self.split_cfg.get(split)) or []
-            wanted = set(ids)
-            out[split] = [u for u in units if {u.unit_id, u.region_id, u.sample_id} & wanted]
-            found = {i for u in out[split] for i in (u.unit_id, u.region_id, u.sample_id)}
-            missing = sorted(wanted - found)
-            if missing:
-                raise ValueError(
-                    f"data.split.{split} names {len(missing)} id(s) with no processed unit "
-                    f"(first: {missing[:5]})."
-                )
-        return out
+    def _split(self, units: Sequence[UnitEntry]) -> dict[str, list[str]]:
+        """Unit ids of the train, val and test splits."""
+        if self._explicit():
+            out, seen = {}, {}
+            for split in ("train", "val", "test"):
+                wanted = set(read_ids(self.split_cfg.get(split)) or [])
+                members = [u for u in units if u.ids & wanted]
+                missing = sorted(wanted - {i for u in members for i in u.ids})
+                if missing:
+                    raise ValueError(
+                        f"data.split.{split} names {len(missing)} id(s) with no processed unit "
+                        f"(first: {missing[:5]})."
+                    )
+                for u in members:
+                    if u.unit_id in seen:
+                        raise ValueError(
+                            f"Unit {u.unit_id} is in both data.split.{seen[u.unit_id]} and "
+                            f"data.split.{split}."
+                        )
+                    seen[u.unit_id] = split
+                out[split] = [u.unit_id for u in members]
+            return out
+        groups = {u.unit_id: self.group_of(u) for u in units}
+        assignment = random_split(
+            groups,
+            self.split_cfg.get("ratios", (0.8, 0.1, 0.1)),
+            int(self.split_cfg.get("seed", 0)),
+            self._strata(units, groups),
+        )
+        return {s: [u for u, a in assignment.items() if a == s] for s in ("train", "val", "test")}
 
     def setup(self, stage: str | None = None) -> None:
         self.index = ProcessedIndex.read(self.processed_dir)
         labels = self.read_labels()
-        units = self.index.units
-        if self.labelled_only and labels is not None:
-            labelled = [u for u in units if labels.resolve(u.unit_id, u.region_id, u.sample_id)]
-            if len(labelled) < len(units):
-                log.warning(f"{len(units) - len(labelled)} unit(s) have no label and are skipped.")
-            units = labelled
-        members = self._members(units)
-        self.dataset_train = GraphUnitDataset(members["train"], labels)
-        self.dataset_val = GraphUnitDataset(members["val"], labels)
-        self.dataset_test = GraphUnitDataset(members["test"], labels)
+        units = self._usable(self.index.units)
+        by_id = {u.unit_id: u for u in units}
+        split = self._split(units)
+        self.dataset_train = GraphUnitDataset([by_id[u] for u in split["train"]], labels)
+        self.dataset_val = GraphUnitDataset([by_id[u] for u in split["val"]], labels)
+        self.dataset_test = GraphUnitDataset([by_id[u] for u in split["test"]], labels)
 
     def all_units(self) -> GraphUnitDataset:
         """Every processed unit (labelled or not), regardless of the split."""
@@ -273,9 +317,10 @@ class SpatialOmicsDataModule(L.LightningDataModule):
         if self.index is None:
             self.index = ProcessedIndex.read(self.processed_dir)
         return InputSpec(
-            feature_dim=len(self.index.feature_names),
+            feature_names=tuple(self.index.feature_names),
             cell_types=tuple(self.index.cell_types),
-            edge_dim=len(self.index.edge_features),
+            edge_features=tuple(self.index.edge_features),
+            preprocessing=self.index.preprocessing,
         )
 
     # ---------------------------------------------------------------- loaders
@@ -315,20 +360,3 @@ class SpatialOmicsDataModule(L.LightningDataModule):
 
     def test_dataloader(self) -> EgoGraphLoader:
         return self.loader(self.dataset_test)
-
-    def predict_dataloader(self) -> EgoGraphLoader:
-        return self.loader(self.dataset_test)
-
-
-def _plain(values: dict[str, Any]) -> dict[str, Any]:
-    """Init arguments as plain Python containers (checkpoint-safe hyperparameters)."""
-    from omegaconf import DictConfig, ListConfig, OmegaConf
-
-    out = {}
-    for key, value in values.items():
-        if key in ("self", "__class__"):
-            continue
-        if isinstance(value, (DictConfig, ListConfig)):
-            value = OmegaConf.to_container(value, resolve=True)
-        out[key] = value
-    return out

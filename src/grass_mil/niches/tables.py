@@ -42,7 +42,8 @@ def niche_table(
     * ``association``: fraction of the niche's cells that come from positive
       units (cell-weighted; compare with ``base_rate``);
     * ``margin`` [``margin_lo``, ``margin_hi``]: mean over units of the mean
-      cell margin within the niche, with a 95% bootstrap interval over units;
+      cell margin within the niche, with a 95% bootstrap interval that
+      resamples patients (units of one patient are not independent);
     * ``sign_consistency``: fraction of those units where the niche's margin
       has the sign of the overall margin;
     * ``frac_<cell type>``: composition; ``enriched``: cell types over-represented
@@ -60,7 +61,12 @@ def niche_table(
     ):
         m = niches == niche
         per_unit = pd.Series(margin[m]).groupby(cells.unit_of_cell[m]).mean()
-        mean, lo, hi = bootstrap_mean(per_unit.to_numpy(), n_boot=n_boot, seed=seed)
+        mean, lo, hi = bootstrap_mean(
+            per_unit.to_numpy(),
+            clusters=[cells.patient_of(u) for u in per_unit.index],
+            n_boot=n_boot,
+            seed=seed,
+        )
         row = {
             "niche": niche_name(niche),
             "niche_id": int(niche),

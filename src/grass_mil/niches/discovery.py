@@ -13,10 +13,12 @@ the Background.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
 import numpy as np
+
+from grass_mil.utils import checked
 
 __all__ = ["ClusteringConfig", "NicheModel", "fit_niches", "niche_name", "BACKGROUND"]
 
@@ -55,10 +57,7 @@ class ClusteringConfig:
 
     @classmethod
     def from_dict(cls, cfg: Mapping[str, Any] | None) -> ClusteringConfig:
-        cfg = dict(cfg or {})
-        unknown = set(cfg) - {f.name for f in fields(cls)}
-        if unknown:
-            raise ValueError(f"Unknown clustering keys: {sorted(unknown)}")
+        cfg = checked(cls, cfg, "clustering")
         out = cls(**cfg)
         if out.space not in ("attention", "embedding"):
             raise ValueError("clustering.space must be 'attention' or 'embedding'.")
@@ -109,7 +108,6 @@ def fit_niches(
     cell ``margin`` in the unit (the statistic the niche table reports).
     """
     import pandas as pd
-
     from sklearn.cluster import HDBSCAN, KMeans
     from sklearn.decomposition import PCA
     from sklearn.neighbors import KNeighborsClassifier
@@ -142,8 +140,11 @@ def fit_niches(
         raw = KMeans(n_clusters=cfg.n_clusters, random_state=cfg.seed, n_init=10).fit_predict(z)
     assigner = KNeighborsClassifier(n_neighbors=max(1, min(cfg.assign_k, sample.size))).fit(z, raw)
     model = NicheModel(cfg, pca, assigner, {}, sample)
-    labels = assigner.predict(model.coordinates(x))
+    labels = np.empty(n, dtype=raw.dtype)
     labels[sample] = raw
+    rest = np.setdiff1d(np.arange(n), sample)
+    if rest.size:
+        labels[rest] = assigner.predict(model.coordinates(x[rest]))
     # Number the clusters by margin, most positive first; -1 is Background.
     per_unit = pd.Series(margin).groupby([labels, unit_of_cell]).mean()
     score = per_unit.groupby(level=0).mean()

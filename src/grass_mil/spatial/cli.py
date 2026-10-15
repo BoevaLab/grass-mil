@@ -13,9 +13,9 @@ from omegaconf import DictConfig, OmegaConf
 from grass_mil.inference.cell_cache import CellCache
 from grass_mil.niches.cells import load_cells, resolve_units
 
-from .graph_stats import contact_counts, cross_l, enrichment_zscores
+from .graph_stats import contact_counts, cross_l, enrichment
 from .neighbourhoods import fit_neighbourhoods, window_composition
-from .stats import clr, mann_whitney_table, patient_mean
+from .stats import clr, group_tests, patient_labels
 
 __all__ = ["run_spatial_stats", "main"]
 
@@ -28,6 +28,8 @@ def run_spatial_stats(cfg: DictConfig) -> Path:
     bad = set(cfg.analyses) - set(ANALYSES)
     if bad:
         raise ValueError(f"Unknown analyses {sorted(bad)}; expected {list(ANALYSES)}.")
+    if cfg.compare_by not in ("patient", "unit"):
+        raise ValueError("compare_by must be 'patient' or 'unit'.")
     out = Path(str(cfg.output_dir))
     out.mkdir(parents=True, exist_ok=True)
     cache = CellCache.open(str(cfg.cells_dir))
@@ -41,59 +43,46 @@ def run_spatial_stats(cfg: DictConfig) -> Path:
     labels = to_group[cells.cell_type]
     g = len(groups)
     reference = [groups.index(r) for r in cfg.reference]
-    partners = [j for j in range(g) if j not in reference]
+    reference_pairs = [(r, p) for r in reference for p in range(g)]
+    radii = np.asarray(cfg.radii, dtype=float)
     rng = np.random.default_rng(int(cfg.seed))
-    positive = cells.positive(int(cfg.positive_class))
-    if cfg.compare_by not in ("patient", "unit"):
-        raise ValueError("compare_by must be 'patient' or 'unit'.")
     if cfg.compare_by == "patient":
-        patient_of = {u: cells.patients.get(u, u) for u in cells.units}
+        patient_of = {u: cells.patient_of(u) for u in cells.units}
     else:
         patient_of = {u: u for u in cells.units}
-    # A patient is positive when any of its units is.
-    y = pd.Series(dtype=int)
-    for u in cells.units:
-        y[patient_of[u]] = max(int(positive[u]), int(y.get(patient_of[u], 0)))
+        if len({cells.patient_of(u) for u in cells.units}) < len(cells.units):
+            log.warning(
+                "compare_by=unit tests units of the same patient as independent samples; "
+                "the p-values are anti-conservative."
+            )
+    y = patient_labels(cells.positive(int(cfg.positive_class)), patient_of)
 
     per_unit: dict[str, dict[str, dict[str, float]]] = {a: {} for a in cfg.analyses}
     windows = []
     for unit in cells.units:
-        m = np.flatnonzero(cells.unit_of_cell == unit)
-        local = np.full(cells.n, -1)
-        local[m] = np.arange(m.size)
-        e = cells.edges[:, np.isin(cells.edges[0], m)]
-        e = local[e]
-        lab, pos = labels[m], cells.pos[m]
+        block, edges = cells.unit_graph(unit)
+        lab, pos = labels[block], cells.pos[block]
         if "enrichment" in cfg.analyses:
-            z = enrichment_zscores(lab, e, g, n_perms=int(cfg.n_perms), rng=rng)
+            _, ratio = enrichment(lab, edges, g, n_perms=int(cfg.n_perms), rng=rng)
             per_unit["enrichment"][unit] = {
-                f"{groups[a]}|{groups[b]}": z[a, b] for a in range(g) for b in range(a, g)
+                f"{groups[a]}|{groups[b]}": ratio[a, b] for a in range(g) for b in range(a, g)
             }
         if "neighbourhoods" in cfg.analyses:
             windows.append(window_composition(pos, lab, g, int(cfg.neighbourhoods.window)))
         if "contacts" in cfg.analyses and reference:
-            counts = contact_counts(lab, e, g)
-            ref_ends = counts[reference].sum()
+            counts = contact_counts(lab, edges, g)
+            ends = counts[reference].sum()
             per_unit["contacts"][unit] = {
-                f"{groups[r]}->{groups[p]}": counts[r, p] / ref_ends if ref_ends else np.nan
-                for r in reference
-                for p in range(g)
+                f"{groups[r]}->{groups[p]}": counts[r, p] / ends if ends else np.nan
+                for r, p in reference_pairs
             }
         if "cross_l" in cfg.analyses and reference:
-            row = {}
-            for r in reference:
-                for p in [*reference, *partners]:
-                    if (lab == r).sum() >= 2 and (lab == p).sum() >= 2:
-                        curve = cross_l(
-                            pos, lab == r, lab == p, np.asarray(cfg.radii, dtype=float)
-                        )
-                        row.update(
-                            {
-                                f"{groups[r]}->{groups[p]}@{rad:g}": v
-                                for rad, v in zip(cfg.radii, curve)
-                            }
-                        )
-            per_unit["cross_l"][unit] = row
+            curves = cross_l(pos, lab, reference_pairs, radii)
+            per_unit["cross_l"][unit] = {
+                f"{groups[r]}->{groups[p]}@{radius:g}": value
+                for (r, p), curve in zip(reference_pairs, curves)
+                for radius, value in zip(radii, curve)
+            }
     if "neighbourhoods" in cfg.analyses:
         n_cn = int(cfg.neighbourhoods.n)
         cn_labels, centres = fit_neighbourhoods(
@@ -113,12 +102,12 @@ def run_spatial_stats(cfg: DictConfig) -> Path:
         frame = pd.DataFrame.from_dict(rows, orient="index")
         frame.index.name = "unit_id"
         frame.to_csv(out / f"{analysis}_per_unit.csv")
-        patients = patient_mean(frame, patient_of)
+        compared = frame.groupby([patient_of[u] for u in frame.index]).mean()
         if analysis == "neighbourhoods":
-            patients = pd.DataFrame(
-                clr(patients.to_numpy()), index=patients.index, columns=patients.columns
+            compared = pd.DataFrame(
+                clr(compared.to_numpy()), index=compared.index, columns=compared.columns
             )
-        mann_whitney_table(patients, y, min_per_group=int(cfg.min_patients)).to_csv(
+        group_tests(compared, y, min_per_group=int(cfg.min_patients)).to_csv(
             out / f"{analysis}_tests.csv", index=False
         )
     log.info(f"Spatial statistics of {len(cells.units)} units written to {out}")

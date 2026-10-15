@@ -28,10 +28,15 @@ grass-mil-niches cells_dir=<extract>/cells/fold0
 (`units=held_out`; or `all`, or a list).
 
 **Margin.** Within a unit, a cell's contribution to class `c` is
-`A[i, c] (l[i, c] - b_c)`, where `b_c` is the head bias; summed over the unit it
-gives the unit's logit minus the bias. A cell's margin is its contribution to
-the positive class minus its contribution to the other class(es), multiplied
-by the unit's number of cells so that units of different size are comparable.
+`A[i, c] (l[i, c] - r_c)`, where `r_c` is the model's mean instance logit over
+every cell of the cohort (recorded by `grass-mil-extract`); summed over the unit
+it gives the unit's logit minus `r_c`. A positive contribution means the cell
+pushes its unit above what an average cell would. (The head bias is not used as
+the reference: the embeddings are not centred, so `l - b` carries a
+model-specific offset that would set the sign of every margin.) A cell's margin
+is its contribution to the positive class minus its contribution to the other
+class(es), multiplied by the unit's number of cells so that units of different
+size are comparable.
 
 **Clustering.** Cells are clustered in the attention space
 (`clustering.space=attention`; `embedding` uses the encoder embedding, for which
@@ -63,7 +68,9 @@ positive.
   (cell-weighted; compare with the base rate in the report). For survival
   models a positive unit is one with an event;
 * `margin` [`margin_lo`, `margin_hi`]: the mean over units of the niche's mean
-  cell margin in the unit, with a 95% bootstrap interval over units;
+  cell margin in the unit, with a 95% bootstrap interval that resamples
+  patients (units of one patient are not independent; no interval with a
+  single patient);
   `sign_consistency`: the fraction of units where it has that sign;
 * `composition`, `enriched` (cell types over-represented more than
   `enrichment_threshold` times) and `frac_<cell type>`.
@@ -76,10 +83,10 @@ between them) and averaged over the units where the niche has at least
 
 | File | Statistic |
 |---|---|
-| `moran.csv` | Moran's I of every cell type (are cells of the type clustered within the niche?), mean and s.e.m. over units, permutation p-value and BH q-value |
-| `enrichment.csv` | neighbourhood-enrichment z-score of every cell-type pair (label permutations over the fixed graph) |
-| `cross_l.csv` | Ripley's centred cross-L, `L(r*) - r*`, of every cell-type pair, at the radius `r*` where the pairs deviate most from randomness |
-| `contacts.csv` | `log2` of a pair's share of the niche's contacts over its share of all contacts; masked below `descriptors.min_contacts` |
+| `moran.csv` | Moran's I of every cell type (are cells of the type clustered within the niche?), mean and s.e.m. over units, and a z-test of the mean against its expectation under random labelling (exact moments in every unit), with BH q-values over niches and types |
+| `enrichment.csv` | neighbourhood enrichment of every cell-type pair against label permutations over the fixed graph: the z-score (which grows with the number of edges) and the size-free `log2` observed/expected ratio |
+| `cross_l.csv` | Ripley's cross-L of every cell-type pair relative to random labelling of the niche's cells, `L_ab(r*) - L(r*)` (positive: `b` lies closer to `a` than cells in general do), at the radius `r*` where the pairs deviate most |
+| `contacts.csv` | `log2` of a pair's share of the niche's contacts over its share of all contacts; masked below `descriptors.min_contacts`. It reflects the niche's composition as well as its arrangement: a pair of the niche's main cell type is enriched by composition alone |
 
 ### Figures
 
@@ -96,7 +103,9 @@ niche shares of each patient (the mean over the patient's units) are related
 to survival: a Cox hazard ratio per standard deviation of the log share of
 every niche (`survival_cox.csv`), and with `survival.score=["Niche 1", "-Niche 4"]`
 Kaplan-Meier curves of the score's tertiles with a log-rank test
-(`figures/survival.png`).
+(`figures/survival.png`). A score chosen after looking at the Cox table of the
+same patients is tested on the data that selected it; its log-rank p-value is
+then descriptive.
 
 ## 3. Replication across models (optional)
 
@@ -112,10 +121,11 @@ discovered separately. This step asks which niches recur:
    Hellinger distance of their compositions, with average linkage that never
    merges two niches of the same model; the threshold maximises the number of
    metaclusters found by at least `match.min_models` models. Outputs
-   `metaclusters.csv`, the metacluster shares of every unit and patient-level
-   tests;
+   `metaclusters.csv`, the metacluster shares of every unit (labelled by the
+   model that held it out) and patient-level tests of those shares;
 3. `transfer`: every model labels every unit, giving training versus held-out
-   behaviour and the agreement between models (`transfer/`);
+   behaviour, the agreement between models and consensus shares (`transfer/`;
+   descriptive, since most models trained on most units);
 4. `basis`: one k-means partition of a single model's space, attributed by
    every model (`basis/`).
 
@@ -126,8 +136,12 @@ grass-mil-spatial-stats cells_dir=<extract>/cells/fold0 reference=[tumor]
 ```
 
 Classical statistics of every unit compared between positive and other
-patients (Mann-Whitney on patient means, BH-corrected): neighbourhood
-enrichment of every cell-type pair, the shares of cellular neighbourhoods
+patients (Mann-Whitney on patient means with AUROC, BH-corrected):
+neighbourhood enrichment of every cell-type pair (`log2` observed/expected, so
+units of different size are comparable), the shares of cellular neighbourhoods
 (k-means of every cell's 10-nearest-neighbour composition, CLR-transformed),
-contact fractions and cross-L at fixed radii between the `reference` group(s)
-and the others. `group_map` merges fine cell types into groups first.
+contact fractions and cross-L relative to random labelling at fixed radii
+between the `reference` group(s) and the others. `group_map` merges fine cell
+types into groups first. `compare_by=unit` compares units instead of patients;
+units of one patient are then treated as independent, so use it only when
+every patient has one unit.

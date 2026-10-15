@@ -26,8 +26,10 @@ cell type, plus any continuous features:
 
 `data.input.cell_type_column` names the cell-type column (`null` if there is
 none; the model then uses only the features). `data.input.features` selects the
-continuous node features: `all` (every remaining CSV column, every h5ad/SCE
-feature), a list of names (for example `[area]`), or `null` for cell type only.
+continuous node features: `all` (every remaining numeric CSV column, every
+h5ad/SCE feature), a list of names (for example `[area]`), or `null` for cell
+type only. With `all`, set `data.input.cell_id_column` so that a numeric id
+column is not taken for a feature. Missing or infinite values are refused.
 
 Coordinates are multiplied by `data.coord_scale_um`; every distance setting
 (contact distance, tile size, radii) is in the resulting unit.
@@ -86,7 +88,8 @@ pretraining.
 ## Folds
 
 A JSON list of lists of unit (or region, or sample) ids, one list per outer
-fold, grouped by patient:
+fold, grouped by patient (cross-validation refuses a file that puts a unit or a
+patient in two folds):
 
 ```json
 [["S01_roi1", "S01_roi2", "S07"], ["S02", "S05_roi1"], ["S03", "S04"]]
@@ -110,7 +113,7 @@ directory serves pretraining, every fold and every task.
 
 For high-dimensional features (for example gene expression in `X`),
 `data.feature_reducer.name=pca` projects them onto `n_components` principal
-components fitted on all cells (`fit_on: all`), the training split
-(`fit_on: train`, single random split only) or each sample (`fit_on: sample`).
+components fitted on all cells (`fit_on: all`, label-free) or on the training
+split (`fit_on: train`, single random split only).
 To score a new cohort in the basis of a trained one, set
 `data.feature_reducer.state_from=<trained cohort>/processed/processed_index.json`.

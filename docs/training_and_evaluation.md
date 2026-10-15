@@ -29,7 +29,11 @@ grass-mil-train experiment=my_cohort regime=pretrain trainer=gpu
 BGRL on the ego-graphs of every unit, label-free: two augmented views
 (importance-weighted node and edge dropping, Gaussian noise on
 `pretrain.augmentation.noise_features`), an online encoder with a predictor and
-an exponential-moving-average target encoder. The run writes
+an exponential-moving-average target encoder. Edges are dropped per direction
+and kept only when both directions survive, so an edge with drop probability
+`p` per direction disappears with probability `1 - (1 - p)^2`. Pretraining sees
+every unit, including the ones cross-validation later holds out; it uses no
+label. The run writes
 `checkpoints/last.ckpt` and a checkpoint every 5000 steps
 (`pretrain.total_steps`, default 200 000).
 
@@ -47,15 +51,19 @@ A regime is the training procedure; select it with `regime=<name>`.
 
 The probe: before training, the frozen encoder embeds
 `finetune.probe.roots_per_unit` cells of every training unit, each ego-graph
-inherits its unit's label, and a standardised logistic regression (ridge for
-regression) is folded into the linear head. With uniform attention, the model
-then starts from the mean-pooled probe. Survival models start from a random
-head.
+inherits its unit's label, and a standardised, L2-penalised logistic regression
+(ridge for regression, a Cox model for survival; inverse penalty
+`finetune.probe.C`) is folded into the linear head. The model then starts from
+an attention-weighted average of the probe's per-cell logits. The probe is
+fitted on standardised embeddings, so an encoder whose embeddings barely vary
+(too little pretraining) gives large head weights; the log reports their norm,
+and a smaller `finetune.probe.C` keeps them small.
 
 Every regime trains one bag per step of the dataloader and takes an optimizer
-step every `finetune.hyperbatch_size` units (12), with gradient-norm clipping
-(`finetune.grad_clip_norm`), a cosine learning-rate schedule over the whole run
-and AdamW (`optim.lr` 1e-4). Validation units are scored on a fixed set of
+step every `finetune.hyperbatch_size` units (12; the last step of an epoch takes
+the remaining units), with gradient-norm clipping (`finetune.grad_clip_norm`),
+a cosine learning-rate schedule over the whole run and AdamW (`optim.lr` 1e-4).
+Class labels must be the integers `0..num_classes-1`. Validation units are scored on a fixed set of
 `data.val_roots_per_unit` cells; the checkpoint with the best validation metric
 is kept and training stops early after `task.selection.patience` epochs without
 improvement (after `trainer.min_epochs`).
@@ -82,21 +90,23 @@ and writes `test_predictions.csv` for the test units.
 grass-mil-nested-cv experiment=my_cohort model.init_from_ckpt=<pretrain>/checkpoints/last.ckpt
 ```
 
-For every outer fold of `nested_cv.folds_file`:
+The folds file must keep every patient (or, without a patient column, every
+region) in one fold; the command checks this before training. For every outer
+fold:
 
 1. the other folds form the development set, split into `nested_cv.inner_k`
    (3) inner folds that keep patients together and every class in every fold;
 2. every inner run trains on its training part and records the epoch with the
    best `task.selection.metric` on its validation part;
-3. the model is refitted on the whole development set for the median of those
-   epochs, without validation, and scored once on the held-out fold, on every
-   cell.
+3. the model is refitted on the whole development set with the same
+   learning-rate schedule as the inner runs, stopped at the median of those
+   epochs, without validation, and scored once on the held-out fold.
 
 | Output | Content |
 |---|---|
 | `nested_cv_summary.json` | metric of every outer fold, mean and standard deviation, pooled out-of-fold metrics, patient-level metrics |
 | `oof_predictions.csv` | one row per unit, scored by the model that held it out |
-| `oof_patient_predictions.csv` | the mean of each patient's unit scores |
+| `oof_patient_predictions.csv` | the mean of each patient's unit scores (when every unit of a patient has the same label) |
 | `outer_<i>/refit/checkpoints/last.ckpt` | the model of outer fold `i` |
 
 Runs that finished are reused when the command is repeated
@@ -109,8 +119,11 @@ grass-mil-predict experiment=new_cohort ckpt_path=<run>/checkpoints/last.ckpt
 ```
 
 The model and its ego-graph settings are rebuilt from the checkpoint; `data`
-only needs to describe the cohort (its cell-type vocabulary must match). Every
-unit is scored on all of its cells (`predictions.csv`). With a patient column,
+only needs to describe the cohort. Its cell types, features, edge features,
+graph settings and feature basis must be the model's (for PCA features, reuse
+the basis with `data.feature_reducer.state_from`); the command refuses other
+inputs. Every unit is scored on all the cells training drew roots from, as
+for the test split (`predictions.csv`). With a patient column,
 patients are scored as the mean of their units (`predict.patient_aggregation=mean`)
 or as one bag holding every cell of their units (`merged_bag`). With labels,
 `metrics.json` reports unit- and patient-level metrics.

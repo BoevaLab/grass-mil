@@ -18,7 +18,7 @@ def load_encoder_weights(encoder: torch.nn.Module, path: str | Path) -> None:
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Encoder checkpoint not found: {path}")
-    state = torch.load(path, map_location="cpu", weights_only=False)
+    state = torch.load(path, map_location="cpu", weights_only=True)
     state = state.get("state_dict", state)
     weights = {k[len("encoder.") :]: v for k, v in state.items() if k.startswith("encoder.")}
     if not weights:

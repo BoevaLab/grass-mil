@@ -56,13 +56,13 @@ procedure, and command-line keys override both.
 | `input.reduced_dim` | `null` | SCE coordinates (`null`: `colData` columns) |
 | `input.cell_id_column` | `null` | |
 | `input.cell_type_column` | `cell_type` | `null`: no cell types |
-| `input.features` | `all` | `all`, a list of names, or `null` |
+| `input.features` | `all` | `all` (numeric columns), a list of names, or `null` |
 | `input.h5ad_layer`, `input.sce_assay`, `input.sep` | `null`, `null`, `","` | |
 | `graph.edge_features` | `[log_distance, neighbor]` | also `distance` |
 | `graph.neighbor_cutoff` | `20.0` | contact distance |
 | `graph.log_distance_bounds` | `[2.0, 5.0]` | ln-length range mapped to [0, 1] |
 | `feature_reducer.name` | `identity` | `pca` |
-| `feature_reducer.n_components`, `.fit_on`, `.state_from` | `32`, `all`, `null` | see data preparation |
+| `feature_reducer.n_components`, `.fit_on`, `.state_from` | `32`, `all`, `null` | `fit_on`: `all` or `train`; see data preparation |
 | `labels.file`, `.id_column`, `.patient_column` | `null`, `region_id`, `null` | |
 | `labels.columns` | `task.target_columns` | |
 | `labelled_only` | `true` | skip unlabelled units (pretraining: `false`) |
@@ -121,12 +121,12 @@ procedure, and command-line keys override both.
 | `lr_scales.encoder/head/attention` | `1.0`, `0.01`, `2.0` | multipliers of `optim.lr`; `0` freezes |
 | `head_weight_decay` | `1e-3` | (`null`: `optim.weight_decay`) |
 | `head_init` | `probe` | or `random` |
-| `freeze_head` | `false` | |
 | `hyperbatch_size` | `12` | units per optimizer step |
 | `grad_clip_norm` | `1.0` | |
 | `warmup_steps` | `0` | linear learning-rate warmup |
-| `augmentation.drop_edge_p`, `.mask_node_p` | `0.0`, `0.0` | |
-| `probe.roots_per_unit`, `.C`, `.class_weight` | `96`, `1.0`, `balanced` | |
+| `schedule_epochs` | `null` | epochs the learning-rate schedule spans (`null`: `trainer.max_epochs`; cross-validation refits set it) |
+| `augmentation.drop_edge_p`, `.mask_node_p` | `0.0`, `0.0` | edge drop per direction; node masking |
+| `probe.roots_per_unit`, `.C`, `.class_weight` | `96`, `1.0`, `balanced` | `C`: inverse L2 penalty of the probe |
 | `optim.lr`, `optim.weight_decay` | `1e-4`, `1e-3` | |
 | `trainer.max_epochs`, `.min_epochs` | `25`, `10` | |
 

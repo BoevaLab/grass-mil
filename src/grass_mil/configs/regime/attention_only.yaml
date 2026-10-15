@@ -1,6 +1,6 @@
 # @package _global_
-# Frozen encoder and frozen probe head: only the attention is trained, starting
-# from uniform attention (the mean-pooled probe).
+# Frozen encoder and frozen probe head: only the attention is trained, on top of
+# the probe's per-cell logits.
 defaults:
   - finetune
 
@@ -10,7 +10,6 @@ finetune:
   lr_scales:
     encoder: 0.0
     head: 0.0
-  freeze_head: true
 data:
   sampler:
     roots_per_unit: 512

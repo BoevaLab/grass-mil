@@ -31,6 +31,9 @@ def test_default_regime_is_finetune_with_a_probe_head(cohort, pretrained, tmp_pa
         for line in (tmp_path / "metrics_per_epoch.jsonl").read_text().splitlines()
     ]
     assert len(rows) == 2 and "val/auroc" in rows[0]
+    # The last, smaller hyperbatch is stepped before the epoch is validated.
+    n_train = len(objects["datamodule"].dataset_train)
+    assert rows[0]["step"] == -(-n_train // cfg.finetune.hyperbatch_size)
 
 
 def test_attention_only_trains_nothing_but_the_attention(cohort, pretrained, tmp_path):
@@ -38,7 +41,7 @@ def test_attention_only_trains_nothing_but_the_attention(cohort, pretrained, tmp
         cohort, tmp_path, "regime=attention_only", f"model.init_from_ckpt={pretrained}"
     )
     model = objects["model"]
-    ckpt = torch.load(pretrained, weights_only=False)["state_dict"]
+    ckpt = torch.load(pretrained, weights_only=True)["state_dict"]
     for name, value in model.encoder.state_dict().items():
         assert torch.equal(value.cpu(), ckpt[f"encoder.{name}"])
     assert not any(p.requires_grad for p in model.head.parameters())
@@ -107,7 +110,7 @@ def test_training_without_validation_split(cohort, tmp_path):
 
 
 def test_pretraining_checkpoint_initialises_the_encoder(pretrained):
-    ckpt = torch.load(pretrained, weights_only=False)
+    ckpt = torch.load(pretrained, weights_only=True)
     assert ckpt["input_spec"]["cell_types"] == ["A", "B", "C", "D"]
     assert any(k.startswith("target_encoder.") for k in ckpt["state_dict"])
     assert ckpt["hyper_parameters"]["pretrain"]["total_steps"] == 4
