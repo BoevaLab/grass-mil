@@ -1,0 +1,4 @@
+# Cosine annealing over every optimizer step of the run (after any warmup).
+_target_: torch.optim.lr_scheduler.CosineAnnealingLR
+T_max: auto
+eta_min: 1.0e-7

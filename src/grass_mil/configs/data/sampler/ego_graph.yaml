@@ -1,0 +1,18 @@
+# One bag per unit per step: roots_per_unit ego-graphs of depth `depth`.
+depth: 4 # keep equal to model.encoder.num_layers
+num_neighbors: -1 # -1 = full k-hop neighbourhood
+roots_per_unit: 256
+batch_size: 64 # ego-graphs per batch when scoring
+merge_units: false
+root_weighting: null # null | inverse | sqrt_inverse (by cell-type frequency)
+interior_roots:
+  enabled: false
+  n_hops: null # null = depth
+  hull_tolerance: 1.0
+  keep_largest_component: true
+  cache_dir: null
+ego_radius:
+  enabled: false
+  radius_per_hop: 75.0 # radius = radius_per_hop * depth + radius_offset
+  radius_offset: 55.0
+  keep_root_component: true

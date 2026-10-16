@@ -1,11 +1,10 @@
-# grass-mil-spatial-stats: classical spatial statistics per region, compared
-# between classes at the patient level.
+# grass-mil-spatial-stats (optional): model-free spatial statistics of every unit,
+# compared between positive and other patients.
 #
-#   grass-mil-spatial-stats cells_dir=<extract_out>/cells/<model> \
-#       labels.label_file=labels.csv labels.label_column=STAS labels.patient_column=PATIENT \
-#       reference=[tumor] partners=[myeloid,CD8] infiltrating=[myeloid,CD8]
+#   grass-mil-spatial-stats cells_dir=<extract output>/cells/fold0 reference=[tumor]
 #
-# Any model's cache works: only cell types, positions and the cell graph are used.
+# Only the cell types, positions and the cell graph of the cache are used, so
+# any model's cache of the cohort gives the same result.
 defaults:
   - _self_
   - paths: default
@@ -14,27 +13,21 @@ defaults:
 task_name: spatial_stats
 cells_dir: ???
 output_dir: ${paths.output_dir}
-regions: null # list / .json / .txt of region ids; null = all cached regions
-labels:
-  label_file: ???
-  id_column: REGION_ID
-  label_column: ???
-  patient_column: null
-positive_name: positive
-analyses: [nhood, cn, contacts, crossk]
+units: all # all | held_out | list / file of unit ids
+positive_class: 1
+# Compare patients (the mean over their units; a patient is positive when any of
+# its units is) or individual units (only when every patient has one unit:
+# units of one patient are not independent).
+compare_by: patient # patient | unit
+analyses: [enrichment, neighbourhoods, contacts, cross_l]
 # Optional fine -> coarse cell-type grouping ({fine: group}); identity by default.
 group_map: {}
-reference: [] # reference group(s) for contacts and cross-K (e.g. [tumor]); empty skips both
-partners: null # partner groups (null = every other group)
-infiltrating: [] # groups whose "intra-reference" fraction is reported
-nhood:
-  n_perms: 200
-  backend: numpy # numpy | squidpy
-cn:
-  window_k: 10
-  n_cn: 10
+reference: [] # group(s) whose contacts and cross-L with the other groups are measured
+n_perms: 200 # enrichment permutations
+neighbourhoods:
+  window: 10 # nearest neighbours per window
+  n: 10 # neighbourhood clusters
   sample_size: 200000
-crossk:
-  radii: [20, 50, 100]
+radii: [20.0, 50.0, 100.0] # cross-L radii (coordinate units), relative to random labelling
+min_patients: 10 # per class (patients or units), for a test
 seed: 0
-min_per_group: 10 # patients per class needed for a test

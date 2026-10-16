@@ -1,266 +1,216 @@
-"""Per-cell cache of a trained GRASS-MIL model: the input of niche discovery.
+"""Per-cell outputs of a trained model: the input of niche discovery.
 
-For every region and every cell (the ego-graph rooted at that cell) the cache
-stores the encoder embedding ``E`` (fp16), the per-class instance logits
-``LG``, the raw per-class attention logits ``AR`` and, once per region, the
-head bias, cell types, positions, the cell graph and the region label. One
-directory per model::
+For every unit and every cell (the ego-graph rooted at it) the cache stores
+
+* ``embedding``: the encoder embedding (fp16),
+* ``attention_space``: the attention head's low-dimensional pre-tanh activation,
+* ``instance_logits`` and ``attention_logits``: per-class logits and raw
+  attention scores,
+
+and once per unit the cell types, positions, cell ids and the cell graph::
 
     <cache_dir>/<model>/index.json
-    <cache_dir>/<model>/<region>.npz
+    <cache_dir>/<model>/<unit>.npz
 
-``index.json`` records the model checkpoint, the region list with cell counts,
-the head bias, the cell-type vocabulary and, when known, which regions were
-held out for that model (nested CV). ``CellCache`` reads it back.
+``index.json`` records the checkpoint, the units with their labels and
+patients, the units held out from the model's training (cross-validation), the
+head bias and the cell-type names.
 """
 
 from __future__ import annotations
 
 import json
-import time
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Iterator, Sequence
 
 import numpy as np
 import torch
 
-__all__ = ["CellCache", "extract_cell_cache", "region_npz_path"]
+from grass_mil.data.samplers import EgoGraphLoader, SamplerConfig
 
-_INDEX = "index.json"
+__all__ = ["CellCache", "extract_cells", "scoring_sampler"]
+
+log = logging.getLogger(__name__)
+
+INDEX_NAME = "index.json"
+ARRAYS = ("embedding", "attention_space", "instance_logits", "attention_logits")
 
 
-def region_npz_path(model_dir: Path, region_id: str) -> Path:
-    safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in str(region_id))
-    return model_dir / f"{safe}.npz"
+def _npz_path(model_dir: Path, unit_id: str) -> Path:
+    return model_dir / ("".join(c if c.isalnum() or c in "._-" else "_" for c in unit_id) + ".npz")
 
 
 @dataclass
 class CellCache:
-    """Reader for one model's cache directory."""
+    """Reader of one model's cache directory."""
 
     model_dir: Path
-    index: Dict[str, Any] = field(default_factory=dict)
+    index: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def open(cls, model_dir: str | Path) -> "CellCache":
+    def open(cls, model_dir: str | Path) -> CellCache:
         model_dir = Path(model_dir)
-        index_path = model_dir / _INDEX
-        if not index_path.exists():
-            raise FileNotFoundError(f"No cell cache index at {index_path}")
-        return cls(model_dir=model_dir, index=json.loads(index_path.read_text()))
+        path = model_dir / INDEX_NAME
+        if not path.exists():
+            raise FileNotFoundError(f"No cell cache at {model_dir} (missing {INDEX_NAME}).")
+        return cls(model_dir=model_dir, index=json.loads(path.read_text()))
 
     @property
-    def regions(self) -> List[str]:
-        return [r["region_id"] for r in self.index["regions"]]
+    def name(self) -> str:
+        return str(self.index["model_name"])
 
     @property
-    def held_out(self) -> List[str]:
-        return list(self.index.get("held_out_regions") or [])
+    def units(self) -> list[str]:
+        return [u["unit_id"] for u in self.index["units"]]
 
     @property
-    def bias(self) -> np.ndarray:
+    def held_out(self) -> list[str]:
+        return list(self.index.get("held_out_units") or [])
+
+    @property
+    def cell_types(self) -> list[str]:
+        return list(self.index["cell_types"])
+
+    @property
+    def head_bias(self) -> np.ndarray:
         return np.asarray(self.index["head_bias"], dtype=np.float64)
 
-    @property
-    def cell_type_names(self) -> Optional[List[str]]:
-        names = self.index.get("cell_type_names")
-        return list(names) if names else None
+    def unit_info(self, unit_id: str) -> dict[str, Any]:
+        if "_by_unit" not in self.__dict__:
+            self.__dict__["_by_unit"] = {u["unit_id"]: u for u in self.index["units"]}
+        return self.__dict__["_by_unit"][unit_id]
 
-    def label_of(self, region_id: str) -> Optional[float]:
-        for r in self.index["regions"]:
-            if r["region_id"] == region_id:
-                return r.get("label")
-        return None
+    def load(self, unit_id: str) -> dict[str, np.ndarray]:
+        with np.load(_npz_path(self.model_dir, unit_id), allow_pickle=False) as z:
+            return {k: z[k] for k in z.files}
 
-    def n_cells(self, region_id: str) -> int:
-        for r in self.index["regions"]:
-            if r["region_id"] == region_id:
-                return int(r["n_cells"])
-        raise KeyError(region_id)
-
-    def load(self, region_id: str, keys: Optional[Iterable[str]] = None) -> Dict[str, np.ndarray]:
-        path = region_npz_path(self.model_dir, region_id)
-        with np.load(path, allow_pickle=False) as z:
-            if keys is None:
-                return {k: z[k] for k in z.files}
-            return {k: z[k] for k in keys if k in z.files}
-
-    def iter_regions(self, regions: Optional[Sequence[str]] = None, keys=None):
-        for rid in regions if regions is not None else self.regions:
-            yield rid, self.load(rid, keys)
+    def __iter__(self) -> Iterator[tuple[str, dict[str, np.ndarray]]]:
+        for unit in self.units:
+            yield unit, self.load(unit)
 
 
-def _cell_type_codes(data) -> Optional[np.ndarray]:
-    codes = getattr(data, "categorical_codes", None)
-    if codes is None:
-        return None
-    codes = codes.detach().cpu()
-    if codes.dim() == 2:
-        codes = codes[:, 0]
-    return codes.numpy().astype(np.int32)
+def scoring_sampler(
+    trained: dict[str, Any], batch_size: int, *, every_cell: bool
+) -> SamplerConfig:
+    """The ego-graph settings a model was trained with (``trained``), scoring all roots.
+
+    Without ``every_cell`` the roots are the ones training drew from (the tissue
+    interior when ``interior_roots`` was on), as for the test split; with it,
+    every cell is scored, as per-cell outputs need.
+    """
+    cfg = dict(trained)
+    cfg.update(
+        roots_per_unit=None, batch_size=int(batch_size), merge_units=False, root_weighting=None
+    )
+    if every_cell:
+        cfg["interior_roots"] = {**dict(cfg.get("interior_roots") or {}), "enabled": False}
+    return SamplerConfig.from_dict(cfg)
 
 
-def _roots_of(batch) -> np.ndarray:
-    roots = getattr(batch, "root_n_id", None)
-    if roots is None:
-        raise ValueError("ShaDow batch without root_n_id; cannot align cells.")
-    roots = roots.detach().cpu().long().view(-1)
-    n_id = getattr(batch, "n_id", None)
-    flag = getattr(batch, "root_n_id_is_global", None)
-    is_global = False
-    if flag is not None:
-        f = torch.as_tensor(flag).view(-1)
-        is_global = bool(f[0]) if f.numel() else False
-    if not is_global and n_id is not None:
-        roots = n_id.detach().cpu().long().view(-1)[roots]
-    return roots.numpy()
+class _OneUnit:
+    def __init__(self, data, entry) -> None:
+        self.data, self.entries = data, [entry]
+
+    def __len__(self) -> int:
+        return 1
+
+    def __getitem__(self, idx: int):
+        return self.data
 
 
 @torch.no_grad()
-def extract_cell_cache(
+def extract_cells(
     model,
     dataset,
     *,
+    sampler: SamplerConfig,
     out_dir: str | Path,
     model_name: str,
-    sampler_config,
-    ckpt_path: Optional[str] = None,
-    held_out_regions: Optional[Sequence[str]] = None,
-    regions: Optional[Sequence[str]] = None,
-    cell_type_names: Optional[Sequence[str]] = None,
-    autocast: bool = True,
-    device: Optional[torch.device | str] = None,
+    ckpt_path: str,
+    held_out: Sequence[str] = (),
+    unit_meta: dict[str, dict[str, Any]] | None = None,
+    device: torch.device,
     resume: bool = True,
-    unit_id: str = "auto",
-    log=None,
 ) -> Path:
-    """Run the model over every cell of every unit (region, sample or patch) and write the cache.
-
-    ``unit_id='auto'`` addresses units by patch id when the dataset holds several
-    tiles per region and by region id otherwise.
-    """
-    from grass_mil.data.components.samplers import get_sampler_strategy
-    from grass_mil.data.spatial_omics_datamodule import unit_key
-
-    kind = str(unit_id).lower()
-    if kind == "auto":
-        regions_seen = {}
-        for e in dataset.entries:
-            regions_seen.setdefault(unit_key(e, "region"), set()).add(str(e.patch_id))
-        kind = "patch" if any(len(v) > 1 for v in regions_seen.values()) else "region"
-
+    """Score every cell of every unit of ``dataset`` and write the cache."""
     model_dir = Path(out_dir) / model_name
     model_dir.mkdir(parents=True, exist_ok=True)
-    device = torch.device(device) if device is not None else next(model.parameters()).device
-    strategy = get_sampler_strategy(sampler_config)
-    head_bias = _head_bias(model)
-    wanted = set(str(r) for r in regions) if regions is not None else None
-    index_regions: List[Dict[str, Any]] = []
-    use_autocast = bool(autocast) and device.type == "cuda"
-    t0 = time.time()
-    for idx in range(len(dataset)):
-        entry = dataset.entries[idx]
-        rid = unit_key(entry, kind)
-        if wanted is not None and rid not in wanted:
-            continue
-        npz = region_npz_path(model_dir, rid)
-        data = dataset[idx]
-        n = int(data.num_nodes)
-        label = None
-        if getattr(data, "graph_y", None) is not None:
-            label = float(data.graph_y.view(-1)[0])
-        if resume and npz.exists():
-            index_regions.append({"region_id": rid, "n_cells": n, "label": label})
-            continue
-        E = np.zeros((n, int(model.encoder.output_dim)), dtype=np.float16)
-        LG = None
-        AR = None
-        seen = np.zeros(n, dtype=bool)
-        loader = strategy.build_dataset_loader(
-            dataset=[data], batch_size=1, num_workers=0, pin_memory=False, shuffle=False
+    # Resume only over files written by this very checkpoint and sampling (the
+    # JSON round trip makes the stamp compare equal to the stored one).
+    stat = Path(ckpt_path).stat()
+    source = json.loads(
+        json.dumps(
+            {
+                "ckpt": [str(ckpt_path), stat.st_size, stat.st_mtime_ns],
+                "sampler": sampler.as_dict(),
+            }
         )
-        for batch in loader:
-            roots = _roots_of(batch)
+    )
+    stamp = model_dir / "source.json"
+    if resume and (not stamp.exists() or json.loads(stamp.read_text()) != source):
+        resume = False
+    stamp.write_text(json.dumps(source))
+    model.to(device).eval()
+    index_units = []
+    autocast = device.type == "cuda"
+    for i, entry in enumerate(dataset.entries):
+        info = {
+            "unit_id": entry.unit_id,
+            "region_id": entry.region_id,
+            "sample_id": entry.sample_id,
+            "n_cells": entry.n_cells,
+        }
+        info.update((unit_meta or {}).get(entry.unit_id, {}))
+        index_units.append(info)
+        path = _npz_path(model_dir, entry.unit_id)
+        if resume and path.exists():
+            continue
+        data = dataset[i]
+        n = int(data.num_nodes)
+        arrays: dict[str, np.ndarray] = {}
+        seen = np.zeros(n, dtype=bool)
+        for batch in EgoGraphLoader(
+            _OneUnit(data, entry), sampler, mode="chunks", roots_per_unit=None
+        ):
+            roots = batch.root_cell.numpy()
             batch = batch.to(device)
-            with torch.autocast(device.type, dtype=torch.float16, enabled=use_autocast):
-                logits, emb, _ = model._forward_instances(batch)
-                attn = model.attention(emb)[0] if model.attention is not None else None
-            emb = emb.float()
-            if LG is None:
-                LG = np.zeros((n, int(logits.shape[1])), dtype=np.float32)
-                AR = (
-                    np.zeros((n, int(attn.shape[1])), dtype=np.float32)
-                    if attn is not None
-                    else None
-                )
-            E[roots] = emb.half().cpu().numpy()
-            LG[roots] = logits.float().cpu().numpy()
-            if AR is not None:
-                AR[roots] = attn.float().cpu().numpy()
+            with torch.autocast(device.type, dtype=torch.float16, enabled=autocast):
+                emb = model.encoder(batch)
+                outputs = {
+                    "embedding": emb,
+                    "attention_space": model.attention.space(emb),
+                    "instance_logits": model.head(emb),
+                    "attention_logits": model.attention(emb),
+                }
+            for key, value in outputs.items():
+                if key not in arrays:
+                    dtype = np.float16 if key == "embedding" else np.float32
+                    arrays[key] = np.zeros((n, int(value.shape[1])), dtype=dtype)
+                arrays[key][roots] = value.float().cpu().numpy()
             seen[roots] = True
         if not seen.all():
             raise RuntimeError(
-                f"Region {rid}: {int((~seen).sum())} of {n} cells were not visited; "
-                "the extraction sampler must keep every root (all-roots mode)."
+                f"Unit {entry.unit_id}: {int((~seen).sum())} cells were not scored."
             )
-        payload: Dict[str, Any] = {
-            "E": E,
-            "LG": LG,
-            "pos": data.pos.detach().cpu().numpy().astype(np.float32),
-            "edge_index": data.edge_index.detach().cpu().numpy().astype(np.int64),
-        }
-        if AR is not None:
-            payload["AR"] = AR
-        ct = _cell_type_codes(data)
-        if ct is not None:
-            payload["ct"] = ct
-        if getattr(data, "edge_attr", None) is not None:
-            payload["edge_attr"] = data.edge_attr.detach().cpu().numpy().astype(np.float32)
-        np.savez(npz, **payload)
-        index_regions.append({"region_id": rid, "n_cells": n, "label": label})
-        if log is not None and len(index_regions) % 25 == 0:
-            log.info(
-                f"[{model_name}] {len(index_regions)} regions ({(time.time() - t0) / 60:.1f} min)"
-            )
+        arrays["pos"] = data.pos.numpy().astype(np.float32)
+        arrays["edge_index"] = data.edge_index.numpy().astype(np.int64)
+        arrays["cell_ids"] = np.asarray(dataset.load(i)["cell_ids"], dtype=str)
+        if getattr(data, "cell_type", None) is not None:
+            arrays["cell_type"] = data.cell_type.numpy().astype(np.int32)
+        np.savez(path, **arrays)
+        if len(index_units) % 25 == 0:
+            log.info(f"[{model_name}] {len(index_units)} units")
     index = {
         "model_name": model_name,
-        "ckpt_path": str(ckpt_path) if ckpt_path else None,
-        "regions": index_regions,
-        "held_out_regions": [str(r) for r in held_out_regions] if held_out_regions else [],
-        "head_bias": head_bias,
-        "unit_id": kind,
-        "cell_type_names": list(cell_type_names) if cell_type_names else None,
-        "embedding_dim": int(model.encoder.output_dim),
-        "sampler_runtime": _plain(getattr(sampler_config, "runtime", {}) or {}),
+        "ckpt_path": str(ckpt_path),
+        "target_type": model.task["target_type"],
+        "units": index_units,
+        "held_out_units": sorted(map(str, held_out)),
+        "head_bias": model.head.bias.detach().cpu().tolist(),
+        "cell_types": list(model.input_spec.cell_types),
+        "sampler": sampler.as_dict(),
     }
-    (model_dir / _INDEX).write_text(json.dumps(index, indent=1, default=str))
+    (model_dir / INDEX_NAME).write_text(json.dumps(index, indent=1, default=str))
     return model_dir
-
-
-def _plain(obj: Any) -> Any:
-    try:
-        from omegaconf import DictConfig, ListConfig, OmegaConf
-
-        if isinstance(obj, (DictConfig, ListConfig)):
-            return OmegaConf.to_container(obj, resolve=True)
-    except ImportError:  # pragma: no cover
-        pass
-    if isinstance(obj, dict):
-        return {str(k): _plain(v) for k, v in obj.items()}
-    if isinstance(obj, (list, tuple)):
-        return [_plain(v) for v in obj]
-    return obj
-
-
-def _head_bias(model) -> List[float]:
-    head = getattr(model, "graph_head", None)
-    if head is None:
-        return []
-    last = None
-    for module in head.modules():
-        if isinstance(module, torch.nn.Linear):
-            last = module
-    if last is None or last.bias is None:
-        return []
-    return [float(v) for v in last.bias.detach().cpu().view(-1)]

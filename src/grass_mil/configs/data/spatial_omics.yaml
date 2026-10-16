@@ -1,109 +1,66 @@
+# A cohort of cell tables listed in a manifest, cut into graph units, with
+# labels attached per unit. See docs/data_preparation.md.
 defaults:
-  - sampler: shadow_custom
+  - sampler: ego_graph
   - _self_
 
-_target_: grass_mil.data.spatial_omics_datamodule.SpatialOmicsDataModule
+_target_: grass_mil.data.SpatialOmicsDataModule
 
-data_dir: ${paths.data_dir}
-raw_manifest_path: ${paths.data_dir}/raw/manifest.csv
-processed_dir: ${paths.data_dir}/processed/spatial_omics
-
-batch_size: 1
-num_workers: 0
-pin_memory: False
-
-coord_scale_um: 1.0
-sample_unit: tile # tile | full
-reducer_scope: sample # sample | dataset
-keep_raw_molecular: false
+# CSV with sample_id, input_path and optionally region_id, input_type,
+# polygons_path (paths relative to the manifest).
+manifest_path: ${paths.data_dir}/manifest.csv
+# Graphs are built here once and reused while the settings below are unchanged.
+processed_dir: ${paths.data_dir}/processed
 force_precompute: false
-min_cells: 10
-use_molecular_features: true
 
-categorical_features:
-  include_labels: ["cell_type"]
+# What one bag is: a whole region, a square tile (data.tiling), or a polygon of
+# the region's polygons_path.
+unit: region # region | tile | polygon
+coord_scale_um: 1.0 # coordinates are multiplied by this
+min_cells: 10 # units with fewer cells are dropped
+tiling:
+  size: 200.0
+  stride: 200.0
 
-split:
-  train_val_test_split: [0.8, 0.1, 0.1]
-  split_by: sample # sample | region | patch
-  loocv:
-    enabled: false
-    fold_unit: region # region | sample
-    holdout_id: null
-    validation_strategy: heldout_fold_items # heldout_fold_items | patches_from_train_items
-    val_ratio: 0.1 # exactly 0.0 disables val; non-zero guarantees at least one val item
-    seed: 42
-  # Explicit id lists (region ids by default, or sample ids with id_kind: sample)
-  # re-partition an existing precompute without re-processing. Each entry is a
-  # list or a path to a .json / .txt file; ids not listed are dropped. This is
-  # what `grass-mil-nested-cv` and `grass-mil-probe` use.
-  explicit:
-    train: null
-    val: null
-    test: null
-    id_kind: region # region | sample | patch (every tile its own unit)
-
-manifest:
-  sample_id: sample_id
-  input_path: input_path
-  input_type: input_type
-  region_id: region_id
-  polygons_path: polygons_path
-
-csv:
+input:
+  coord_columns: [x, y]
+  obsm_key: spatial # h5ad: coordinates in obsm[obsm_key]; null = obs coord_columns
+  reduced_dim: null # SCE: coordinates in reducedDim; null = colData coord_columns
+  cell_id_column: null
+  cell_type_column: cell_type # null = no cell types (features only)
+  features: all # continuous node features: all | [names] | null (cell type only)
+  h5ad_layer: null
+  sce_assay: null
   sep: ","
-  coord_columns: ["x", "y"]
-  cell_id_column: cell_id
-  categorical_label_columns: []
-  molecular_columns: null
 
-h5ad:
-  coord_source: obsm # obs | obsm
-  coord_key: spatial
-  coord_columns: ["x", "y"]
-  cell_id_column: null
-  categorical_label_columns: []
-  molecular_layer: null
-  molecular_features: null
-
-sce:
-  assay_name: null
-  coord_source: colData # colData | reducedDims
-  coord_key: null
-  coord_columns: ["x", "y"]
-  cell_id_column: null
-  categorical_label_columns: []
-  transpose_assay: true
-  molecular_features: null
-
-graph_builder:
-  name: delaunay
-  kwargs:
-    edge_features: ["distance", "neighbor"]
-    neighbor_cutoff_um: 20.0
+graph:
+  edge_features: [log_distance, neighbor]
+  neighbor_cutoff: 20.0 # contact distance, in coordinate units
+  log_distance_bounds: [2.0, 5.0] # ln-length mapped to [0, 1]
 
 feature_reducer:
-  name: identity
-  fit_mode: train_only # train_only | global
-  kwargs: {}
+  name: identity # identity | pca
+  n_components: 32
+  fit_on: all # all | train (single random split only)
+  state_from: null # processed_index.json of a cohort whose PCA basis to reuse
 
-# `sampler` comes from the data/sampler group (shadow_custom by default;
-# `data/sampler=ego_graph_mil` is the preprint MIL setting). Override single
-# keys as `data.sampler.runtime.<key>=...`.
-val_sampler: null
-# Test/predict loader; null derives an all-roots, unweighted variant of `sampler`.
-test_sampler: null
+labels:
+  file: null # CSV with one row per labelled id
+  id_column: region_id # unit, region or sample ids
+  columns: ${oc.select:task.target_columns,null}
+  patient_column: null # grouping for splits; never a target
+# Skip units without a label (supervised training); pretraining uses all units.
+labelled_only: true
 
-tiling:
-  tile_size_um: 200.0
-  stride_um: 200.0
-  min_cells: 10
+split:
+  ratios: [0.8, 0.1, 0.1] # random train/val/test split, grouped by patient
+  seed: 0
+  # Explicit ids (lists or .json/.txt files) replace the random split.
+  train: null
+  val: null
+  test: null
 
-graph_labels:
-  label_file: null
-  id_column: id
-  tasks: null
-  scope: region
-  patient_column: null # grouping column; attached as data.patient_id, never a target
-
-transforms: []
+# Validation scores a fixed subset of roots per unit; test scores every cell.
+val_roots_per_unit: 1024
+num_workers: 0
+pin_memory: false

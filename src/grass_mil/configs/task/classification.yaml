@@ -1,0 +1,13 @@
+# Classification of units (regions, tiles) into num_classes classes.
+target_type: classification
+# Label-file column(s) to predict; null = the first non-patient column.
+target_columns: null
+num_classes: 2
+# auto = inverse class frequency on the training units (mean 1); a list of
+# per-class weights; or null.
+class_weights: auto
+# Epoch selection and early stopping (validation metrics are region-level).
+selection:
+  metric: val/auroc
+  mode: max
+  patience: 8

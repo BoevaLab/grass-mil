@@ -1,54 +1,58 @@
-# grass-mil-niches: niche discovery on a trained model's cell cache.
+# grass-mil-niches: niches of one model's cells (see docs/niche_analysis.md).
 #
-#   grass-mil-niches cells_dir=<extract_out>/cells/fold2 output_dir=niches_fold2
-#   grass-mil-niches cells_dir=... clustering.method=kmeans clustering.n_clusters=12
-#   grass-mil-niches cells_dir=... space=attention attention_ckpt=<run>/checkpoints/last.ckpt
+#   grass-mil-niches cells_dir=<extract output>/cells/fold0
 #
-# The defaults are the preprint's recipe; every reduction / clustering key is
-# a plain override (any backend of grass_mil.interpretability.core.clustering).
+# Cells are clustered in the model's attention space, each niche is described by
+# its composition, empirical association and attention-weighted margin, and by
+# spatial descriptors computed within the niche.
 defaults:
   - _self_
   - paths: default
   - hydra: default
 
 task_name: niches
-cells_dir: ??? # one model's cache directory written by grass-mil-extract
+cells_dir: ??? # one model's cache, written by grass-mil-extract
 output_dir: ${paths.output_dir}
-regions: held_out # held_out | all | list of region ids | path to .json/.txt
-labels:
-  # Optional label CSV overriding the labels stored in the cache.
-  label_file: null
-  id_column: REGION_ID
-  label_column: null
-space: gnn # gnn (encoder embedding) | attention (8-d pre-tanh attention space)
-attention_ckpt: null # checkpoint of the model; required for space=attention
+units: held_out # held_out (units the model did not train on) | all | list / file of unit ids
 positive_class: 1
 positive_name: positive
-title: null # report title (default from the cache name)
-held_out_auroc: null # optional, printed in the report header
+title: null
 
-reduction:
-  method: pca # pca | none | umap
-  n_components: 10
-  random_state: 42
 clustering:
-  method: hdbscan # hdbscan | kmeans | agglomerative | dbscan | optics | spectral
-  n_clusters: null # for kmeans / agglomerative / spectral
-  random_state: 42
-  params:
-    min_cluster_size: 300
-    min_samples: 1
-    cluster_selection_method: eom
-sample_size: 100000 # cells used to fit the reducer and the clustering (null = all)
-l2_normalise: true # cluster on L2-normalised coordinates (cosine geometry)
-assign_k: 15 # k-NN assignment of unsampled cells on the reduced coordinates
-seed: 0
+  space: attention # attention | embedding
+  pca_components: null # e.g. 10 with space=embedding
+  cosine: true
+  method: hdbscan # hdbscan | kmeans
+  min_cluster_size: 300
+  min_samples: 1
+  selection: eom
+  n_clusters: 10 # kmeans only
+  sample_size: 100000 # cells used to fit the clustering (null = all)
+  assign_k: 15 # neighbours assigning the remaining cells
+  seed: 0
 
-present_threshold: 0.02 # a niche is "present" in a region above this share
-n_boot: 2000 # bootstrap over regions for the margin CI
+present_threshold: 0.02 # a niche is present in a unit above this share
+enrichment_threshold: 1.5 # cell types over-represented by more than this factor
+n_boot: 2000 # bootstrap resamples (of patients) for the margin interval
+
+descriptors:
+  analyses: [moran, enrichment, cross_l, contacts]
+  min_cells: 20 # cells of a niche in a unit needed to describe it
+  n_perms: 100 # label permutations for neighbourhood enrichment
+  n_radii: 20
+  max_radius: null # null = a quarter of the median unit diagonal
+  min_contacts: 100
+  max_edge_length: null
+  seed: 0
+
+# Optional: niche shares versus survival (one row per patient).
+survival:
+  file: null
+  id_column: patient_id
+  time_column: time
+  event_column: event
+  pseudo_share: 0.001
+  score: [] # e.g. ["Niche 1", "-Niche 4"] for Kaplan-Meier curves of score tertiles
+
 figures: true
-umap:
-  enabled: true
-  n_neighbors: 30
-  min_dist: 0.1
-  metric: cosine
+render_units: 4 # maps of the most positive and most negative units

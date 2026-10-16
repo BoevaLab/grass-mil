@@ -1,5 +1,0 @@
-enabled: true
-method: pca
-params:
-  n_components: 2
-  random_state: 42

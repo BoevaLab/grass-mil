@@ -1,0 +1,13 @@
+# @package _global_
+# Frozen encoder; MLP head and attention trained on the pretrained embeddings.
+defaults:
+  - mlp_head
+
+regime_name: mlp_head_frozen
+
+finetune:
+  lr_scales:
+    encoder: 0.0
+data:
+  sampler:
+    roots_per_unit: 512

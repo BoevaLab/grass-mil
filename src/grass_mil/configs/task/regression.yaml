@@ -1,0 +1,9 @@
+# Regression of one or more continuous unit-level targets.
+target_type: regression
+target_columns: ???
+loss: mse # mse | huber
+huber_delta: 1.0
+selection:
+  metric: val/rmse
+  mode: min
+  patience: 8

@@ -1,0 +1,39 @@
+# @package _global_
+# Default regime: the BGRL-pretrained encoder is fine-tuned end to end; the
+# linear instance head starts from a logistic probe on the frozen embeddings
+# and learns slowly; the attention learns at twice the base rate.
+regime_name: finetune
+
+finetune:
+  lr_scales:
+    encoder: 1.0
+    head: 0.01
+    attention: 2.0
+  head_weight_decay: 1.0e-3 # null = optim.weight_decay
+  head_init: probe # probe | random
+  hyperbatch_size: 12 # units per optimizer step
+  grad_clip_norm: 1.0
+  warmup_steps: 0
+  schedule_epochs: null # epochs the lr schedule spans (null = trainer.max_epochs)
+  augmentation:
+    drop_edge_p: 0.0
+    mask_node_p: 0.0
+    seed: 0
+  probe:
+    roots_per_unit: 96
+    seed: 0
+    C: 1.0
+    class_weight: balanced
+    max_iter: 3000
+
+model:
+  head:
+    num_layers: 1
+
+data:
+  sampler:
+    roots_per_unit: 256
+
+trainer:
+  max_epochs: 25
+  min_epochs: 10

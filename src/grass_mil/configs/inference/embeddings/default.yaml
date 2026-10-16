@@ -1,5 +1,0 @@
-enabled: true
-extract_node: false
-save: true
-filename: graph_embeddings.csv
-node_filename: node_embeddings.csv

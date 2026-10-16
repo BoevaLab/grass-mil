@@ -1,0 +1,39 @@
+# @package _global_
+# Label-free BGRL pretraining of the encoder on every unit of the cohort:
+#   grass-mil-train experiment=my_cohort regime=pretrain trainer=gpu
+defaults:
+  - override /model: bgrl
+  - override /callbacks: pretrain_checkpoint
+  - override /data/sampler: ego_graph_pretrain
+
+regime_name: pretrain
+task_name: pretrain
+test: false
+
+pretrain:
+  total_steps: 200000
+  warmup_steps: 1000
+  momentum_start: 0.99
+  momentum_end: 1.0
+  predictor_hidden_dim: 512
+  seed: 0
+  augmentation:
+    mu: 0.25 # node/edge drop scale
+    p_lambda: 0.45 # maximum drop probability
+    noise_std: 0.2
+    noise_features: [] # continuous features to perturb, by name (e.g. [area])
+
+optim:
+  lr: 5.0e-5
+  weight_decay: 1.0e-5
+
+data:
+  labelled_only: false
+  split:
+    ratios: [1.0, 0.0, 0.0]
+
+trainer:
+  max_steps: ${pretrain.total_steps}
+  max_epochs: -1
+  min_epochs: null
+  limit_val_batches: 0

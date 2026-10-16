@@ -1,170 +1,88 @@
-from typing import Any, Dict, List, Optional, Tuple
+"""``grass-mil-train``: one training run (fine-tuning, or ``regime=pretrain``)."""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Any
 
 import hydra
 import lightning as L
-from lightning import Callback, LightningDataModule, LightningModule, Trainer
-from lightning.pytorch.loggers import Logger
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig, open_dict
 
-from grass_mil._paths import setup_project_root
+from grass_mil.inference.predictions import prediction_frame
+from grass_mil.runtime import EpochMetricsWriter, instantiate_group, start_run
 
-setup_project_root()
+__all__ = ["train", "main"]
 
-from grass_mil.utils import (
-    RankedLogger,
-    extras,
-    get_metric_value,
-    instantiate_callbacks,
-    instantiate_loggers,
-    log_hyperparameters,
-    task_wrapper,
-)  # noqa: E402
-
-log = RankedLogger(__name__, rank_zero_only=True)
+log = logging.getLogger(__name__)
 
 
-def _requires_zero_validation(cfg: DictConfig) -> bool:
-    split_cfg = cfg.get("data", {}).get("split")
-    if not split_cfg:
-        return False
-
-    loocv_cfg = split_cfg.get("loocv")
-    if loocv_cfg and bool(loocv_cfg.get("enabled", False)):
-        return float(loocv_cfg.get("val_ratio", 0.0)) == 0.0
-
-    ratios = split_cfg.get("train_val_test_split")
-    if ratios is None:
-        return False
-    try:
-        return float(ratios[1]) == 0.0
-    except Exception:
-        return False
+def _without_validation(cfg: DictConfig) -> DictConfig:
+    """Drop the callbacks that monitor validation metrics and disable the loop."""
+    cfg = cfg.copy()
+    with open_dict(cfg):
+        for name in list(cfg.callbacks or {}):
+            monitor = (cfg.callbacks[name] or {}).get("monitor")
+            if isinstance(monitor, str) and monitor.startswith("val/"):
+                if name == "model_checkpoint":
+                    cfg.callbacks[name].monitor = None
+                    cfg.callbacks[name].save_top_k = 0
+                else:
+                    del cfg.callbacks[name]
+        cfg.trainer.limit_val_batches = 0
+    return cfg
 
 
-def _filter_val_monitor_callbacks(
-    callbacks_cfg: Optional[DictConfig],
-) -> Tuple[Optional[DictConfig], List[str]]:
-    if not callbacks_cfg or not isinstance(callbacks_cfg, DictConfig):
-        return callbacks_cfg, []
+def train(cfg: DictConfig) -> tuple[dict[str, float], dict[str, Any]]:
+    """Train (and test) the configured model; returns the final metrics and the run objects."""
+    start_run(cfg)
+    output_dir = Path(str(cfg.paths.output_dir))
+    datamodule: L.LightningDataModule = hydra.utils.instantiate(cfg.data, _recursive_=False)
+    datamodule.prepare_data()
+    datamodule.setup("fit")
+    if len(datamodule.dataset_val) == 0 and cfg.trainer.get("limit_val_batches") != 0:
+        log.info("The validation split is empty: training without validation.")
+        cfg = _without_validation(cfg)
 
-    # Resolve interpolations (``${paths.output_dir}`` and friends) first: the
-    # filtered copy below is a new root, so unresolved references into the
-    # full config would fail at instantiation.
-    try:
-        callbacks_cfg = OmegaConf.create(OmegaConf.to_container(callbacks_cfg, resolve=True))
-    except Exception:  # pragma: no cover - unresolvable outside a Hydra run
-        pass
-    filtered = OmegaConf.create({})
-    removed: List[str] = []
-    for name, cb_conf in callbacks_cfg.items():
-        monitor = cb_conf.get("monitor") if isinstance(cb_conf, DictConfig) else None
-        if isinstance(monitor, str) and monitor.startswith("val/"):
-            removed.append(str(name))
-            continue
-        filtered[name] = cb_conf
-    return filtered, removed
-
-
-@task_wrapper
-def train(cfg: DictConfig) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """Train (and optionally test) using Hydra-composed config."""
-    if cfg.get("seed"):
-        L.seed_everything(cfg.seed, workers=True)
-
-    log.info(f"Instantiating datamodule <{cfg.data._target_}>")
-    datamodule: LightningDataModule = hydra.utils.instantiate(cfg.data)
-
-    if cfg.get("model") is None:
-        raise ValueError("No model config provided. Set `model=...` in your Hydra config.")
-    log.info(f"Instantiating model <{cfg.model._target_}>")
-    model: LightningModule = hydra.utils.instantiate(cfg.model)
-
-    log.info("Instantiating callbacks...")
-    callbacks_cfg = cfg.get("callbacks")
-    if _requires_zero_validation(cfg):
-        callbacks_cfg, removed = _filter_val_monitor_callbacks(callbacks_cfg)
-        if removed:
-            log.info(
-                "Validation is disabled by configuration; skipping val-monitored callbacks: "
-                f"{removed}"
-            )
-    callbacks: List[Callback] = instantiate_callbacks(callbacks_cfg)
-    output_dir = cfg.get("paths", {}).get("output_dir") if cfg.get("paths") else None
-    if output_dir and not _requires_zero_validation(cfg):
-        from grass_mil.callbacks import EpochMetricsWriter
-
-        callbacks.append(EpochMetricsWriter(str(output_dir)))
-
-    log.info("Instantiating loggers...")
-    logger: List[Logger] = instantiate_loggers(cfg.get("logger"))
-
-    log.info(f"Instantiating trainer <{cfg.trainer._target_}>")
-    trainer: Trainer = hydra.utils.instantiate(cfg.trainer, callbacks=callbacks, logger=logger)
-
-    object_dict = {
-        "cfg": cfg,
-        "datamodule": datamodule,
-        "model": model,
-        "callbacks": callbacks,
-        "logger": logger,
-        "trainer": trainer,
-    }
-
-    if logger:
-        log.info("Logging hyperparameters!")
-        log_hyperparameters(object_dict)
+    model: L.LightningModule = hydra.utils.instantiate(cfg.model, _recursive_=False)
+    callbacks = instantiate_group(cfg.get("callbacks"))
+    if cfg.trainer.get("limit_val_batches") != 0:
+        callbacks.append(EpochMetricsWriter(output_dir / "metrics_per_epoch.jsonl"))
+    trainer: L.Trainer = hydra.utils.instantiate(
+        cfg.trainer, callbacks=callbacks, logger=instantiate_group(cfg.get("logger")) or False
+    )
 
     if cfg.get("train"):
-        log.info("Starting training!")
-        trainer.fit(
-            model=model,
-            datamodule=datamodule,
-            ckpt_path=cfg.get("ckpt_path"),
+        trainer.fit(model, datamodule=datamodule, ckpt_path=cfg.get("ckpt_path"))
+    metrics = {k: float(v) for k, v in trainer.callback_metrics.items()}
+
+    if cfg.get("test") and len(datamodule.dataset_test):
+        checkpoint = trainer.checkpoint_callback
+        best = checkpoint.best_model_path if checkpoint is not None and checkpoint.monitor else ""
+        trainer.test(model, datamodule=datamodule, ckpt_path=best or None)
+        metrics.update({k: float(v) for k, v in trainer.callback_metrics.items()})
+        preds = model.test_predictions
+        frame = prediction_frame(
+            preds["unit_ids"],
+            preds["logits"],
+            target_type=model.task["target_type"],
+            targets=preds["targets"],
+            meta=datamodule.unit_table(datamodule.dataset_test),
         )
-
-    train_metrics = trainer.callback_metrics
-
-    if cfg.get("test"):
-        log.info("Starting testing!")
-        ckpt_path = None
-        checkpoint_callback = getattr(trainer, "checkpoint_callback", None)
-        if checkpoint_callback is not None:
-            ckpt_path = checkpoint_callback.best_model_path
-            if ckpt_path == "":
-                log.warning("Best ckpt not found! Using current weights for testing...")
-                ckpt_path = None
-        else:
-            log.warning(
-                "Checkpoint callback is not configured. Using current weights for testing..."
-            )
-        trainer.test(model=model, datamodule=datamodule, ckpt_path=ckpt_path)
-        log.info(f"Best ckpt path: {ckpt_path}")
-        if output_dir:
-            from grass_mil.callbacks import write_test_predictions
-
-            written = write_test_predictions(model, str(output_dir))
-            if written is not None:
-                log.info(f"Test predictions written to {written}")
-
-    test_metrics = trainer.callback_metrics
-
-    metric_dict = {**train_metrics, **test_metrics}
-
-    return metric_dict, object_dict
+        frame.to_csv(output_dir / "test_predictions.csv", index=False)
+        log.info(f"Test predictions written to {output_dir / 'test_predictions.csv'}")
+    checkpoint = trainer.checkpoint_callback
+    if checkpoint is not None and checkpoint.last_model_path:
+        selected = checkpoint.best_model_path if checkpoint.monitor else ""
+        log.info(f"Checkpoint: {selected or checkpoint.last_model_path}")
+    log.info(f"Outputs written to {output_dir}")
+    return metrics, {"cfg": cfg, "datamodule": datamodule, "model": model, "trainer": trainer}
 
 
 @hydra.main(version_base="1.3", config_path="configs", config_name="train.yaml")
-def main(cfg: DictConfig) -> Optional[float]:
-    """Entry point for training."""
-    extras(cfg)
-
-    metric_dict, _ = train(cfg)
-
-    metric_value = get_metric_value(
-        metric_dict=metric_dict, metric_name=cfg.get("optimized_metric")
-    )
-
-    return metric_value
+def main(cfg: DictConfig) -> None:
+    train(cfg)
 
 
 if __name__ == "__main__":

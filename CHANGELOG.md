@@ -1,30 +1,38 @@
 # Changelog
 
+## 1.1.0 (2026-10)
+
+A package-level cleanup. Commands, configuration keys and file formats changed;
+graphs and checkpoints of 1.0.0 need to be rebuilt.
+
+- **Regimes renamed**; `finetune` is the default: `linear_ftall` → `finetune`,
+  `linear_ftall_reg` → `finetune_reg`, `linear_probehead` → `attention_only`,
+  `mil` → `mlp_head`, `mil_frozen` → `mlp_head_frozen`, `pretrain_a3` →
+  `pretrain`. The probe head is fitted automatically; `grass-mil-probe` is gone.
+- **Niche analysis** (`grass-mil-niches`) reports the primary results directly:
+  niches in the attention space, composition, association, margin with
+  intervals, per-niche Moran's I, neighbourhood enrichment, cross-L and contact
+  enrichment, and optional survival. `grass-mil-metaclusters` is optional.
+- **Removed**: `grass-mil-report` and its plugin stack, `grass-mil-eval`,
+  `grass-mil-loocv`, `grass-mil-scores`, mean pooling, the GCN/GAT/GraphSAGE/GIN
+  encoders, per-sample PCA, `finetune.freeze_head`, the 1.0.0 checkpoint-import
+  options and unused logger, debug and multi-GPU presets.
+- **Configuration**: one `data.input` block for all formats, `data.unit`
+  (`region`, `tile`, `polygon`), labels attached at load time (one set of
+  graphs for every task and fold), `task` (`classification`, `regression`,
+  `survival`) with its own selection metric.
+- **Fixes**: gradient clipping under mixed precision now acts on unscaled
+  gradients; cross-validation refits no longer evaluate on the held-out fold;
+  `grass-mil-predict` reports AUROC and works without `regime=`; the PCA
+  feature reducer works; survival training optimises over several units per
+  step; numeric sample ids; stale processed graphs are detected.
+- **Statistics**: the Cox loss handles tied times (Breslow) and survival heads
+  start from a Cox probe; outer folds must keep patients together; refits keep
+  the inner runs' learning-rate schedule; margin intervals resample patients;
+  per-niche cross-L is relative to random labelling and Moran's I is tested
+  with exact randomisation moments; prediction checks that the cohort was
+  preprocessed like the training data.
+
 ## 1.0.0 (2026-10)
 
-Public release accompanying the preprint
-[GRASS-MIL: graph-based representation and discovery of phenotype-associated spatial structures with multiple instance learning](https://www.biorxiv.org/content/10.64898/2026.10.08.757722v1).
-
-### Method (defaults match the preprint; every setting stays configurable)
-
-- Delaunay cell graph with the bounded log edge length `clip((ln d - 2)/3, 0, 1)` as the edge feature (`log_distance`).
-- GINE ego-graph encoder (4 x 256, learnable epsilon, layer norm, max pooling, xavier-initialised cell-type embedding) as `model=grass_mil`.
-- Projected gated attention with one channel per class (32 / 8, kaiming) and logit-space pooling, so every bag logit is an exact sum of per-cell contributions.
-- One region = one bag: all sampled ego-graphs of a region in one batch, one attention softmax, one loss; region-level validation metrics and selection.
-- Training regimes as presets (`regime=mil|mil_frozen|linear_probehead|linear_ftall|linear_ftall_reg`) with per-component learning-rate scales, head pre-fit by a logistic probe, class weights from the training split, per-step cosine schedule, gradient accumulation over regions, AMP-safe scheduler stepping, elementwise feature drop with an unassigned token.
-- BGRL "A3" pretraining preset (`regime=pretrain_a3`): roots drawn from the union of all regions, momentum 0.99 -> 1.0, DropImportance + feature noise, checkpoint every 5000 steps.
-- Import of legacy SPACE-GM style BGRL checkpoints (`model.encoder_init_map=spacegm_bgrl`).
-
-### Analyses
-
-- `grass-mil-probe`, `grass-mil-nested-cv`: nested patient-grouped cross-validation with explicit fold files, inner-fold epoch selection, refit and out-of-fold predictions (region and patient level).
-- `grass-mil-extract`: per-cell cache (embeddings, instance logits, attention) of trained models over every cell.
-- `grass-mil-niches`: niche discovery on a model's cells (cosine HDBSCAN by default, any registry backend), attention-weighted margins, per-niche tables, co-localisation, figures.
-- `grass-mil-metaclusters`: cross-fold niche replication (constrained matching on composition), whole-dataset transfer, shared label-free basis.
-- `grass-mil-scores`: bootstrap AUROC intervals, DeLong tests, within-fold standardisation, operating points (sensitivity, specificity, PPV, NPV, likelihood ratios).
-- `grass-mil-spatial-stats`: neighbourhood enrichment, cellular neighbourhoods, contact fractions and cross-K per region with patient-level group tests.
-- Patient-level aggregation in `grass-mil-predict` (mean of region probabilities or one merged bag).
-
-### Housekeeping
-
-- Removed stale component configs, the dummy dataset, the embeddings shim and internal audit notes; added `CITATION.cff`; `hydra-core` 1.3.5+.
+Public release accompanying the preprint.

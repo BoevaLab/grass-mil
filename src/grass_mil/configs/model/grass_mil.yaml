@@ -1,45 +1,25 @@
+# GRASS-MIL: ego-graph encoder, linear (or MLP) instance head and projected
+# gated attention with one channel per class, pooled in logit space.
 defaults:
-  - encoder: gine_length
-  - attention: gated_projected
+  - encoder: gine
   - _self_
 
-# GRASS-MIL supervised module with the preprint defaults: BGRL-pretrainable GINE
-# ego-graph encoder (model/encoder/gine_length), projected gated attention with
-# one channel per class (model/attention/gated_projected), and an MLP instance
-# head pooled in logit space (bag logit_c = sum_i A[i,c] * f_c(h_i)), so each
-# prediction decomposes exactly into per-neighbourhood contributions.
-#
-# Use with `model=grass_mil task=finetune_mil` (and a `regime=...` preset). Any
-# key can be overridden, e.g. `model.encoder.num_layers=3`,
-# `model.graph_head.num_layers=1` (linear head for the probe regimes).
-
-_target_: grass_mil.models.supervised_module.SupervisedModule
+_target_: grass_mil.models.SupervisedModule
 _recursive_: false
 
-flags:
-  use_ssl: false
-
-graph_head:
-  input_dim: ${model.encoder.out_dim}
-  output_dim: 1
-  hidden_dim: ${model.encoder.out_dim}
-  # 2 = MLP instance head (default); 1 = linear head for grass-mil-probe regimes.
-  num_layers: 2
+head:
+  num_layers: 1 # 1 = linear head; 2 = MLP
+  hidden_dim: null # MLP hidden width (null = embedding width)
   dropout: 0.0
-
-ssl:
-  method: bgrl
-  predictor:
-    hidden_size: 512
-
-loss:
-  loss_type: ${task.loss}
-
-optim: ${oc.select:optim,null}
-scheduler: ${oc.select:scheduler,null}
+  act: leaky_relu
+attention:
+  projection_dim: 32
+  hidden_dim: 8
+  dropout: 0.25
+  init: kaiming # kaiming | default
 task: ${task}
-
+finetune: ${finetune}
+optim: ${optim}
+scheduler: ${scheduler}
+# Pretrained encoder checkpoint (from regime=pretrain); null = random encoder.
 init_from_ckpt: null
-init_strict: false
-encoder_init_map: auto_bgrl_or_identity
-freeze_encoder: false

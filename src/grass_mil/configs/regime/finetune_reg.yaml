@@ -1,0 +1,19 @@
+# @package _global_
+# finetune with a slower encoder and regularisation (weight decay, encoder
+# dropout, edge drop and node masking).
+defaults:
+  - finetune
+
+regime_name: finetune_reg
+
+optim:
+  weight_decay: 1.0e-2
+finetune:
+  lr_scales:
+    encoder: 0.3
+  augmentation:
+    drop_edge_p: 0.05
+    mask_node_p: 0.05
+model:
+  encoder:
+    dropout: 0.2
